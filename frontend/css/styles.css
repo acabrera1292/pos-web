@@ -1,0 +1,12 @@
+body { font-family: Arial, sans-serif; margin: 20px; background: #f7f7f7; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #ccc; padding: 8px; }
+button { padding: 8px 12px; margin: 5px; }
+body { font-family: Arial, sans-serif; margin: 20px; }
+header { margin-bottom: 15px; }
+.tab-btn { padding: 8px 14px; margin-right: 8px; cursor: pointer; }
+.tab-section { display: none; margin-top: 10px; }
+.tab-section input, .tab-section button { margin: 5px 0; padding: 6px; }
+.hidden { display: none; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #ccc; padding: 6px; }

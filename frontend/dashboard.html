@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>POS Simple Web</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <header>
+    <button class="tab-btn" onclick="showTab('inventario')">Inventario</button>
+    <button class="tab-btn" onclick="showTab('pos')">Punto de Venta</button>
+    <button class="tab-btn" onclick="showTab('ventas')">Ventas</button>
+    <button class="tab-btn" onclick="showTab('config')">Configuración</button>
+  </header>
+
+  <!-- INVENTARIO TAB -->
+  <section id="inventario" class="tab-section">
+
+    <h2>Inventario</h2>
+
+    <input type="text" id="searchInput" placeholder="🔎 Buscar producto por nombre o código" oninput="searchInventory()">
+    <button onclick="filterLowInventory()">🚨 Bajar Existencias</button>
+    <button onclick="loadInventory()">🔄 Ver Todo</button>
+
+    <table id="inventoryTable">
+      <thead>
+        <tr>
+          <th>Código</th><th>Nombre</th><th>Cantidad</th><th>Precio</th><th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <hr>
+
+    <h3>Agregar / Editar Producto</h3>
+
+    <form id="productForm">
+      <input type="hidden" id="productId" />
+      <input id="prodCode" placeholder="Código" />
+      <input id="prodName" placeholder="Nombre" />
+      <input id="prodQty" type="number" placeholder="Cantidad" />
+      <input id="prodPrice" type="number" step="0.01" placeholder="Precio" />
+      <button type="submit">Guardar Producto</button>
+      <button type="button" onclick="clearForm()">Cancelar</button>
+    </form>
+
+    <hr>
+
+    <input type="file" id="csvFileInput" accept=".csv" />
+    <button onclick="importCSV()">📥 Importar CSV</button>
+    <button onclick="exportCSV()">📤 Exportar Inventario</button>
+
+  </section>
+
+  <!-- POS TAB (placeholder for later) -->
+  <section id="pos" class="tab-section hidden">
+    <h2>Punto de Venta</h2>
+    <p>…soon!</p>
+  </section>
+
+  <!-- VENTAS TAB (placeholder) -->
+  <section id="ventas" class="tab-section hidden">
+    <h2>Ventas</h2>
+    <p>…soon!</p>
+  </section>
+
+  <!-- CONFIGURACIÓN -->
+  <section id="config" class="tab-section hidden">
+    <h2>Configuración</h2>
+    <label>Umbral de stock bajo</label>
+    <input id="lowThreshold" type="number" />
+    <button onclick="saveSettings()">Guardar Configuración</button>
+  </section>
+
+  <script src="js/api.js"></script>
+  <script src="js/inventory.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/csv.js"></script>
+  
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    showTab('inventario');
+    loadInventory();
+    loadSettings();
+  });
+</script>
+
+
+</body>
+</html>
