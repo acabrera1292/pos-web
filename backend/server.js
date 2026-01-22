@@ -3,10 +3,14 @@ const cors = require("cors");
 const sqlite3 = require("sqlite3").verbose();
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
+const path = require("path");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Serve frontend
+app.use(express.static(path.join(__dirname, "../frontend")));
 
 const db = new sqlite3.Database("./database.sqlite");
 
@@ -559,7 +563,13 @@ app.get("/sales/:company", (req, res) => {
   );
 });
 
-const PORT = 4000;
+
+// ✅ Route for frontend (Render needs this)
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "../frontend/index.html"));
+});
+
+const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ Backend running on http://localhost:${PORT}`);
 });
