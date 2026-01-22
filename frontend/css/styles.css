@@ -1,12 +1,575 @@
-body { font-family: Arial, sans-serif; margin: 20px; background: #f7f7f7; }
-table { width: 100%; border-collapse: collapse; }
-th, td { border: 1px solid #ccc; padding: 8px; }
-button { padding: 8px 12px; margin: 5px; }
-body { font-family: Arial, sans-serif; margin: 20px; }
-header { margin-bottom: 15px; }
-.tab-btn { padding: 8px 14px; margin-right: 8px; cursor: pointer; }
-.tab-section { display: none; margin-top: 10px; }
-.tab-section input, .tab-section button { margin: 5px 0; padding: 6px; }
-.hidden { display: none; }
-table { width: 100%; border-collapse: collapse; }
-th, td { border: 1px solid #ccc; padding: 6px; }
+
+/* Modern font like ChatGPT (Inter) */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+
+/* --------------------------------------------------
+   BASE
+-------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  background: #ffffff;
+  color: #111827;
+}
+
+/* Small helper for hiding stuff */
+.hidden {
+  display: none !important;
+}
+
+
+/* --------------------------------------------------
+   APP LAYOUT  (3 columns)
+   .app-shell  = whole page
+   .side-nav   = left
+   .main-area  = center
+   .right-panel= right
+-------------------------------------------------- */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 220px 1fr 260px;
+  min-height: 100vh;
+}
+
+/* LEFT NAV (light gray like reference app) */
+
+.side-nav {
+  background: #f3f4f6;
+  border-right: 1px solid #d4d4d4;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px;
+}
+
+.side-nav .logo {
+  font-weight: 700;
+  font-size: 18px;
+  margin: 4px 6px 10px;
+  color: #111827;
+}
+
+.side-nav .nav-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin: 10px 6px 4px;
+}
+
+/* nav buttons mimic the neutral BusHive style */
+
+.side-nav button {
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #111827;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.side-nav button:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+.side-nav button.active {
+  background: #d1d5db;
+  border-color: #9ca3af;
+}
+
+/* CENTER AREA */
+
+.main-area {
+  padding: 12px 18px;
+  overflow: auto;
+  background: #ffffff;
+}
+
+/* top bar inside main area */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.topbar-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.top-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  color: #4b5563;
+}
+
+.top-user-store {
+  font-weight: 600;
+}
+
+/* logout button aligned like other buttons (same style) */
+
+/* RIGHT PANEL */
+
+.right-panel {
+  background: #f9fafb;
+  border-left: 1px solid #e5e7eb;
+  padding: 16px 14px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+/* “Banner” for filter titles on the right panel */
+
+/* --- Side panel section titles (FILTROS INVENTARIO, FILTROS VENTAS, IMPORTAR / EXPORTAR) --- */
+
+.right-panel h3 {
+  background: #e5e7eb;      /* light grey banner */
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 0 0 10px;         /* space below the banner */
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;           /* dark text */
+}
+
+
+/* groups under each title */
+.right-panel .filter-group {
+  margin-bottom: 18px;
+}
+
+/* Header bar for side-panel sections (Filtros Inventario / Importar / Filtros Ventas) */
+.filter-banner {
+  margin: 0 -14px 10px;        /* stretch to edges of the panel */
+  padding: 8px 12px;
+  background: #e0e0e0;         /* darker grey like the sample */
+  border-bottom: 1px solid #c4c4c4;
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  color: #333333;
+}
+
+
+/* --- Extra spacing in right filter panel --- */
+
+/* space between search input and its buttons */
+.right-panel .filter-group input[type="text"] {
+  margin-bottom: 10px;
+}
+
+/* space above the buttons in each group */
+.right-panel .filter-group button {
+  margin-top: 6px;
+  display: block;          /* keep them nicely stacked */
+}
+
+/* a bit more separation between groups (Filtros / Importar-Exportar) */
+.right-panel .filter-group + .filter-group {
+  margin-top: 24px;
+}
+
+/* Ventas date range row in right panel */
+.right-panel .date-range-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #111827;
+}
+
+.right-panel .date-range-row input[type="date"] {
+  flex: 1 1 0;
+  min-width: 0; /* so they can shrink if panel is narrow */
+}
+
+/* Ventas: each date on its own row */
+.right-panel .date-field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #111827;
+}
+
+.right-panel .date-field-row input[type="date"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* VENTAS filters layout in right panel */
+.ventas-date-group {
+  display: flex;
+  flex-direction: column;  /* two lines: Desde row, Hasta row */
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.ventas-date-group label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ventas-date-group input[type="date"] {
+  flex: 1;
+}
+
+
+
+/* --------------------------------------------------
+   CARDS / CONTENT BOXES
+-------------------------------------------------- */
+
+.app-card {
+  background: #ffffff;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px #d4d4d4;
+  padding: 14px 16px 16px;
+}
+
+/* generic section titles inside main area */
+
+.section-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+/* --------------------------------------------------
+   INPUTS
+-------------------------------------------------- */
+
+input[type="text"],
+input[type="number"],
+input[type="password"],
+input[type="date"],
+select {
+  padding: 4px 6px;
+  border-radius: 3px;
+  border: 1px solid #c4c4c4;
+  font-size: 13px;
+  outline: none;
+  min-width: 120px;
+  background: #ffffff;
+  color: #111827;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="password"]:focus,
+input[type="date"]:focus,
+select:focus {
+  border-color: #6b7280;
+  box-shadow: 0 0 0 1px #9ca3af;
+}
+
+/* file input */
+
+input[type="file"] {
+  font-size: 13px;
+}
+
+/* --------------------------------------------------
+   BUTTONS  (neutral gray, like reference app)
+-------------------------------------------------- */
+
+button {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 3px;
+  border: 1px solid #707070;
+  background-color: #dddddd;
+  box-shadow: none;
+  text-transform: none;
+}
+
+button:hover {
+  background-color: #cccccc;
+}
+
+button:active {
+  background-color: #c2c2c2;
+}
+
+button[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Pagination buttons get same style, but rounded a little more */
+
+.pagination button {
+  border-radius: 999px;
+  padding: 4px 12px;
+}
+
+/* --------------------------------------------------
+   TABLES
+-------------------------------------------------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+thead {
+  background: #f3f4f6;
+}
+
+thead th {
+  padding: 6px 6px;
+  text-align: left;
+  font-weight: 600;
+  color: #374151;
+  border-bottom: 1px solid #d4d4d4;
+}
+
+tbody td {
+  padding: 5px 6px;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: middle;
+}
+
+tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+/* selected row outline */
+
+tbody tr.selected-row {
+  outline: 2px solid #4b5563;
+  outline-offset: -1px;
+  background-color: #e5e7eb !important;
+}
+
+/* when low stock JS sets background-color, keep font a bit bolder */
+
+tbody tr[style*="background-color"] {
+  font-weight: 500;
+}
+
+/* inventory-specific wrappers */
+
+.inventory-filters {
+  margin-bottom: 6px;
+}
+
+.inventory-filters button {
+  margin-right: 4px;
+}
+
+.inventory-actions {
+  margin-top: 8px;
+  text-align: center;
+}
+
+/* buttons inside table cells */
+
+td button {
+  font-size: 12px;
+  padding: 2px 8px;
+  margin-right: 4px;
+}
+
+/* --------------------------------------------------
+   PAGINATION
+-------------------------------------------------- */
+
+.pagination {
+  margin: 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#pageInfo {
+  font-size: 13px;
+  color: #4b5563;
+}
+
+/* --------------------------------------------------
+   POS / CARRITO
+-------------------------------------------------- */
+
+#pos .app-card > div:first-of-type {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+#cartBody input[type="number"] {
+  width: 60px;
+}
+
+#cartTotal,
+#changeDue {
+  font-weight: 700;
+}
+
+/* --------------------------------------------------
+   VENTAS
+-------------------------------------------------- */
+
+#ventas h3 {
+  margin-top: 12px;
+  margin-bottom: 6px;
+}
+
+#ventas .filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+#ventas p {
+  margin: 2px 0;
+}
+
+/* --------------------------------------------------
+   LOGIN PAGE
+-------------------------------------------------- */
+
+body.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+/* Background for login page */
+.login-page {
+  background: url('../img/login-bg.png') no-repeat top center fixed;
+  background-size: cover;
+  height: 100vh;
+  margin: 0;
+  font-family: sans-serif;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  
+}
+
+.login-card {
+  background-color: rgba(255, 255, 255); /* Slight transparency */
+  padding: 30px;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  width: 300px;
+  text-align: center;
+   margin-top: 100px;
+}
+
+
+.login-card h2 {
+  margin: 0 0 14px;
+  text-align: center;
+  font-size: 18px;
+}
+
+.login-card .field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.login-card label {
+  font-size: 12px;
+  color: #4b5563;
+}
+
+
+.login-card button {
+  background-color: #47C06A;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  font-weight: bold;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.login-card button:hover {
+  background-color: #3bab5a;
+}
+
+/* Make all table borders light gray */
+table,
+table th,
+table td {
+  border: 1px solid #e5e7eb !important;   /* light gray */
+}
+
+thead th {
+  border-bottom-color: #e5e7eb;
+}
+
+tbody td {
+  border-bottom-color: #e5e7eb;
+}
+
+
+/* --------------------------------------------------
+   RESPONSIVE
+-------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 200px 1fr;
+  }
+  .right-panel {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+  .side-nav {
+    display: none; /* could be turned into a drawer later */
+  }
+  .main-area {
+    padding: 10px 12px;
+  }
+}

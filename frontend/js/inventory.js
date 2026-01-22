@@ -4,6 +4,7 @@ async function loadInventory() {
   renderInventoryTable(data);
 }
 
+
 async function addOrUpdateProduct(event) {
   event.preventDefault();
   const company = localStorage.getItem("company");

@@ -1,92 +1,967 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <title>POS Simple Web</title>
-  <link rel="stylesheet" href="css/styles.css" />
+  <meta charset="UTF-8">
+  <title>POS Simple - Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
+  <div class="app-shell">
+    <!-- LEFT NAV -->
+    <aside class="side-nav">
+      <div class="logo">POS Simple</div>
 
-  <header>
-    <button class="tab-btn" onclick="showTab('inventario')">Inventario</button>
-    <button class="tab-btn" onclick="showTab('pos')">Punto de Venta</button>
-    <button class="tab-btn" onclick="showTab('ventas')">Ventas</button>
-    <button class="tab-btn" onclick="showTab('config')">Configuración</button>
-  </header>
+      <div class="nav-section-title">Módulos</div>
+      <button id="nav-inventario" onclick="showTab('inventario'); loadProducts();">
+        Inventario
+      </button>
+      <button id="nav-pos" onclick="showTab('pos')">
+        Punto de Venta
+      </button>
+      <button id="nav-ventas" onclick="showTab('ventas')">
+        Ventas
+      </button>
+      <button id="nav-config" onclick="showTab('config')">
+        Configuración
+      </button>
+    </aside>
 
-  <!-- INVENTARIO TAB -->
-  <section id="inventario" class="tab-section">
+    <!-- CENTER -->
+    <main class="main-area">
+      <header class="topbar">
+        <div class="topbar-title" id="sectionTitle"></div>
+        <div class="top-user">
+          <span class="top-user-store" id="storeNameLabel"></span>
+          <button onclick="logout()">Cerrar Sesión</button>
+        </div>
+      </header>
 
-    <h2>Inventario</h2>
+      <!-- TAB: INVENTARIO -->
+      <section id="inventario" class="tab-section app-card">
+        <h2>Agregar / Editar Producto</h2>
+        <div class="form-row">
+          <input id="code" placeholder="Código">
+          <input id="name" placeholder="Nombre">
+          <input id="qty" type="number" placeholder="Cantidad">
+          <input id="price" type="number" placeholder="Precio">
+          <button onclick="saveProduct()">Guardar</button>
+          <button onclick="clearForm()">Cancelar</button>
+        </div>
 
-    <input type="text" id="searchInput" placeholder="🔎 Buscar producto por nombre o código" oninput="searchInventory()">
-    <button onclick="filterLowInventory()">🚨 Bajar Existencias</button>
-    <button onclick="loadInventory()">🔄 Ver Todo</button>
+        <input type="hidden" id="productId">
 
-    <table id="inventoryTable">
+<h2 style="margin-top:18px;">Inventario</h2>
+
+<table border="1">
+  <thead>
+    <tr>
+      <th>Código</th>
+      <th>Nombre</th>
+      <th>Cantidad</th>
+      <th>Precio</th>
+    </tr>
+  </thead>
+  <tbody id="tableBody"></tbody>
+</table>
+
+<!-- 🔁 Paginación -->
+<div class="pagination">
+  <button onclick="prevPage()">Anterior</button>
+  <span id="pageInfo">1 / 1</span>
+  <button onclick="nextPage()">Siguiente</button>
+</div>
+
+<div class="inventory-actions">
+  <button id="btnEdit" onclick="editSelected()">Editar</button>
+  <button id="btnDelete" data-action="delete" onclick="deleteSelected()">Eliminar</button>
+</div>
+
+      </section>
+
+      <!-- TAB: PUNTO DE VENTA -->
+      <section id="pos" class="tab-section app-card";">
+        <h2>Punto de Venta</h2>
+
+        <div>
+          <label>Código de producto:</label>
+          <input id="posCode" placeholder="Escanear o escribir código">
+          <button onclick="addToCartByCode()">Agregar</button>
+        </div>
+
+        <h3>Carrito</h3>
+        <table border="1">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Nombre</th>
+              <th>Cant.</th>
+              <th>Precio</th>
+              <th>Subtotal</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="cartBody"></tbody>
+        </table>
+
+        <h3>Totales</h3>
+        <p>Total: $<span id="cartTotal">0.00</span></p>
+
+        <label>Tipo de pago:
+          <select id="paymentType">
+            <option value="Efectivo" selected>Efectivo</option>
+            <option value="Tarjeta">Tarjeta</option>
+          </select>
+        </label>
+
+        <br>
+
+        <label>Efectivo recibido:</label>
+        <input id="cashReceived" type="number" step="0.01" oninput="updateChange()">
+        <p>Cambio: $<span id="changeDue">0.00</span></p>
+
+        <button onclick="finishSale()">Finalizar venta</button>
+      </section>
+
+      <!-- TAB: VENTAS -->
+<!-- VENTAS -->
+<section id="ventas" class="tab-section hidden">
+  <div class="app-card">
+    <h2>Ventas</h2>
+
+    <table>
       <thead>
         <tr>
-          <th>Código</th><th>Nombre</th><th>Cantidad</th><th>Precio</th><th>Acciones</th>
+          <th>Fecha</th>
+          <th>Código</th>
+          <th>Nombre</th>
+          <th>Cant.</th>
+          <th>Precio</th>
+          <th>Total</th>
+          <th>Tipo</th>
         </tr>
       </thead>
-      <tbody></tbody>
+      <tbody id="salesBody"></tbody>
     </table>
 
-    <hr>
+    <button onclick="loadSales()">Cargar ventas</button>
 
-    <h3>Agregar / Editar Producto</h3>
+    <h3>Resumen</h3>
+    <p>Rango: <span id="summaryLabel">Sin datos</span></p>
+    <p>Total vendido: $<span id="summaryTotal">0.00</span></p>
+    <p>Número de líneas: <span id="summaryCount">0</span></p>
 
-    <form id="productForm">
-      <input type="hidden" id="productId" />
-      <input id="prodCode" placeholder="Código" />
-      <input id="prodName" placeholder="Nombre" />
-      <input id="prodQty" type="number" placeholder="Cantidad" />
-      <input id="prodPrice" type="number" step="0.01" placeholder="Precio" />
-      <button type="submit">Guardar Producto</button>
-      <button type="button" onclick="clearForm()">Cancelar</button>
-    </form>
+  </div>
+</section>
 
-    <hr>
+      <!-- TAB: CONFIGURACIÓN -->
+      <section id="config" class="tab-section app-card";">
+        <h2>Configuración</h2>
 
-    <input type="file" id="csvFileInput" accept=".csv" />
-    <button onclick="importCSV()">📥 Importar CSV</button>
-    <button onclick="exportCSV()">📤 Exportar Inventario</button>
+        <h3>Stock Bajo</h3>
+        <label>
+          Umbral stock bajo:
+          <input id="lowThreshold" type="number" style="width:80px;">
+        </label>
+        <button onclick="saveThreshold()">Guardar umbral</button>
 
-  </section>
+        <hr style="margin:16px 0;">
 
-  <!-- POS TAB (placeholder for later) -->
-  <section id="pos" class="tab-section hidden">
-    <h2>Punto de Venta</h2>
-    <p>…soon!</p>
-  </section>
+        <h3>Cambiar contraseña</h3>
+        <div class="config-form-row">
+          <input id="currentPass" type="password" placeholder="Contraseña actual">
+          <input id="newPass" type="password" placeholder="Nueva contraseña">
+          <input id="newPass2" type="password" placeholder="Repetir nueva contraseña">
+          <button onclick="changePassword()">Guardar nueva contraseña</button>
+        </div>
+      </section>
+    </main>
 
-  <!-- VENTAS TAB (placeholder) -->
-  <section id="ventas" class="tab-section hidden">
-    <h2>Ventas</h2>
-    <p>…soon!</p>
-  </section>
+    <!-- RIGHT PANEL: Inventario filters only for ahora -->
 
-  <!-- CONFIGURACIÓN -->
-  <section id="config" class="tab-section hidden">
-    <h2>Configuración</h2>
-    <label>Umbral de stock bajo</label>
-    <input id="lowThreshold" type="number" />
-    <button onclick="saveSettings()">Guardar Configuración</button>
-  </section>
+    <aside class="right-panel">
+  <!-- INVENTARIO: filtros + importar/exportar -->
+  <div id="invFilters" class="filter-group">
+    <div class="filter-banner">FILTROS INVENTARIO</div>
 
-  <script src="js/api.js"></script>
-  <script src="js/inventory.js"></script>
-  <script src="js/ui.js"></script>
-  <script src="js/csv.js"></script>
-  
+    <input
+      type="text"
+      id="invSearch"
+      placeholder="Buscar por código o nombre"
+      oninput="searchInventory()"
+    />
+
+    <button onclick="showLowStock()">Ver solo bajo stock</button>
+    <button onclick="loadProducts()">Ver todo</button>
+
+    <div class="filter-banner" style="margin-top:16px;">IMPORTAR / EXPORTAR</div>
+    <input type="file" id="csvFile" accept=".csv" onchange="importCSV(event)" />
+    <button onclick="exportCSV()">📤 Exportar CSV</button>
+  </div>
+
+  <!-- VENTAS: SOLO para la pestaña Ventas -->
+  <div id="salesFilters" class="filter-group hidden">
+    <div class="filter-banner">FILTROS VENTAS</div>
+
+    <div class="ventas-date-group">
+      <label>
+        Desde:
+        <input type="date" id="fromDate" />
+      </label>
+      <label>
+        Hasta:
+        <input type="date" id="toDate" />
+      </label>
+    </div>
+
+    <button onclick="filterSalesByDate()">Aplicar filtro</button>
+    <button onclick="clearSalesFilter()">Limpiar filtro</button>
+    <button onclick="exportSales()">Exportar ventas (CSV)</button>
+  </div>
+</aside>
+
 <script>
-  document.addEventListener("DOMContentLoaded", () => {
-    showTab('inventario');
-    loadInventory();
-    loadSettings();
+const API = "http://localhost:4000";
+const company = localStorage.getItem("company");
+const userRole = localStorage.getItem("role") || "Usuario";
+
+
+if (!company) {
+  alert("Por favor inicia sesión.");
+  location.href = "index.html";
+}
+
+// Mostrar nombre de tienda al cargar
+window.addEventListener("DOMContentLoaded", () => {
+  const label = document.getElementById("storeNameLabel");
+  if (label) {
+    label.textContent = company;
+  }
+  
+    const deleteBtn = document.getElementById("btnDelete");
+  if (deleteBtn && userRole !== "Admin") {
+    deleteBtn.disabled = true;
+    deleteBtn.title = "Solo un administrador puede eliminar productos";
+  }
+});
+
+let selectedProduct = null;
+let allProducts = [];
+let filteredProducts = [];
+let currentPage = 1;
+const pageSize = 100;
+
+let cart = [];
+let allSales = [];
+let filteredSales = [];
+
+
+// --- NUEVO showTab para layout + filtros ---
+
+  function showTab(tabId) {
+    // Ocultar todas las secciones del centro
+    document.querySelectorAll(".tab-section").forEach(sec => {
+      sec.classList.add("hidden");
+    });
+
+    // Mostrar la sección seleccionada
+    const active = document.getElementById(tabId);
+    if (active) {
+      active.classList.remove("hidden");
+    }
+
+    // Marcar botón activo en el menú izquierdo (si tienes data-tab)
+    document.querySelectorAll(".side-nav button[data-tab]").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.tab === tabId);
+    });
+
+    // Mostrar / ocultar panel derecho según pestaña
+    const invFilters   = document.getElementById("invFilters");
+    const salesFilters = document.getElementById("salesFilters");
+
+    if (invFilters) {
+      invFilters.classList.toggle("hidden", tabId !== "inventario");
+    }
+    if (salesFilters) {
+      salesFilters.classList.toggle("hidden", tabId !== "ventas");
+    }
+
+    // Cargar ventas automáticamente al abrir la pestaña Ventas
+    if (tabId === "ventas") {
+      loadSales();
+    }
+  }
+
+function updateRightPanel(tabId) {
+  const invFilters = document.getElementById("filters-inventory");
+  const invImport  = document.getElementById("inventory-import");
+  const salesFilters = document.getElementById("filters-sales");
+
+  if (!invFilters || !invImport || !salesFilters) return;
+
+  if (tabId === "inventario") {
+    invFilters.classList.remove("hidden");
+    invImport.classList.remove("hidden");
+    salesFilters.classList.add("hidden");
+  } else if (tabId === "ventas") {
+    invFilters.classList.add("hidden");
+    invImport.classList.add("hidden");
+    salesFilters.classList.remove("hidden");
+  } else {
+    // POS / Config → ningún filtro especial
+    invFilters.classList.add("hidden");
+    invImport.classList.add("hidden");
+    salesFilters.classList.add("hidden");
+  }
+}
+
+
+// ------- STOCK BAJO (UMBRAL) -------
+
+function getThreshold() {
+  const key = `lowThreshold_${company}`;
+  const val = localStorage.getItem(key);
+  return val ? Number(val) : 5; // valor por defecto
+}
+
+function saveThreshold() {
+  const input = document.getElementById("lowThreshold");
+  const value = Number(input.value || 0);
+  const key = `lowThreshold_${company}`;
+  localStorage.setItem(key, value);
+  loadProducts();
+}
+
+function applyLowStockHighlight() {
+  const threshold = getThreshold();
+  const rows = document.querySelectorAll("#tableBody tr");
+  rows.forEach(row => {
+    const qty = Number(row.children[2].innerText || 0);
+    if (qty <= threshold) {
+      row.style.backgroundColor = "#ffe0e0"; // fondo rojo claro
+    } else {
+      row.style.backgroundColor = "";
+    }
   });
+}
+
+function showLowStock() {
+  const threshold = getThreshold();
+  const rows = document.querySelectorAll("#tableBody tr");
+  rows.forEach(row => {
+    const qty = Number(row.children[2].innerText || 0);
+    row.style.display = qty <= threshold ? "" : "none";
+  });
+}
+
+// ------- INVENTARIO CRUD -------
+
+async function loadProducts() {
+  const res = await fetch(`${API}/products/${company}`);
+  const data = await res.json();
+
+  if (!Array.isArray(data)) {
+    console.error("Error cargando productos:", data);
+    return;
+  }
+
+  allProducts = data;
+  filteredProducts = data.slice();   // copia
+  currentPage = 1;
+
+  const thrInput = document.getElementById("lowThreshold");
+  if (thrInput) thrInput.value = getThreshold();
+
+  renderInventoryTable();
+}
+
+function renderInventoryTable() {
+  const tbody = document.getElementById("tableBody");
+  tbody.innerHTML = "";
+
+  const source = filteredProducts.length ? filteredProducts : allProducts;
+  const totalPages = Math.max(1, Math.ceil(source.length / pageSize));
+
+  if (currentPage > totalPages) currentPage = totalPages;
+
+  const start = (currentPage - 1) * pageSize;
+  const items = source.slice(start, start + pageSize);
+
+  items.forEach(p => {
+    tbody.innerHTML += `
+      <tr data-id="${p.id}" onclick="selectRow(this, ${p.id})">
+        <td>${p.code}</td>
+        <td>${p.name}</td>
+        <td>${p.quantity}</td>
+        <td>$${p.price}</td>
+      </tr>
+    `;
+  });
+
+  const pageInfo = document.getElementById("pageInfo");
+  if (pageInfo) pageInfo.textContent = `${currentPage} / ${totalPages}`;
+
+  const prevBtn = document.querySelector(".pagination button:nth-child(1)");
+  const nextBtn = document.querySelector(".pagination button:nth-child(3)");
+  if (prevBtn) prevBtn.disabled = currentPage <= 1;
+  if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+
+  applyLowStockHighlight();
+
+  // Ocultar botón Eliminar para rol "Usuario"
+  const deleteBtn = document.getElementById("btnDelete");
+  if (deleteBtn) {
+    deleteBtn.style.display =
+      (userRole === "Usuario") ? "none" : "inline-block";
+  }
+}
+
+
+async function saveProduct() {
+  const id = document.getElementById("productId").value;
+
+  const payload = {
+    code: document.getElementById("code").value.trim(),
+    name: document.getElementById("name").value.trim(),
+    quantity: Number(document.getElementById("qty").value || 0),
+    price: Number(document.getElementById("price").value || 0)
+  };
+
+  if (!payload.code) {
+    alert("El código es obligatorio.");
+    return;
+  }
+
+  let url, method;
+
+  if (id) {
+    url = `${API}/products/${company}/${id}`;
+    method = "PUT";
+  } else {
+    url = `${API}/products/${company}`;
+    method = "POST";
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    alert(data.error || "Error al guardar producto.");
+    return;
+  }
+
+  clearForm();
+  loadProducts();
+}
+
+function editProduct(p) {
+  document.getElementById("productId").value = p.id;
+  document.getElementById("code").value = p.code || "";
+  document.getElementById("name").value = p.name || "";
+  document.getElementById("qty").value = p.quantity;
+  document.getElementById("price").value = p.price;
+}
+
+async function deleteProduct(id) {
+  if (!id) return;
+  await fetch(`${API}/products/${company}/${id}`, {
+    method: "DELETE"
+  });
+  loadProducts();
+}
+
+function selectRow(rowEl, id) {
+  selectedProduct = allProducts.find(p => p.id === id) || null;
+
+  const rows = document.querySelectorAll("#tableBody tr");
+  rows.forEach(r => r.classList.remove("selected-row"));
+  rowEl.classList.add("selected-row");
+}
+
+function editSelected() {
+  if (!selectedProduct) {
+    alert("Selecciona un producto de la tabla primero.");
+    return;
+  }
+  editProduct(selectedProduct);
+  showTab("inventario");
+}
+
+async function deleteSelected() {
+  // Bloqueo adicional por seguridad
+  if (userRole !== "Admin") {
+    alert("No tienes permiso para eliminar productos.");
+    return;
+  }
+
+  if (!selectedProduct) {
+    alert("Selecciona un producto de la tabla primero.");
+    return;
+  }
+
+  if (!confirm("¿Eliminar este producto?")) return;
+
+  await fetch(`${API}/products/${company}/${selectedProduct.id}`, {
+    method: "DELETE"
+  });
+
+  selectedProduct = null;
+  loadProducts();
+}
+
+function clearForm() {
+  document.getElementById("productId").value = "";
+  document.getElementById("code").value = "";
+  document.getElementById("name").value = "";
+  document.getElementById("qty").value = "";
+  document.getElementById("price").value = "";
+}
+
+function searchInventory() {
+  const input = document.getElementById("invSearch");
+  const q = (input.value || "").trim().toLowerCase();
+
+  if (!q) {
+    filteredProducts = allProducts.slice();
+  } else {
+    filteredProducts = allProducts.filter(p => {
+      const code = String(p.code || "").toLowerCase();
+      const name = String(p.name || "").toLowerCase();
+      return code.includes(q) || name.includes(q);
+    });
+  }
+
+  currentPage = 1;
+  renderInventoryTable();
+}
+
+function nextPage() {
+  const source = filteredProducts.length ? filteredProducts : allProducts;
+  const totalPages = Math.max(1, Math.ceil(source.length / pageSize));
+  if (currentPage < totalPages) {
+    currentPage++;
+    renderInventoryTable();
+  }
+}
+
+function prevPage() {
+  if (currentPage > 1) {
+    currentPage--;
+    renderInventoryTable();
+  }
+}
+
+// ------- CAMBIO DE CONTRASEÑA -------
+
+async function changePassword() {
+  const username = localStorage.getItem("username");
+  if (!username) {
+    alert("No se encontró el usuario en sesión.");
+    return;
+  }
+
+  const current = document.getElementById("currentPass").value.trim();
+  const newPass = document.getElementById("newPass").value.trim();
+  const newPass2 = document.getElementById("newPass2").value.trim();
+
+  if (!current || !newPass || !newPass2) {
+    alert("Completa todos los campos de contraseña.");
+    return;
+  }
+
+  if (newPass !== newPass2) {
+    alert("La nueva contraseña no coincide.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API}/auth/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username,
+        oldPassword: current,
+        newPassword: newPass
+      })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.error || "Error al cambiar contraseña.");
+      return;
+    }
+
+    alert("Contraseña actualizada correctamente.");
+    document.getElementById("currentPass").value = "";
+    document.getElementById("newPass").value = "";
+    document.getElementById("newPass2").value = "";
+  } catch (err) {
+    console.error(err);
+    alert("No se pudo conectar con el servidor.");
+  }
+}
+
+// ------- CSV EXPORT -------
+
+function exportCSV() {
+  const rows = [["codigo","nombre","cantidad","precio"]];
+  document.querySelectorAll("#tableBody tr").forEach(tr => {
+    const tds = tr.querySelectorAll("td");
+    if (tds.length >= 4) {
+      const codigo = tds[0].innerText;
+      const nombre = tds[1].innerText;
+      const cantidad = tds[2].innerText;
+      const precio = tds[3].innerText.replace("$","").trim();
+      rows.push([codigo, nombre, cantidad, precio]);
+    }
+  });
+
+  const csv = rows.map(r => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `inventario_${company}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ------- CSV IMPORT -------
+
+function importCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const text = reader.result;
+    const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+    if (lines.length <= 1) return;
+
+    const dataLines = lines.slice(1); // saltar cabecera
+
+    for (const line of dataLines) {
+      const [code, name, quantity, price] = line.split(",");
+      if (!code) continue;
+
+      try {
+        await fetch(`${API}/products/import/${company}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code: code.trim(),
+            name: (name || "").trim(),
+            quantity: Number(quantity) || 0,
+            price: Number(price) || 0
+          })
+        });
+      } catch (err) {
+        console.error("Error importando línea:", line, err);
+      }
+    }
+
+    document.getElementById("csvFile").value = "";
+    loadProducts();
+  };
+  reader.readAsText(file);
+}
+
+
+// ------- POS / CARRITO -------
+
+function addToCartByCode() {
+  const codeInput = document.getElementById("posCode");
+  const code = codeInput.value.trim();
+  if (!code) return;
+
+  const product = allProducts.find(p => String(p.code) === code);
+  if (!product) {
+    alert("Producto no encontrado");
+    return;
+  }
+
+  addToCart(product);
+  codeInput.value = "";
+}
+
+function addToCart(product) {
+  const existing = cart.find(item => item.id === product.id);
+  if (existing) {
+    existing.quantity += 1;
+  } else {
+    cart.push({
+      id: product.id,
+      code: product.code,
+      name: product.name,
+      price: Number(product.price),
+      quantity: 1
+    });
+  }
+  renderCart();
+}
+
+function renderCart() {
+  const tbody = document.getElementById("cartBody");
+  tbody.innerHTML = "";
+  cart.forEach((item, index) => {
+    const subtotal = item.price * item.quantity;
+    tbody.innerHTML += `
+      <tr>
+        <td>${item.code}</td>
+        <td>${item.name}</td>
+        <td>
+          <input type="number" min="1" value="${item.quantity}"
+                 onchange="updateCartQuantity(${index}, this.value)">
+        </td>
+        <td>$${item.price.toFixed(2)}</td>
+        <td>$${subtotal.toFixed(2)}</td>
+        <td><button onclick="removeFromCart(${index})">Quitar</button></td>
+      </tr>
+    `;
+  });
+  updateTotal();
+}
+
+function updateCartQuantity(index, newQty) {
+  const qty = Number(newQty);
+  if (!qty || qty <= 0) return;
+  cart[index].quantity = qty;
+  renderCart();
+}
+
+function removeFromCart(index) {
+  cart.splice(index, 1);
+  renderCart();
+}
+
+function updateTotal() {
+  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  document.getElementById("cartTotal").innerText = total.toFixed(2);
+  updateChange();
+}
+
+function updateChange() {
+  const total = Number(document.getElementById("cartTotal").innerText || 0);
+  const cash = Number(document.getElementById("cashReceived").value || 0);
+  const change = cash - total;
+  document.getElementById("changeDue").innerText =
+    change > 0 ? change.toFixed(2) : "0.00";
+}
+
+async function finishSale() {
+  if (!cart.length) {
+    alert("No hay productos en el carrito.");
+    return;
+  }
+
+  const total = Number(document.getElementById("cartTotal").innerText || 0);
+  const cash = Number(document.getElementById("cashReceived").value || 0);
+  const paymentType = document.getElementById("paymentType").value || "Efectivo";
+
+  if (paymentType === "Efectivo" && cash < total) {
+    alert("Efectivo insuficiente.");
+    return;
+  }
+
+  await fetch(`${API}/sales/${company}`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      items: cart,
+      total,
+      cash,
+      paymentType
+    })
+  });
+
+  cart = [];
+  renderCart();
+  document.getElementById("cashReceived").value = "";
+  updateChange();
+  await loadProducts(); // actualizar inventario
+  alert("Venta registrada.");
+}
+
+// ------- VENTAS (LISTADO) -------
+
+async function loadSales() {
+  const res = await fetch(`${API}/sales/${company}`);
+  const data = await res.json();
+
+  if (!Array.isArray(data)) {
+    console.error("Error cargando ventas:", data);
+    return;
+  }
+
+  allSales = data;
+
+  // por defecto: filtrar a HOY
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const fromInput = document.getElementById("fromDate");
+  const toInput = document.getElementById("toDate");
+  if (fromInput) fromInput.value = today;
+  if (toInput) toInput.value = today;
+
+  filterSalesByDate();
+}
+
+function renderSalesTable(list) {
+  const tbody = document.getElementById("salesBody");
+  tbody.innerHTML = "";
+  list.forEach(s => {
+    const fecha = s.date ? new Date(s.date).toLocaleString() : "";
+    const tipo = s.paymentType || "Efectivo";
+    tbody.innerHTML += `
+      <tr>
+        <td>${fecha}</td>
+        <td>${s.code}</td>
+        <td>${s.name}</td>
+        <td>${s.quantity}</td>
+        <td>$${Number(s.price).toFixed(2)}</td>
+        <td>$${Number(s.total).toFixed(2)}</td>
+        <td>${tipo}</td>
+      </tr>
+    `;
+  });
+}
+
+function filterSalesByDate() {
+  if (!Array.isArray(allSales) || !allSales.length) {
+    document.getElementById("summaryLabel").innerText = "Sin datos";
+    document.getElementById("summaryTotal").innerText = "0.00";
+    document.getElementById("summaryCount").innerText = "0";
+    filteredSales = [];
+    renderSalesTable([]);
+    return;
+  }
+
+  const fromVal = document.getElementById("fromDate").value;
+  const toVal = document.getElementById("toDate").value;
+
+  let fromDate = fromVal ? new Date(fromVal + "T00:00:00") : null;
+  let toDate = toVal ? new Date(toVal + "T23:59:59") : null;
+
+  let filtered = allSales;
+
+  if (fromDate || toDate) {
+    filtered = allSales.filter(s => {
+      if (!s.date) return false;
+      const d = new Date(s.date);
+      if (isNaN(d)) return false;
+      if (fromDate && d < fromDate) return false;
+      if (toDate && d > toDate) return false;
+      return true;
+    });
+  }
+
+  const total = filtered.reduce((sum, s) => sum + Number(s.total || 0), 0);
+
+  let label = "Todo";
+  if (fromVal || toVal) {
+    const fromText = fromVal || "...";
+    const toText = toVal || "...";
+    label = `${fromText} → ${toText}`;
+  }
+
+  filteredSales = filtered;
+
+  document.getElementById("summaryLabel").innerText = label;
+  document.getElementById("summaryTotal").innerText = total.toFixed(2);
+  document.getElementById("summaryCount").innerText = String(filtered.length);
+
+  renderSalesTable(filtered);
+}
+
+function clearSalesFilter() {
+  const fromInput = document.getElementById("fromDate");
+  const toInput = document.getElementById("toDate");
+  if (fromInput) fromInput.value = "";
+  if (toInput) toInput.value = "";
+
+  filteredSales = allSales;
+
+  const total = allSales.reduce((sum, s) => sum + Number(s.total || 0), 0);
+  document.getElementById("summaryLabel").innerText = "Todo";
+  document.getElementById("summaryTotal").innerText = total.toFixed(2);
+  document.getElementById("summaryCount").innerText = String(allSales.length);
+
+  renderSalesTable(allSales);
+}
+
+function exportSales() {
+  const list = (filteredSales && filteredSales.length) ? filteredSales : allSales;
+
+  if (!list || !list.length) {
+    alert("No hay ventas para exportar.");
+    return;
+  }
+
+  const rows = [["fecha","hora","codigo","nombre","cantidad","precio","total","tipo_pago"]];
+
+  list.forEach(s => {
+    let fecha = "";
+    let hora = "";
+    if (s.date) {
+      const d = new Date(s.date);
+      if (!isNaN(d)) {
+        fecha = d.toLocaleDateString();
+        hora  = d.toLocaleTimeString();
+      }
+    }
+    const tipo = s.paymentType || "Efectivo";
+
+    rows.push([
+      fecha,
+      hora,
+      s.code,
+      s.name,
+      s.quantity,
+      Number(s.price).toFixed(2),
+      Number(s.total).toFixed(2),
+      tipo
+    ]);
+  });
+
+  const csv = rows.map(r => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url;
+  a.download = "ventas.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function logout() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("company");
+  localStorage.removeItem("username");
+  localStorage.removeItem("role"); 
+  location.href = "index.html";
+}
+
+// Desactivar botón eliminar si el rol NO es Admin
+//window.addEventListener("DOMContentLoaded", () => {
+  //const delBtn = document.getElementById("btnDelete");
+  //if (delBtn && role !== "Admin") {
+   // delBtn.disabled = true;
+  //  delBtn.title = "Solo un administrador puede eliminar productos";
+ // }
+//});
+
+
+// inicializar
+showTab("inventario");
+loadProducts();
 </script>
-
-
 </body>
 </html>

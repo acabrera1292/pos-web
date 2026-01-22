@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Administración de Tiendas</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="main-shell">
+
+<main class="main-area">
+  <header class="topbar">
+    <div class="topbar-title">Administración de Tiendas</div>
+  </header>
+
+  <section class="app-card">
+    <p>
+      Esta pantalla es solo para ti (administrador).
+      Usa tu clave secreta para ver, crear y activar / desactivar tiendas y usuarios.
+    </p>
+
+    <div style="margin-bottom:16px;">
+      <label>Clave admin (ADMIN_SECRET):</label>
+      <input type="password" id="adminSecret" style="width:200px;">
+      <button onclick="loadAll()">Cargar datos</button>
+    </div>
+
+    <!-- TIENDAS -->
+    <h3>Crear nueva tienda / cliente</h3>
+    <div class="config-form-row">
+      <input id="newEmail" type="text" placeholder="Correo admin inicial">
+      <input id="newPassword" type="password" placeholder="Contraseña inicial">
+      <input id="newStore" type="text" placeholder="Nombre de Tienda">
+      <button onclick="createStore()">Crear tienda</button>
+    </div>
+
+    <h3>Tiendas</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Tienda</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="storesBody"></tbody>
+    </table>
+
+    <hr style="margin:24px 0;">
+
+    <!-- USUARIOS -->
+    <h3>Agregar usuario a tienda</h3>
+    <div class="config-form-row">
+      <select id="storeSelect"></select>
+      <input id="userEmail" type="text" placeholder="Correo / Usuario">
+      <input id="userPass" type="password" placeholder="Contraseña">
+      <select id="userRole">
+        <option value="Admin">Admin</option>
+        <option value="Usuario">Usuario</option>
+      </select>
+      <button onclick="createUser()">Crear usuario</button>
+    </div>
+
+    <h3>Usuarios</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Usuario</th>
+          <th>Tienda</th>
+          <th>Rol</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="usersBody"></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="js/admin.js"></script>
+</body>
+</html>

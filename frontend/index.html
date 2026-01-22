@@ -1,13 +1,32 @@
 <!DOCTYPE html>
-<html>
-<head><title>POS Login</title></head>
-<body>
-<h1>Iniciar Sesión</h1>
-<input id="username" placeholder="Usuario">
-<input id="password" type="password" placeholder="Contraseña">
-<button onclick="login()">Entrar</button>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>POS Simple - Acceso</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="login-page">
 
-<script src="js/api.js"></script>
-<script src="js/auth.js"></script>
+  <div class="login-card">
+    <h2>Iniciar Sesión</h2>
+
+    <div class="field">
+      <label for="loginUser">Correo electrónico</label>
+      <input id="loginUser" type="email" />
+    </div>
+
+    <div class="field">
+      <label for="loginPass">Contraseña</label>
+      <input id="loginPass" type="password" />
+    </div>
+
+    <button onclick="login()">Entrar</button>
+
+    <p style="font-size:12px; color:#6b7280; margin-top:10px;">
+      Si no tienes acceso, contacta a tu administrador para que te cree una cuenta.
+    </p>
+  </div>
+
+  <script src="js/auth.js"></script>
 </body>
 </html>
