@@ -1,4 +1,5 @@
 const express = require("express");
+const cors = require("cors");
 const sqlite3 = require("sqlite3").verbose();
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
@@ -11,23 +12,32 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ---------- CORS SETUP (simple & permissive) ---------- */
-app.use((req, res, next) => {
-  const origin = req.headers.origin || "*";
+/* ---------- CORS SETUP (using cors package) ---------- */
+const allowedOrigins = [
+  "http://localhost:5500",                 // local frontend (VS Code Live Server, etc.)
+  "http://localhost:4000",                 // local when serving frontend from backend
+  "https://pos-web-yvoj.onrender.com",     // Render frontend
+];
 
-  res.setHeader("Access-Control-Allow-Origin", origin);
-  res.setHeader("Vary", "Origin"); // so caches behave
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
+const corsOptions = {
+  origin(origin, callback) {
+    // allow tools like curl / Postman (no Origin header)
+    if (!origin) return callback(null, true);
 
-  // Handle preflight here
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-  next();
-});
+    console.warn("Blocked CORS origin:", origin);
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+// handle preflight for all routes
+app.options("*", cors(corsOptions));
+
 
 /* ---------- BODY PARSER & STATIC ---------- */
 app.use(express.json());
