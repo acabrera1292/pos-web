@@ -21,7 +21,6 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin(origin, callback) {
-    // allow tools like curl / Postman (no Origin header)
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
@@ -29,18 +28,25 @@ const corsOptions = {
     }
 
     console.warn("Blocked CORS origin:", origin);
-    return callback(new Error("Not allowed by CORS"));
+    return callback(null, false); // 👈 IMPORTANT: don't throw Error
   },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
 };
-
 app.use(cors(corsOptions));
-// handle preflight for all routes
-app.options("*", cors(corsOptions));
+app.options("*", cors()); // 👈 do NOT pass corsOptions here
 
 
 /* ---------- BODY PARSER & STATIC ---------- */
 app.use(express.json());
+
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", req.headers.origin);
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  next();
+});
 
 // Serve frontend
 app.use(express.static(path.join(__dirname, "../frontend")));
@@ -776,5 +782,6 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`✅ Backend running on http://localhost:${PORT}`);
+  console.log(`✅ Backend running on port ${PORT}`);
 });
+
