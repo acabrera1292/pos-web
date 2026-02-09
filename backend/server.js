@@ -6,7 +6,34 @@ const bcrypt = require("bcrypt");
 const path = require("path");
 
 const app = express();
-app.use(cors());
+/* ---------- CORS SETUP ---------- */
+
+const allowedOrigins = [
+  "http://localhost:5500",                // local static dev server
+  "http://localhost:4000",                // if you ever open frontend from backend directly
+  "https://pos-web-yvoj.onrender.com"     // your Render frontend
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // allow non-browser tools / curl (no origin)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    console.warn("Blocked CORS origin:", origin);
+    return callback(new Error("Not allowed by CORS"));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+app.use(cors(corsOptions));
+// important for preflight
+app.options("*", cors(corsOptions));
+
+/* ---------- BODY PARSER & STATIC ---------- */
 app.use(express.json());
 
 // Serve frontend
