@@ -7,6 +7,16 @@ const path = require("path");
 
 const app = express();
 
+// 🔥 FORCE PREFLIGHT HANDLING (Render fix)
+app.options("/auth/*", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  return res.sendStatus(204);
+});
+
+
 app.use((req, res, next) => {
   console.log(`[REQ] ${req.method} ${req.path}`);
   next();
@@ -20,23 +30,12 @@ const allowedOrigins = [
 ];
 
 const corsOptions = {
-  origin(origin, callback) {
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    console.warn("Blocked CORS origin:", origin);
-    return callback(null, false); // 👈 IMPORTANT: don't throw Error
-  },
+  origin: allowedOrigins,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true,
 };
-app.use(cors(corsOptions));
-app.options("*", cors()); // 👈 do NOT pass corsOptions here
 
+app.use(cors(corsOptions));
 
 /* ---------- BODY PARSER & STATIC ---------- */
 app.use(express.json());
