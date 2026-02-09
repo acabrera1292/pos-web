@@ -1,4 +1,4 @@
-const baseURL = "https://pos-web-yvoj.onrender.com";
+const API = "http://localhost:4000";
 
 // Solo login, el registro ahora vive en admin.html
 async function login() {
@@ -27,7 +27,7 @@ async function login() {
     // guardar sesión (incluimos el correo)
     localStorage.setItem("token", data.token);
     localStorage.setItem("company", data.company);
-    localStorage.setItem("username", data.username);
+    localStorage.setItem("username", data.username || username);
     localStorage.setItem("role", data.role || "Admin");
 
     window.location.href = "dashboard.html";

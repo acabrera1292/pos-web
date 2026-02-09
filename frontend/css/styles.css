@@ -381,6 +381,18 @@ tbody tr[style*="background-color"] {
   font-weight: 500;
 }
 
+/* Scroll only inside tables, not the whole window */
+.table-scroll {
+  max-height: 60vh;        /* how tall the visible table area can be */
+  overflow-y: auto;        /* vertical scroll inside */
+  overflow-x: hidden;      /* no horizontal scrollbar unless you want it */
+}
+
+/* Remove extra top margin so table sticks to the wrapper */
+.table-scroll table {
+  margin-top: 0;
+}
+
 /* inventory-specific wrappers */
 
 .inventory-filters {

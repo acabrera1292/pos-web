@@ -21,6 +21,8 @@
       <button id="nav-ventas" onclick="showTab('ventas')">
         Ventas
       </button>
+      <button id="nav-clientes" onclick="showTab('clientes')">
+        Clientes</button>
       <button id="nav-config" onclick="showTab('config')">
         Configuración
       </button>
@@ -51,7 +53,7 @@
         <input type="hidden" id="productId">
 
 <h2 style="margin-top:18px;">Inventario</h2>
-
+<div class="table-scroll">
 <table border="1">
   <thead>
     <tr>
@@ -63,7 +65,7 @@
   </thead>
   <tbody id="tableBody"></tbody>
 </table>
-
+</div>
 <!-- 🔁 Paginación -->
 <div class="pagination">
   <button onclick="prevPage()">Anterior</button>
@@ -89,6 +91,8 @@
         </div>
 
         <h3>Carrito</h3>
+
+        <div class="table-scroll">
         <table border="1">
           <thead>
             <tr>
@@ -102,6 +106,7 @@
           </thead>
           <tbody id="cartBody"></tbody>
         </table>
+        </div>
 
         <h3>Totales</h3>
         <p>Total: $<span id="cartTotal">0.00</span></p>
@@ -128,6 +133,7 @@
   <div class="app-card">
     <h2>Ventas</h2>
 
+    <div class="table-scroll">
     <table>
       <thead>
         <tr>
@@ -142,6 +148,7 @@
       </thead>
       <tbody id="salesBody"></tbody>
     </table>
+    </div>
 
     <button onclick="loadSales()">Cargar ventas</button>
 
@@ -151,6 +158,64 @@
     <p>Número de líneas: <span id="summaryCount">0</span></p>
 
   </div>
+</section>
+
+      <!-- TAB: Clientes -->
+<!-- CLIENTES -->
+<section id="clientes" class="tab-section app-card">
+  <h2>Agregar / Editar Clientes</h2>
+
+  <div class="form-row" style="margin-bottom:12px; display:flex; flex-wrap:wrap; gap:8px;">
+   <!-- FORMULARIO CLIENTE -->
+<select id="clientType">
+  <option value="Cedula">Cédula</option>
+  <option value="RUC">RUC</option>
+</select>
+
+<input id="clientIdNumber"    placeholder="Identificación" />
+<input id="clientRazonSocial" placeholder="Razón social" />
+<input id="clientNombreCom"   placeholder="Nombre comercial" />
+<input id="clientCiudad"      placeholder="Ciudad" />
+<input id="clientDireccion"   placeholder="Dirección" />
+<input id="clientEmail"       placeholder="Email" />
+<input id="clientTelefono"    placeholder="Teléfono" />
+<input id="clientCelular"     placeholder="Celular" />
+
+<button type="button" onclick="saveClient()">Guardar</button>
+<button type="button" onclick="clearClientForm()">Cancelar</button>
+</div>
+
+<h2 style="margin-top:18px;">Clientes</h2>
+<div class="table-scroll">
+<table border="1">
+  <thead>
+    <tr>
+      <th>Tipo</th>
+      <th>Identificación</th>
+      <th>Razón Social</th>
+      <th>Nombre Comercial</th>
+      <th>Ciudad</th>
+      <th>Email</th>
+      <th>Teléfono</th>
+      <th>Celular</th>
+    </tr>
+  </thead>
+  <tbody id="clientsBody"></tbody>
+</table>
+</div>
+
+
+<div class="pagination">
+  <button id="clientPrev" onclick="clientPrevPage()">Anterior</button>
+  <span id="clientPageInfo">1 / 1</span>
+  <button id="clientNext" onclick="clientNextPage()">Siguiente</button>
+</div>
+
+<div class="inventory-actions">
+  <button onclick="startEditClient()">Editar</button>
+  <button onclick="deleteSelectedClient()">Eliminar</button>
+</div>
+
 </section>
 
       <!-- TAB: CONFIGURACIÓN -->
@@ -191,12 +256,40 @@
     />
 
     <button onclick="showLowStock()">Ver solo bajo stock</button>
-    <button onclick="loadProducts()">Ver todo</button>
+    <button onclick="showAllInventory()">Ver todo</button>
 
     <div class="filter-banner" style="margin-top:16px;">IMPORTAR / EXPORTAR</div>
     <input type="file" id="csvFile" accept=".csv" onchange="importCSV(event)" />
     <button onclick="exportCSV()">📤 Exportar CSV</button>
   </div>
+
+  <!-- === CLIENTES: filtros === -->
+<!-- CLIENTES -->
+<div id="filters-clients" class="filter-group hidden">
+  <div class="filter-banner">FILTROS CLIENTES</div>
+  <input
+    id="clientSearch"
+    type="text"
+    placeholder="Buscar por nombre o identificación"
+    oninput="searchClients()"
+  />
+</div>
+
+<div id="clients-import" class="filter-group hidden">
+  <div class="filter-banner">IMPORTAR / EXPORTAR</div>
+
+  <input
+    type="file"
+    id="clientCsvFile"
+    accept=".csv"
+    onchange="importClientsCSV(event)"
+  />
+
+  <button type="button" onclick="exportClientsCSV()">
+    Exportar clientes (CSV)
+  </button>
+</div>
+
 
   <!-- VENTAS: SOLO para la pestaña Ventas -->
   <div id="salesFilters" class="filter-group hidden">
@@ -242,6 +335,11 @@ window.addEventListener("DOMContentLoaded", () => {
     deleteBtn.disabled = true;
     deleteBtn.title = "Solo un administrador puede eliminar productos";
   }
+   const editBtn = document.getElementById("btnEdit");
+  if (editBtn && userRole !== "Admin") {
+    editBtn.disabled = true;
+    editBtn.title = "Solo un administrador puede editar productos";
+  }
 });
 
 let selectedProduct = null;
@@ -252,65 +350,59 @@ const pageSize = 100;
 
 let cart = [];
 let allSales = [];
+let allClients = [];
 let filteredSales = [];
 
 
 // --- NUEVO showTab para layout + filtros ---
 
-  function showTab(tabId) {
-    // Ocultar todas las secciones del centro
-    document.querySelectorAll(".tab-section").forEach(sec => {
-      sec.classList.add("hidden");
-    });
+function showTab(tabId) {
+  // ocultar todas las secciones
+  document.querySelectorAll(".tab-section").forEach(sec => {
+    sec.classList.add("hidden");
+  });
+  const sec = document.getElementById(tabId);
+  if (sec) sec.classList.remove("hidden");
 
-    // Mostrar la sección seleccionada
-    const active = document.getElementById(tabId);
-    if (active) {
-      active.classList.remove("hidden");
-    }
+  // marcar botón de navegación activo
+  ["inventario", "pos", "ventas", "clientes", "config"].forEach(id => {
+    const btn = document.getElementById(`nav-${id}`);
+    if (btn) btn.classList.toggle("active", id === tabId);
+  });
 
-    // Marcar botón activo en el menú izquierdo (si tienes data-tab)
-    document.querySelectorAll(".side-nav button[data-tab]").forEach(btn => {
-      btn.classList.toggle("active", btn.dataset.tab === tabId);
-    });
+  // cargar datos según pestaña
+  if (tabId === "ventas")   loadSales();
+  if (tabId === "clientes") loadClients();
 
-    // Mostrar / ocultar panel derecho según pestaña
-    const invFilters   = document.getElementById("invFilters");
-    const salesFilters = document.getElementById("salesFilters");
+  // actualizar panel derecho
+  updateRightPanel(tabId);
+}
 
-    if (invFilters) {
-      invFilters.classList.toggle("hidden", tabId !== "inventario");
-    }
-    if (salesFilters) {
-      salesFilters.classList.toggle("hidden", tabId !== "ventas");
-    }
-
-    // Cargar ventas automáticamente al abrir la pestaña Ventas
-    if (tabId === "ventas") {
-      loadSales();
-    }
-  }
 
 function updateRightPanel(tabId) {
-  const invFilters = document.getElementById("filters-inventory");
-  const invImport  = document.getElementById("inventory-import");
-  const salesFilters = document.getElementById("filters-sales");
+  const invFilters    = document.getElementById("invFilters");        // inventario
+  const salesFilters  = document.getElementById("salesFilters");      // ventas
+  const clientFilters = document.getElementById("filters-clients");   // clientes filtros
+  const clientImport  = document.getElementById("clients-import");    // clientes importar/exportar
 
-  if (!invFilters || !invImport || !salesFilters) return;
+  const showInv     = (tabId === "inventario");
+  const showSales   = (tabId === "ventas");
+  const showClients = (tabId === "clientes");
 
-  if (tabId === "inventario") {
-    invFilters.classList.remove("hidden");
-    invImport.classList.remove("hidden");
-    salesFilters.classList.add("hidden");
-  } else if (tabId === "ventas") {
-    invFilters.classList.add("hidden");
-    invImport.classList.add("hidden");
-    salesFilters.classList.remove("hidden");
-  } else {
-    // POS / Config → ningún filtro especial
-    invFilters.classList.add("hidden");
-    invImport.classList.add("hidden");
-    salesFilters.classList.add("hidden");
+  if (invFilters) {
+    invFilters.classList.toggle("hidden", !showInv);
+  }
+
+  if (salesFilters) {
+    salesFilters.classList.toggle("hidden", !showSales);
+  }
+
+  if (clientFilters) {
+    clientFilters.classList.toggle("hidden", !showClients);
+  }
+
+  if (clientImport) {
+    clientImport.classList.toggle("hidden", !showClients);
   }
 }
 
@@ -345,13 +437,19 @@ function applyLowStockHighlight() {
 }
 
 function showLowStock() {
-  const threshold = getThreshold();
-  const rows = document.querySelectorAll("#tableBody tr");
-  rows.forEach(row => {
-    const qty = Number(row.children[2].innerText || 0);
-    row.style.display = qty <= threshold ? "" : "none";
-  });
+  const threshold = getThreshold(); // ya la tienes
+  // filtrar los productos en memoria
+  filteredProducts = allProducts.filter(p => Number(p.quantity) <= threshold);
+  currentPage = 1;        // empezar desde la primera página del filtro
+  renderInventoryTable(); // vuelve a dibujar usando filteredProducts
 }
+
+function showAllInventory() {
+  filteredProducts = [];   // sin filtro => usa allProducts
+  currentPage = 1;
+  renderInventoryTable();
+}
+
 
 // ------- INVENTARIO CRUD -------
 
@@ -413,8 +511,13 @@ function renderInventoryTable() {
     deleteBtn.style.display =
       (userRole === "Usuario") ? "none" : "inline-block";
   }
+  // Ocultar botón Editar para rol "Usuario"
+  const editBtn = document.getElementById("btnEdit");
+  if (editBtn) {
+    editBtn.style.display =
+      (userRole === "Usuario") ? "none" : "inline-block";
+  }
 }
-
 
 async function saveProduct() {
   const id = document.getElementById("productId").value;
@@ -483,6 +586,12 @@ function selectRow(rowEl, id) {
 }
 
 function editSelected() {
+    // Bloqueo adicional por seguridad
+  if (userRole !== "Admin") {
+    alert("No tienes permiso para editar productos.");
+    return;
+  }
+
   if (!selectedProduct) {
     alert("Selecciona un producto de la tabla primero.");
     return;
@@ -555,6 +664,267 @@ function prevPage() {
   }
 }
 
+
+// ------- CLIENTES -------
+
+let filteredClients = [];
+let currentClientPage = 1;
+const clientPageSize = 100;
+
+let selectedClientId = null;   // fila seleccionada en la tabla
+let editingClientId = null;    // si no es null, estamos editando
+
+async function loadClients() {
+  try {
+    const res = await fetch(`${API}/clients/${company}`);
+    const data = await res.json();
+
+    if (!Array.isArray(data)) {
+      console.error("Error cargando clientes:", data);
+      return;
+    }
+
+    allClients = data;
+    filteredClients = allClients;
+    currentClientPage = 1;
+    renderClientsTable();
+  } catch (err) {
+    console.error("Error en loadClients:", err);
+  }
+}
+
+function renderClientsTable() {
+  const tbody = document.getElementById("clientsBody");
+  const pageInfo = document.getElementById("clientPageInfo");
+  const prevBtn = document.getElementById("clientPrev");
+  const nextBtn = document.getElementById("clientNext");
+
+  if (!tbody) return;
+
+  tbody.innerHTML = "";
+
+  const source = filteredClients.length ? filteredClients : allClients;
+  const totalPages = Math.max(1, Math.ceil(source.length / clientPageSize));
+  if (currentClientPage > totalPages) currentClientPage = totalPages;
+
+  const start = (currentClientPage - 1) * clientPageSize;
+  const items = source.slice(start, start + clientPageSize);
+
+  items.forEach(c => {
+    tbody.innerHTML += `
+      <tr onclick="selectClientRow(${c.id}, this)">
+        <td>${c.idType || ""}</td>
+        <td>${c.idNumber || ""}</td>
+        <td>${c.razonSocial || ""}</td>
+        <td>${c.nombreComercial || ""}</td>
+        <td>${c.ciudad || ""}</td>
+        <td>${c.email || ""}</td>
+        <td>${c.telefono || ""}</td>
+        <td>${c.celular || ""}</td>
+      </tr>
+    `;
+  });
+
+  if (pageInfo) {
+    pageInfo.textContent = `${currentClientPage} / ${totalPages}`;
+  }
+  if (prevBtn) prevBtn.disabled = currentClientPage <= 1;
+  if (nextBtn) nextBtn.disabled = currentClientPage >= totalPages;
+}
+
+function clientPrevPage() {
+  if (currentClientPage > 1) {
+    currentClientPage--;
+    renderClientsTable();
+  }
+}
+
+function clientNextPage() {
+  const source = filteredClients.length ? filteredClients : allClients;
+  const totalPages = Math.max(1, Math.ceil(source.length / clientPageSize));
+  if (currentClientPage < totalPages) {
+    currentClientPage++;
+    renderClientsTable();
+  }
+}
+
+function selectClientRow(id, tr) {
+  selectedClientId = id;
+
+  // quitar selección previa
+  document.querySelectorAll("#clientsBody tr").forEach(row => {
+    row.classList.remove("selected-row");
+  });
+
+  if (tr) tr.classList.add("selected-row");
+}
+
+function clearClientForm() {
+  editingClientId = null;
+  selectedClientId = null;
+
+  const fields = [
+    "clientType",        // dropdown: Cédula / RUC
+    "clientIdNumber",    // identificación
+    "clientRazonSocial", // razón social
+    "clientNombreCom",   // nombre comercial
+    "clientCiudad",
+    "clientDireccion",
+    "clientEmail",
+    "clientTelefono",
+    "clientCelular"
+  ];
+
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+
+  // limpiar selección en la tabla
+  document.querySelectorAll("#clientsBody tr").forEach(row => {
+    row.classList.remove("selected-row");
+  });
+}
+
+async function saveClient() {
+  const idType        = document.getElementById("clientType")?.value || "Cedula";
+  const idNumber      = document.getElementById("clientIdNumber")?.value.trim() || "";
+  const razonSocial   = document.getElementById("clientRazonSocial")?.value.trim() || "";
+  const nombreComercial = document.getElementById("clientNombreCom")?.value.trim() || "";
+  const ciudad        = document.getElementById("clientCiudad")?.value.trim() || "";
+  const direccion     = document.getElementById("clientDireccion")?.value.trim() || "";
+  const email         = document.getElementById("clientEmail")?.value.trim() || "";
+  const telefono      = document.getElementById("clientTelefono")?.value.trim() || "";
+  const celular       = document.getElementById("clientCelular")?.value.trim() || "";
+
+  if (!idNumber || !razonSocial) {
+    alert("Identificación y Razón social son obligatorias.");
+    return;
+  }
+
+  const payload = {
+    idType,
+    idNumber,
+    razonSocial,
+    nombreComercial,
+    ciudad,
+    direccion,
+    email,
+    telefono,
+    celular
+  };
+
+  const isEdit = !!editingClientId;
+  const url = isEdit
+    ? `${API}/clients/${company}/${editingClientId}`
+    : `${API}/clients/${company}`;
+  const method = isEdit ? "PUT" : "POST";
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      alert(data.error || "Error al guardar cliente.");
+      return;
+    }
+
+    // IMPORTANTE: NO cambiamos de pestaña, solo recargamos lista
+    clearClientForm();
+    await loadClients();
+  } catch (err) {
+    console.error("Error en saveClient:", err);
+    alert("No se pudo guardar el cliente.");
+  }
+}
+
+function startEditClient() {
+  if (!selectedClientId) {
+    alert("Selecciona un cliente en la tabla.");
+    return;
+  }
+
+  const c = allClients.find(x => x.id === selectedClientId);
+  if (!c) return;
+
+  editingClientId = c.id;
+
+  const setVal = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value || "";
+  };
+
+  setVal("clientType", c.idType);
+  setVal("clientIdNumber", c.idNumber);
+  setVal("clientRazonSocial", c.razonSocial);
+  setVal("clientNombreCom", c.nombreComercial);
+  setVal("clientCiudad", c.ciudad);
+  setVal("clientDireccion", c.direccion);
+  setVal("clientEmail", c.email);
+  setVal("clientTelefono", c.telefono);
+  setVal("clientCelular", c.celular);
+}
+
+async function deleteSelectedClient() {
+  if (!selectedClientId) {
+    alert("Selecciona un cliente en la tabla.");
+    return;
+  }
+
+  if (!confirm("¿Seguro que deseas eliminar este cliente?")) return;
+
+  try {
+    const res = await fetch(`${API}/clients/${company}/${selectedClientId}`, {
+      method: "DELETE"
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || "Error al eliminar cliente.");
+      return;
+    }
+
+    selectedClientId = null;
+    editingClientId = null;
+    await loadClients();
+  } catch (err) {
+    console.error("Error al eliminar cliente:", err);
+    alert("No se pudo eliminar el cliente.");
+  }
+}
+
+function searchClients() {
+  const q = document.getElementById("clientSearch")?.value.trim().toLowerCase() || "";
+  if (!q) {
+    filteredClients = allClients;
+  } else {
+    filteredClients = allClients.filter(c => {
+      const texto = [
+        c.idType,
+        c.idNumber,
+        c.razonSocial,
+        c.nombreComercial,
+        c.ciudad,
+        c.email,
+        c.telefono,
+        c.celular
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return texto.includes(q);
+    });
+  }
+  currentClientPage = 1;
+  renderClientsTable();
+}
+
+
 // ------- CAMBIO DE CONTRASEÑA -------
 
 async function changePassword() {
@@ -609,16 +979,20 @@ async function changePassword() {
 // ------- CSV EXPORT -------
 
 function exportCSV() {
+  // si hay filtro activo, exportamos el filtro; si no, todo el inventario
+  const source = (filteredProducts && filteredProducts.length)
+    ? filteredProducts
+    : allProducts;
+
   const rows = [["codigo","nombre","cantidad","precio"]];
-  document.querySelectorAll("#tableBody tr").forEach(tr => {
-    const tds = tr.querySelectorAll("td");
-    if (tds.length >= 4) {
-      const codigo = tds[0].innerText;
-      const nombre = tds[1].innerText;
-      const cantidad = tds[2].innerText;
-      const precio = tds[3].innerText.replace("$","").trim();
-      rows.push([codigo, nombre, cantidad, precio]);
-    }
+
+  source.forEach(p => {
+    rows.push([
+      p.code ?? "",
+      p.name ?? "",
+      String(p.quantity ?? ""),
+      String(p.price ?? "")
+    ]);
   });
 
   const csv = rows.map(r => r.join(",")).join("\n");
@@ -672,7 +1046,6 @@ function importCSV(event) {
   };
   reader.readAsText(file);
 }
-
 
 // ------- POS / CARRITO -------
 
@@ -949,19 +1322,10 @@ function logout() {
   location.href = "index.html";
 }
 
-// Desactivar botón eliminar si el rol NO es Admin
-//window.addEventListener("DOMContentLoaded", () => {
-  //const delBtn = document.getElementById("btnDelete");
-  //if (delBtn && role !== "Admin") {
-   // delBtn.disabled = true;
-  //  delBtn.title = "Solo un administrador puede eliminar productos";
- // }
-//});
-
-
 // inicializar
 showTab("inventario");
 loadProducts();
+loadClients();
 </script>
 </body>
 </html>

@@ -70,6 +70,23 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       company TEXT
     )
   `);
+
+    db.run(`
+    CREATE TABLE IF NOT EXISTS clients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company TEXT,
+      idType TEXT,           -- "Cedula" o "RUC"
+      idNumber TEXT,         -- número de identificación
+      razonSocial TEXT,      -- nombre legal
+      nombreComercial TEXT,  -- opcional
+      ciudad TEXT,
+      direccion TEXT,
+      email TEXT,
+      telefono TEXT,
+      celular TEXT
+    )
+  `);
+
 });
 
 // Migración por si la BD es vieja: asegurar columna 'active'
@@ -84,7 +101,7 @@ db.run("ALTER TABLE users ADD COLUMN active INTEGER DEFAULT 1", (err) => {
 });
 
 const SECRET = "pos-secret";
-const ADMIN_SECRET = "posmaster"; // cámbialo si quieres
+const ADMIN_SECRET = "posmaster"; // 
 
 // ---------- AUTH ----------
 
@@ -244,24 +261,35 @@ app.delete("/admin/usuarios/:id", requireAdmin, (req, res) => {
 });
 
 
-// Cambio de contraseña por el propio cliente (dentro de la app)
-app.post("/auth/change-password", async (req, res) => {
+// ---------- CAMBIO DE CONTRASEÑA (CLIENTE) ----------
+app.post("/auth/change-password", (req, res) => {
   const { username, oldPassword, newPassword } = req.body;
 
   if (!username || !oldPassword || !newPassword) {
     return res.status(400).json({ error: "Datos incompletos." });
   }
 
+  // Solo para depurar: ver qué llega
+  console.log("POST /auth/change-password", username);
+
   db.get(
     "SELECT * FROM users WHERE username = ?",
     [username],
     async (err, user) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (!user) return res.status(404).json({ error: "Usuario no encontrado." });
+      if (err) {
+        console.error(err);
+        return res.status(500).json({ error: err.message });
+      }
+
+      if (!user) {
+        return res.status(404).json({ error: "Usuario no encontrado." });
+      }
 
       const ok = await bcrypt.compare(oldPassword, user.password);
       if (!ok) {
-        return res.status(401).json({ error: "Contraseña actual incorrecta." });
+        return res
+          .status(401)
+          .json({ error: "Contraseña actual incorrecta." });
       }
 
       try {
@@ -270,16 +298,21 @@ app.post("/auth/change-password", async (req, res) => {
           "UPDATE users SET password = ? WHERE id = ?",
           [hashed, user.id],
           function (err2) {
-            if (err2) return res.status(500).json({ error: err2.message });
-            res.json({ msg: "Contraseña actualizada." });
+            if (err2) {
+              console.error(err2);
+              return res.status(500).json({ error: err2.message });
+            }
+            return res.json({ msg: "Contraseña actualizada." });
           }
         );
       } catch (e) {
-        res.status(500).json({ error: e.message });
+        console.error(e);
+        return res.status(500).json({ error: e.message });
       }
     }
   );
 });
+
 
 // ====== ADMIN & ROLES ======
 
@@ -559,6 +592,145 @@ app.get("/sales/:company", (req, res) => {
     (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json(rows);
+    }
+  );
+});
+
+// ---------- CLIENTES (por empresa) ----------
+
+// Listar clientes de una tienda
+app.get("/clients/:company", (req, res) => {
+  const { company } = req.params;
+
+  db.all(
+    `SELECT * 
+     FROM clients 
+     WHERE company = ? 
+     ORDER BY razonSocial`,
+    [company],
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(rows);
+    }
+  );
+});
+
+// Crear cliente nuevo
+app.post("/clients/:company", (req, res) => {
+  const { company } = req.params;
+  const {
+    idType,
+    idNumber,
+    razonSocial,
+    nombreComercial,
+    ciudad,
+    direccion,
+    email,
+    telefono,
+    celular,
+  } = req.body;
+
+  if (!idType || !idNumber || !razonSocial) {
+    return res
+      .status(400)
+      .json({ error: "Tipo de identificación, número y razón social son obligatorios." });
+  }
+
+  // Evitar duplicados por compañía + número de identificación
+  db.get(
+    "SELECT id FROM clients WHERE company = ? AND idNumber = ?",
+    [company, idNumber],
+    (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+
+      if (row) {
+        return res
+          .status(409)
+          .json({ error: "Ya existe un cliente con ese número de identificación." });
+      }
+
+      db.run(
+        `INSERT INTO clients
+         (company, idType, idNumber, razonSocial, nombreComercial,
+          ciudad, direccion, email, telefono, celular)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          company,
+          idType,
+          idNumber,
+          razonSocial,
+          nombreComercial || "",
+          ciudad || "",
+          direccion || "",
+          email || "",
+          telefono || "",
+          celular || "",
+        ],
+        function (err2) {
+          if (err2) return res.status(500).json({ error: err2.message });
+          res.json({ id: this.lastID });
+        }
+      );
+    }
+  );
+});
+
+// Actualizar cliente existente
+app.put("/clients/:company/:id", (req, res) => {
+  const { company, id } = req.params;
+  const {
+    idType,
+    idNumber,
+    razonSocial,
+    nombreComercial,
+    ciudad,
+    direccion,
+    email,
+    telefono,
+    celular,
+  } = req.body;
+
+  if (!idType || !idNumber || !razonSocial) {
+    return res
+      .status(400)
+      .json({ error: "Tipo de identificación, número y razón social son obligatorios." });
+  }
+
+  db.run(
+    `UPDATE clients
+     SET idType = ?, idNumber = ?, razonSocial = ?, nombreComercial = ?,
+         ciudad = ?, direccion = ?, email = ?, telefono = ?, celular = ?
+     WHERE id = ? AND company = ?`,
+    [
+      idType,
+      idNumber,
+      razonSocial,
+      nombreComercial || "",
+      ciudad || "",
+      direccion || "",
+      email || "",
+      telefono || "",
+      celular || "",
+      id,
+      company,
+    ],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ updated: this.changes });
+    }
+  );
+});
+
+// Eliminar cliente
+app.delete("/clients/:company/:id", (req, res) => {
+  const { company, id } = req.params;
+
+  db.run(
+    "DELETE FROM clients WHERE id = ? AND company = ?",
+    [id, company],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ deleted: this.changes });
     }
   );
 });
