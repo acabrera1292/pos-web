@@ -1,4 +1,4 @@
-const API = "http://localhost:4000";
+const API = "https://pos-api-yvoj.onrender.com";
 
 // Solo login, el registro ahora vive en admin.html
 async function login() {

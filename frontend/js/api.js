@@ -1,4 +1,4 @@
-const API = "http://localhost:4000";
+const API = "https://pos-api-yvoj.onrender.com";
 
 async function request(path, method = "GET", body = null) {
   const token = localStorage.getItem("token");
