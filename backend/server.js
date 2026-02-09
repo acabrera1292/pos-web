@@ -5,6 +5,12 @@ const bcrypt = require("bcrypt");
 const path = require("path");
 
 const app = express();
+
+app.use((req, res, next) => {
+  console.log(`[REQ] ${req.method} ${req.path}`);
+  next();
+});
+
 /* ---------- CORS SETUP (simple & permissive) ---------- */
 app.use((req, res, next) => {
   const origin = req.headers.origin || "*";
