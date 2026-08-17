@@ -1,39 +1,60 @@
-cd🧾 README.md
-# POS Web (JavaScript + Node + SQLite)
+# POS Web
 
-This is a simple web‑based POS system with:
+A web-based point-of-sale system built with Node.js, Express, SQLite, and vanilla HTML, CSS, and JavaScript.
 
-✅ Multi‑user login  
-✅ Inventory CRUD  
-✅ Sales / POS cart  
-✅ Daily / Weekly / Monthly reports  
-✅ Configurable low inventory threshold  
-✅ SQLite backend (easy to move to MySQL)
+## Features
 
----
+- Store and user administration
+- Inventory management and CSV import/export
+- Point-of-sale cart and sales history
+- Client management
+- Daily, weekly, and monthly reports
+- Role-based UI controls
 
-## 🚀 How to Run
+## Run locally
 
-### Backend
-
-
+```text
 cd backend
 npm install
-node server.js
+npm start
+```
 
+Open `http://localhost:4000`. The backend serves both the API and frontend.
 
-### Frontend
-Open in browser:
+## Configuration
 
+| Variable | Purpose | Development default |
+| --- | --- | --- |
+| `PORT` | HTTP server port | `4000` |
+| `DATABASE_PATH` | SQLite database path | `backend/database.sqlite` |
+| `JWT_SECRET` | Signs login tokens | `pos-secret` |
+| `ADMIN_SECRET` | Protects administration | `posmaster` |
 
-frontend/index.html
+Set private values for `JWT_SECRET` and `ADMIN_SECRET` in a public deployment.
 
+## Deploy on Render
 
----
+Create one Node Web Service and leave its root directory blank.
 
-## 🛠️ Tech
+- Build command: `cd backend && npm ci`
+- Start command: `cd backend && npm start`
+- Health check path: `/health`
 
-✔ Node + Express  
-✔ SQLite  
-✔ Vanilla HTML/CSS/JS  
-✔ JWT Authentication
+Do not set Render's root directory to `backend`; the server also needs the adjacent `frontend` directory.
+
+SQLite data on Render's default filesystem is temporary. For production, attach a persistent disk and point `DATABASE_PATH` to it, or migrate to a managed database.
+
+## Structure
+
+```text
+backend/
+  server.js
+  database.sqlite
+frontend/
+  index.html
+  admin.html
+  dashboard.html
+  css/styles.css
+  js/auth.js
+  js/admin.js
+```

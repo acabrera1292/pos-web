@@ -101,8 +101,8 @@ db.run("ALTER TABLE users ADD COLUMN active INTEGER DEFAULT 1", (err) => {
   }
 });
 
-const SECRET = "pos-secret";
-const ADMIN_SECRET = "posmaster"; // 
+const SECRET = process.env.JWT_SECRET || "pos-secret";
+const ADMIN_SECRET = process.env.ADMIN_SECRET || "posmaster";
 
 // ---------- AUTH ----------
 
@@ -314,115 +314,6 @@ app.post("/auth/change-password", (req, res) => {
   );
 });
 
-
-// ====== ADMIN & ROLES ======
-
-function checkAdminSecret(req, res) {
-  if (req.query.secret !== ADMIN_SECRET) {
-    res.status(403).json({ error: "No autorizado" });
-    return false;
-  }
-  return true;
-}
-
-
-// LISTA DE USUARIOS / TIENDAS
-app.get("/admin/tiendas", (req, res) => {
-  if (!checkAdminSecret(req, res)) return;
-
-  db.all(
-    "SELECT id, username, company, role, active FROM users ORDER BY company, username",
-    (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
-    }
-  );
-});
-
-// CREAR NUEVA TIENDA + USUARIO ADMIN INICIAL
-app.post("/admin/tienda", async (req, res) => {
-  if (!checkAdminSecret(req, res)) return;
-
-  const { email, password, company } = req.body;
-  if (!email || !password || !company) {
-    return res.status(400).json({ error: "Faltan datos" });
-  }
-
-  try {
-    const hashed = await bcrypt.hash(password, 10);
-    db.run(
-      `INSERT INTO users (username, password, company, role, active)
-       VALUES (?, ?, ?, 'Admin', 1)`,
-      [email, hashed, company],
-      function (err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ id: this.lastID });
-      }
-    );
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ACTIVAR / DESACTIVAR USUARIO
-app.post("/admin/tienda/:id/active", (req, res) => {
-  if (!checkAdminSecret(req, res)) return;
-
-  const { id } = req.params;
-  const { active } = req.body; // true / false o 1 / 0
-
-  db.run(
-    "UPDATE users SET active = ? WHERE id = ?",
-    [active ? 1 : 0, id],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ updated: this.changes });
-    }
-  );
-});
-
-// ELIMINAR TODA UNA TIENDA (usuarios + inventario + ventas)
-app.delete("/admin/tienda/:company", (req, res) => {
-  if (!checkAdminSecret(req, res)) return;
-
-  const { company } = req.params;
-
-  db.serialize(() => {
-    db.run("DELETE FROM sales WHERE company = ?", [company]);
-    db.run("DELETE FROM products WHERE company = ?", [company]);
-    db.run("DELETE FROM users WHERE company = ?", [company], function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ deleted: this.changes });
-    });
-  });
-});
-
-// AÑADIR USUARIO A TIENDA EXISTENTE (Admin o Usuario)
-app.post("/admin/usuario", async (req, res) => {
-  if (!checkAdminSecret(req, res)) return;
-
-  const { company, email, password, role } = req.body;
-  if (!company || !email || !password) {
-    return res.status(400).json({ error: "Faltan datos" });
-  }
-
-  const userRole = role === "Usuario" ? "Usuario" : "Admin";
-
-  try {
-    const hashed = await bcrypt.hash(password, 10);
-    db.run(
-      `INSERT INTO users (username, password, company, role, active)
-       VALUES (?, ?, ?, ?, 1)`,
-      [email, hashed, company, userRole],
-      function (err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ id: this.lastID });
-      }
-    );
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // ---------- PRODUCTS (por empresa) ----------
 
@@ -740,6 +631,10 @@ app.delete("/clients/:company/:id", (req, res) => {
 // ✅ Route for frontend (Render needs this)
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "../frontend/index.html"));
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
 });
 
 const PORT = process.env.PORT || 4000;
