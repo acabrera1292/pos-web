@@ -443,8 +443,9 @@ tbody tr.selected-row {
   height: 38px;
   place-items: center;
   border-radius: 50%;
-  background: #2563eb;
-  color: #fff;
+  border: 1px solid #9ca3af;
+  background: #e5e7eb;
+  color: #374151;
   font-size: 22px;
   font-weight: 700;
 }
@@ -471,8 +472,14 @@ tbody tr.selected-row {
 }
 
 .app-dialog-primary {
-  background: #2563eb;
-  color: #fff;
+  border: 1px solid #9ca3af;
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.app-dialog-primary:hover,
+.app-dialog-primary:focus {
+  background: #d1d5db;
 }
 
 @keyframes app-dialog-open {
