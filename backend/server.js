@@ -53,6 +53,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       name TEXT,
       quantity INTEGER,
       price REAL,
+      taxRate REAL DEFAULT 15,
       company TEXT
     )
   `);
@@ -68,7 +69,51 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       total REAL,
       date TEXT,
       paymentType TEXT,
+      invoiceId INTEGER,
       company TEXT
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company TEXT NOT NULL,
+      invoiceType TEXT NOT NULL,
+      clientId INTEGER,
+      buyerIdType TEXT,
+      buyerIdNumber TEXT,
+      buyerName TEXT NOT NULL,
+      buyerAddress TEXT,
+      buyerEmail TEXT,
+      subtotal REAL NOT NULL,
+      taxAmount REAL NOT NULL,
+      total REAL NOT NULL,
+      paymentType TEXT NOT NULL,
+      invoiceNumber TEXT,
+      status TEXT DEFAULT 'CONFIGURATION_REQUIRED',
+      sriMessage TEXT,
+      date TEXT NOT NULL
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sri_settings (
+      company TEXT PRIMARY KEY,
+      environment TEXT DEFAULT 'TEST',
+      ruc TEXT,
+      legalName TEXT,
+      commercialName TEXT,
+      mainAddress TEXT,
+      establishmentAddress TEXT,
+      establishmentCode TEXT DEFAULT '001',
+      emissionPoint TEXT DEFAULT '001',
+      nextSequence INTEGER DEFAULT 1,
+      accountingRequired TEXT DEFAULT 'NO',
+      specialTaxpayerNumber TEXT,
+      taxRegime TEXT,
+      senderEmail TEXT,
+      adminCopyEmail TEXT,
+      certificateConfigured INTEGER DEFAULT 0
     )
   `);
 
@@ -169,6 +214,25 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function dbGet(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
+  });
+}
+
+function dbRun(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+  });
+}
+
+function money(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
 function requireAuthenticatedUser(req, res, next) {
   const authorization = req.get("Authorization") || "";
   const [scheme, token] = authorization.split(" ");
@@ -216,6 +280,69 @@ function requireCompanyUser(req, res, next) {
     next();
   });
 }
+
+app.get("/settings/sri/:company", requireCompanyUser, async (req, res) => {
+  try {
+    const settings = await dbGet(
+      "SELECT * FROM sri_settings WHERE company = ?",
+      [req.params.company]
+    );
+    res.json(settings || {
+      company: req.params.company,
+      environment: "TEST",
+      establishmentCode: "001",
+      emissionPoint: "001",
+      nextSequence: 1,
+      accountingRequired: "NO",
+      certificateConfigured: 0
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/settings/sri/:company", requireUserAdmin, async (req, res) => {
+  const { company } = req.params;
+  const values = req.body;
+  const environment = values.environment === "PRODUCTION" ? "PRODUCTION" : "TEST";
+
+  try {
+    await dbRun(
+      `INSERT INTO sri_settings
+       (company, environment, ruc, legalName, commercialName, mainAddress,
+        establishmentAddress, establishmentCode, emissionPoint, nextSequence,
+        accountingRequired, specialTaxpayerNumber, taxRegime, senderEmail,
+        adminCopyEmail, certificateConfigured)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(company) DO UPDATE SET
+         environment=excluded.environment, ruc=excluded.ruc,
+         legalName=excluded.legalName, commercialName=excluded.commercialName,
+         mainAddress=excluded.mainAddress,
+         establishmentAddress=excluded.establishmentAddress,
+         establishmentCode=excluded.establishmentCode,
+         emissionPoint=excluded.emissionPoint,
+         nextSequence=excluded.nextSequence,
+         accountingRequired=excluded.accountingRequired,
+         specialTaxpayerNumber=excluded.specialTaxpayerNumber,
+         taxRegime=excluded.taxRegime, senderEmail=excluded.senderEmail,
+         adminCopyEmail=excluded.adminCopyEmail,
+         certificateConfigured=excluded.certificateConfigured`,
+      [
+        company, environment, values.ruc || "", values.legalName || "",
+        values.commercialName || "", values.mainAddress || "",
+        values.establishmentAddress || "", values.establishmentCode || "001",
+        values.emissionPoint || "001", Math.max(1, Number(values.nextSequence) || 1),
+        values.accountingRequired === "SI" ? "SI" : "NO",
+        values.specialTaxpayerNumber || "", values.taxRegime || "",
+        values.senderEmail || "", values.adminCopyEmail || "",
+        values.certificateConfigured ? 1 : 0
+      ]
+    );
+    res.json({ saved: true, environment });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET lista de tiendas (una fila por company)
 app.get("/admin/tiendas", requireAdmin, (req, res) => {
@@ -497,9 +624,9 @@ app.delete("/products/:company/:id", requireUserAdmin, (req, res) => {
 
 // ---------- SALES (ventas) ----------
 
-app.post("/sales/:company", (req, res) => {
+app.post("/sales/:company", requireCompanyUser, async (req, res) => {
   const { company } = req.params;
-  const { items, total, cash, paymentType } = req.body;
+  const { items, cash, paymentType, invoiceType, clientId } = req.body;
   const date = getETLocalISO();
   const payType = paymentType || "Efectivo";
 
@@ -507,33 +634,103 @@ app.post("/sales/:company", (req, res) => {
     return res.status(400).json({ error: "Carrito vacío" });
   }
 
-  db.serialize(() => {
-    items.forEach((item) => {
-      const lineTotal = item.price * item.quantity;
-      db.run(
-        `INSERT INTO sales (productId, code, name, quantity, price, total, date, paymentType, company)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          item.id,
-          item.code,
-          item.name,
-          item.quantity,
-          item.price,
-          lineTotal,
-          date,
-          payType,
-          company,
-        ]
-      );
+  const type = invoiceType === "FACTURA" ? "FACTURA" : "CONSUMIDOR_FINAL";
 
-      db.run(
+  try {
+    const client = type === "FACTURA"
+      ? await dbGet("SELECT * FROM clients WHERE id = ? AND company = ?", [clientId, company])
+      : null;
+    if (type === "FACTURA" && !client) {
+      return res.status(400).json({ error: "Selecciona un cliente para la factura." });
+    }
+
+    const lines = [];
+    let subtotal = 0;
+    let taxAmount = 0;
+    let total = 0;
+    for (const item of items) {
+      const product = await dbGet(
+        "SELECT * FROM products WHERE id = ? AND company = ?",
+        [item.id, company]
+      );
+      if (!product) return res.status(400).json({ error: `Producto no encontrado: ${item.code}` });
+      const quantity = Math.max(1, Number(item.quantity) || 1);
+      if (quantity > product.quantity) {
+        return res.status(400).json({ error: `Inventario insuficiente para ${product.name}.` });
+      }
+      const rate = Number(product.taxRate ?? 15);
+      const gross = money(Number(product.price) * quantity);
+      const base = rate > 0 ? money(gross / (1 + rate / 100)) : gross;
+      const tax = money(gross - base);
+      subtotal = money(subtotal + base);
+      taxAmount = money(taxAmount + tax);
+      total = money(total + gross);
+      lines.push({ product, quantity, gross });
+    }
+
+    const settings = await dbGet("SELECT * FROM sri_settings WHERE company = ?", [company]);
+    const sequence = settings?.nextSequence || 1;
+    const establishment = settings?.establishmentCode || "001";
+    const emissionPoint = settings?.emissionPoint || "001";
+    const invoiceNumber = `${establishment}-${emissionPoint}-${String(sequence).padStart(9, "0")}`;
+    const configured = Boolean(settings?.ruc && settings?.legalName && settings?.mainAddress && settings?.certificateConfigured);
+    const status = configured ? "PENDING_SRI" : "CONFIGURATION_REQUIRED";
+
+    await dbRun("BEGIN IMMEDIATE TRANSACTION");
+    const invoice = await dbRun(
+      `INSERT INTO invoices
+       (company, invoiceType, clientId, buyerIdType, buyerIdNumber, buyerName,
+        buyerAddress, buyerEmail, subtotal, taxAmount, total, paymentType,
+        invoiceNumber, status, sriMessage, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        company, type, client?.id || null, client?.idType || "07",
+        client?.idNumber || "9999999999999",
+        client?.razonSocial || "CONSUMIDOR FINAL", client?.direccion || "",
+        client?.email || "", subtotal, taxAmount, total, payType,
+        invoiceNumber, status,
+        configured ? "Pendiente de firma y envío al SRI." : "Complete la configuración SRI.",
+        date
+      ]
+    );
+
+    for (const line of lines) {
+      await dbRun(
+        `INSERT INTO sales
+         (productId, code, name, quantity, price, total, date, paymentType, invoiceId, company)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [line.product.id, line.product.code, line.product.name, line.quantity,
+          line.product.price, line.gross, date, payType, invoice.lastID, company]
+      );
+      await dbRun(
         "UPDATE products SET quantity = quantity - ? WHERE id = ? AND company = ?",
-        [item.quantity, item.id, company]
+        [line.quantity, line.product.id, company]
       );
-    });
-  });
+    }
 
-  res.json({ msg: "Venta registrada", total, cash, paymentType: payType });
+    await dbRun(
+      `INSERT INTO sri_settings (company, nextSequence)
+       VALUES (?, ?)
+       ON CONFLICT(company) DO UPDATE SET nextSequence = ?`,
+      [company, sequence + 1, sequence + 1]
+    );
+    await dbRun("COMMIT");
+
+    res.json({
+      msg: "Venta registrada",
+      invoiceId: invoice.lastID,
+      invoiceNumber,
+      status,
+      subtotal,
+      taxAmount,
+      total,
+      cash,
+      paymentType: payType
+    });
+  } catch (err) {
+    try { await dbRun("ROLLBACK"); } catch {}
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/sales/:company", (req, res) => {
@@ -691,6 +888,17 @@ app.delete("/clients/:company/:id", (req, res) => {
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "../frontend/index.html"));
 });
+
+function addColumnIfMissing(table, definition) {
+  db.run(`ALTER TABLE ${table} ADD COLUMN ${definition}`, err => {
+    if (err && !String(err.message).includes("duplicate column")) {
+      console.error(`Error updating ${table}:`, err.message);
+    }
+  });
+}
+
+addColumnIfMissing("products", "taxRate REAL DEFAULT 15");
+addColumnIfMissing("sales", "invoiceId INTEGER");
 
 app.delete("/sales/:company/:id", requireUserAdmin, (req, res) => {
   const { company, id } = req.params;

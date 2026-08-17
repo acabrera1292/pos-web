@@ -109,7 +109,11 @@
         </div>
 
         <h3>Totales</h3>
-        <p>Total: $<span id="cartTotal">0.00</span></p>
+        <div class="invoice-totals">
+          <p>Subtotal sin IVA: $<span id="cartSubtotal">0.00</span></p>
+          <p>IVA 15%: $<span id="cartTax">0.00</span></p>
+          <p class="invoice-grand-total">Total: $<span id="cartTotal">0.00</span></p>
+        </div>
 
         <label>Tipo de pago:
           <select id="paymentType">
@@ -117,6 +121,30 @@
             <option value="Tarjeta">Tarjeta</option>
           </select>
         </label>
+
+        <div class="invoice-choice">
+          <span class="invoice-choice-label">Comprobante:</span>
+          <button id="btnConsumerFinal" class="invoice-choice-button active" type="button" onclick="setInvoiceType('CONSUMIDOR_FINAL')">Consumidor Final</button>
+          <button id="btnInvoice" class="invoice-choice-button" type="button" onclick="setInvoiceType('FACTURA')">Factura</button>
+        </div>
+
+        <div id="invoiceClientPanel" class="invoice-client-panel hidden">
+          <h3>Datos del cliente</h3>
+          <label for="invoiceClientSearch">Buscar por cédula, RUC o nombre</label>
+          <input id="invoiceClientSearch" type="text" placeholder="Empieza a escribir..." oninput="searchInvoiceClients()">
+          <div id="invoiceClientResults" class="invoice-client-results"></div>
+          <div id="selectedInvoiceClient" class="selected-invoice-client hidden"></div>
+          <button type="button" onclick="toggleQuickClientForm(true)">Agregar nuevo cliente</button>
+          <div id="quickClientForm" class="quick-client-form hidden">
+            <select id="quickClientIdType"><option value="Cedula">Cédula</option><option value="RUC">RUC</option><option value="Pasaporte">Pasaporte</option></select>
+            <input id="quickClientIdNumber" placeholder="Número de identificación">
+            <input id="quickClientName" placeholder="Razón social / Nombre completo">
+            <input id="quickClientAddress" placeholder="Dirección">
+            <input id="quickClientEmail" type="email" placeholder="Correo electrónico">
+            <input id="quickClientPhone" placeholder="Teléfono">
+            <div><button type="button" onclick="saveQuickClient()">Guardar y seleccionar</button> <button type="button" onclick="toggleQuickClientForm(false)">Cancelar</button></div>
+          </div>
+        </div>
 
         <br>
 
@@ -242,6 +270,30 @@
           <input id="newPass2" type="password" placeholder="Repetir nueva contraseña">
           <button onclick="changePassword()">Guardar nueva contraseña</button>
         </div>
+
+        <div id="sriAdminSettings">
+          <hr style="margin:20px 0;">
+          <h3>Facturación Electrónica SRI</h3>
+          <p class="settings-note">Usa Pruebas hasta validar la firma electrónica y la autorización del SRI.</p>
+          <div class="sri-settings-grid">
+            <label>Ambiente <select id="sriEnvironment"><option value="TEST">Pruebas</option><option value="PRODUCTION">Producción</option></select></label>
+            <label>RUC <input id="sriRuc" maxlength="13"></label>
+            <label>Razón social <input id="sriLegalName"></label>
+            <label>Nombre comercial <input id="sriCommercialName"></label>
+            <label>Dirección matriz <input id="sriMainAddress"></label>
+            <label>Dirección establecimiento <input id="sriEstablishmentAddress"></label>
+            <label>Código establecimiento <input id="sriEstablishmentCode" maxlength="3" value="001"></label>
+            <label>Punto de emisión <input id="sriEmissionPoint" maxlength="3" value="001"></label>
+            <label>Próximo secuencial <input id="sriNextSequence" type="number" min="1" value="1"></label>
+            <label>Obligado a contabilidad <select id="sriAccountingRequired"><option value="NO">No</option><option value="SI">Sí</option></select></label>
+            <label>Contribuyente especial <input id="sriSpecialTaxpayerNumber"></label>
+            <label>Régimen tributario <input id="sriTaxRegime" placeholder="General, RIMPE, etc."></label>
+            <label>Correo remitente <input id="sriSenderEmail" type="email"></label>
+            <label>Correo copia Admin <input id="sriAdminCopyEmail" type="email"></label>
+          </div>
+          <p class="certificate-status">Firma electrónica: <strong id="sriCertificateStatus">No configurada</strong></p>
+          <button type="button" onclick="saveSriSettings()">Guardar configuración SRI</button>
+        </div>
       </section>
     </main>
 
@@ -344,6 +396,9 @@ window.addEventListener("DOMContentLoaded", () => {
   if (saleDeleteActions && userRole !== "Admin") {
     saleDeleteActions.style.display = "none";
   }
+  const sriAdminSettings = document.getElementById("sriAdminSettings");
+  if (sriAdminSettings) sriAdminSettings.style.display = userRole === "Admin" ? "block" : "none";
+  if (userRole === "Admin") loadSriSettings();
 });
 
 let selectedProduct = null;
@@ -358,6 +413,8 @@ let selectedSale = null;
 let selectedSaleIds = new Set();
 let multiSaleSelection = false;
 let allClients = [];
+let invoiceType = "CONSUMIDOR_FINAL";
+let selectedInvoiceClient = null;
 let filteredSales = [];
 
 
@@ -985,6 +1042,46 @@ async function changePassword() {
   }
 }
 
+const sriFieldMap = {
+  environment: "sriEnvironment", ruc: "sriRuc", legalName: "sriLegalName",
+  commercialName: "sriCommercialName", mainAddress: "sriMainAddress",
+  establishmentAddress: "sriEstablishmentAddress", establishmentCode: "sriEstablishmentCode",
+  emissionPoint: "sriEmissionPoint", nextSequence: "sriNextSequence",
+  accountingRequired: "sriAccountingRequired", specialTaxpayerNumber: "sriSpecialTaxpayerNumber",
+  taxRegime: "sriTaxRegime", senderEmail: "sriSenderEmail", adminCopyEmail: "sriAdminCopyEmail"
+};
+
+async function loadSriSettings() {
+  if (userRole !== "Admin") return;
+  const res = await fetch(`${API}/settings/sri/${company}`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cargar la configuración SRI.");
+  Object.entries(sriFieldMap).forEach(([key, id]) => {
+    const input = document.getElementById(id);
+    if (input && data[key] != null) input.value = data[key];
+  });
+  document.getElementById("sriCertificateStatus").textContent = data.certificateConfigured ? "Configurada" : "No configurada";
+}
+
+async function saveSriSettings() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede configurar el SRI.");
+  const payload = {};
+  Object.entries(sriFieldMap).forEach(([key, id]) => payload[key] = document.getElementById(id).value.trim());
+  payload.nextSequence = Number(payload.nextSequence) || 1;
+  payload.certificateConfigured = document.getElementById("sriCertificateStatus").textContent === "Configurada";
+  if (!/^\d{13}$/.test(payload.ruc)) return alert("El RUC debe contener 13 dígitos.");
+  if (!payload.legalName || !payload.mainAddress) return alert("Razón social y dirección matriz son obligatorias.");
+  if (payload.environment === "PRODUCTION" && !payload.certificateConfigured) return alert("No puedes activar Producción sin configurar y validar la firma electrónica.");
+  const res = await fetch(`${API}/settings/sri/${company}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo guardar la configuración SRI.");
+  alert("Configuración SRI guardada en ambiente de " + (data.environment === "TEST" ? "Pruebas." : "Producción."));
+}
+
 // ------- CSV EXPORT -------
 
 function exportCSV() {
@@ -1058,6 +1155,74 @@ function importCSV(event) {
 
 // ------- POS / CARRITO -------
 
+function setInvoiceType(type) {
+  invoiceType = type === "FACTURA" ? "FACTURA" : "CONSUMIDOR_FINAL";
+  document.getElementById("btnConsumerFinal").classList.toggle("active", invoiceType === "CONSUMIDOR_FINAL");
+  document.getElementById("btnInvoice").classList.toggle("active", invoiceType === "FACTURA");
+  document.getElementById("invoiceClientPanel").classList.toggle("hidden", invoiceType !== "FACTURA");
+  if (invoiceType === "FACTURA") loadClients();
+}
+
+function searchInvoiceClients() {
+  const query = document.getElementById("invoiceClientSearch").value.trim().toLowerCase();
+  const results = document.getElementById("invoiceClientResults");
+  results.innerHTML = "";
+  if (!query) return;
+  allClients
+    .filter(client => [client.idNumber, client.razonSocial, client.nombreComercial]
+      .some(value => String(value || "").toLowerCase().includes(query)))
+    .slice(0, 8)
+    .forEach(client => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "invoice-client-result";
+      button.textContent = `${client.razonSocial} — ${client.idNumber}`;
+      button.onclick = () => selectInvoiceClient(client);
+      results.appendChild(button);
+    });
+  if (!results.children.length) results.innerHTML = '<p class="settings-note">Cliente no encontrado. Usa "Agregar nuevo cliente".</p>';
+}
+
+function selectInvoiceClient(client) {
+  selectedInvoiceClient = client;
+  const selected = document.getElementById("selectedInvoiceClient");
+  selected.classList.remove("hidden");
+  selected.innerHTML = `<strong>${client.razonSocial}</strong><br>${client.idType}: ${client.idNumber}<br>${client.direccion || "Sin dirección"}<br>${client.email || "Sin correo"}`;
+  document.getElementById("invoiceClientResults").innerHTML = "";
+  document.getElementById("invoiceClientSearch").value = "";
+}
+
+function toggleQuickClientForm(show) {
+  document.getElementById("quickClientForm").classList.toggle("hidden", !show);
+}
+
+async function saveQuickClient() {
+  const payload = {
+    idType: document.getElementById("quickClientIdType").value,
+    idNumber: document.getElementById("quickClientIdNumber").value.trim(),
+    razonSocial: document.getElementById("quickClientName").value.trim(),
+    direccion: document.getElementById("quickClientAddress").value.trim(),
+    email: document.getElementById("quickClientEmail").value.trim(),
+    telefono: document.getElementById("quickClientPhone").value.trim(),
+    nombreComercial: "", ciudad: "", celular: ""
+  };
+  if (!payload.idNumber || !payload.razonSocial) {
+    alert("Identificación y nombre son obligatorios.");
+    return;
+  }
+  const res = await fetch(`${API}/clients/${company}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo crear el cliente.");
+  const client = { ...payload, id: data.id };
+  allClients.push(client);
+  selectInvoiceClient(client);
+  toggleQuickClientForm(false);
+}
+
 function addToCartByCode() {
   const codeInput = document.getElementById("posCode");
   const code = codeInput.value.trim();
@@ -1125,6 +1290,10 @@ function removeFromCart(index) {
 
 function updateTotal() {
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const subtotal = total / 1.15;
+  const tax = total - subtotal;
+  document.getElementById("cartSubtotal").innerText = subtotal.toFixed(2);
+  document.getElementById("cartTax").innerText = tax.toFixed(2);
   document.getElementById("cartTotal").innerText = total.toFixed(2);
   updateChange();
 }
@@ -1147,28 +1316,47 @@ async function finishSale() {
   const cash = Number(document.getElementById("cashReceived").value || 0);
   const paymentType = document.getElementById("paymentType").value || "Efectivo";
 
+  if (invoiceType === "FACTURA" && !selectedInvoiceClient) {
+    alert("Selecciona o agrega un cliente para emitir la factura.");
+    return;
+  }
+
   if (paymentType === "Efectivo" && cash < total) {
     alert("Efectivo insuficiente.");
     return;
   }
 
-  await fetch(`${API}/sales/${company}`, {
+  const confirmed = await appConfirm(
+    `${invoiceType === "FACTURA" ? selectedInvoiceClient.razonSocial : "CONSUMIDOR FINAL"}\n` +
+    `Subtotal: $${document.getElementById("cartSubtotal").innerText}\n` +
+    `IVA 15%: $${document.getElementById("cartTax").innerText}\n` +
+    `Total: $${total.toFixed(2)}\n\n¿Emitir comprobante?`
+  );
+  if (!confirmed) return;
+
+  const res = await fetch(`${API}/sales/${company}`, {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: {"Content-Type": "application/json", ...authHeaders()},
     body: JSON.stringify({
       items: cart,
       total,
       cash,
-      paymentType
+      paymentType,
+      invoiceType,
+      clientId: selectedInvoiceClient?.id || null
     })
   });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo registrar la factura.");
 
   cart = [];
   renderCart();
   document.getElementById("cashReceived").value = "";
   updateChange();
   await loadProducts(); // actualizar inventario
-  alert("Venta registrada.");
+  selectedInvoiceClient = null;
+  setInvoiceType("CONSUMIDOR_FINAL");
+  alert(`Venta registrada.\nComprobante: ${data.invoiceNumber}\nEstado SRI: ${data.status}`);
 }
 
 // ------- VENTAS (LISTADO) -------
