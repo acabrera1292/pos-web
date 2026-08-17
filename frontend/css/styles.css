@@ -375,6 +375,111 @@ tbody tr.selected-row {
   background-color: #e5e7eb !important;
 }
 
+/* Centered application dialogs */
+.app-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(17, 24, 39, 0.46);
+  backdrop-filter: blur(2px);
+}
+
+.app-dialog {
+  width: min(440px, 100%);
+  overflow: hidden;
+  border: 1px solid #9ca3af;
+  border-radius: 10px;
+  background: #f8fafc;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32), 0 4px 12px rgba(0, 0, 0, 0.18);
+  animation: app-dialog-open 140ms ease-out;
+}
+
+.app-dialog-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 10px 0 16px;
+  border-bottom: 1px solid #d1d5db;
+  background: linear-gradient(#ffffff, #e5e7eb);
+  color: #111827;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.app-dialog-close {
+  width: 32px;
+  min-width: 32px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #374151;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.app-dialog-close:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
+.app-dialog-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-height: 100px;
+  padding: 26px 26px 20px;
+}
+
+.app-dialog-icon {
+  display: grid;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.app-dialog-message {
+  margin: 7px 0 0;
+  color: #111827;
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid #d1d5db;
+  background: #eef0f3;
+}
+
+.app-dialog-actions button {
+  min-width: 92px;
+}
+
+.app-dialog-primary {
+  background: #2563eb;
+  color: #fff;
+}
+
+@keyframes app-dialog-open {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
 /* when low stock JS sets background-color, keep font a bit bolder */
 
 tbody tr[style*="background-color"] {

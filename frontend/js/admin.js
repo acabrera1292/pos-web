@@ -101,7 +101,7 @@ async function changeStoreState(company, value) {
 
 async function deleteStore(company) {
   const secret = getSecret();
-  if (!confirm(`¿Eliminar la tienda "${company}" y todos sus datos?`)) return;
+  if (!await appConfirm(`¿Eliminar la tienda "${company}" y todos sus datos?`)) return;
 
   try {
     const res = await fetch(
@@ -242,7 +242,7 @@ async function createUser() {
 
 async function deleteUser(id) {
   const secret = getSecret();
-  if (!confirm("¿Eliminar este usuario?")) return;
+  if (!await appConfirm("¿Eliminar este usuario?")) return;
 
   try {
     const res = await fetch(`${API}/admin/usuarios/${id}?secret=${encodeURIComponent(secret)}`, {

@@ -316,6 +316,7 @@
   </div>
 </aside>
 
+<script src="js/dialogs.js"></script>
 <script>
 const API = "";
 const company = localStorage.getItem("company");
@@ -617,7 +618,7 @@ async function deleteSelected() {
     return;
   }
 
-  if (!confirm("¿Eliminar este producto?")) return;
+  if (!await appConfirm("¿Eliminar este producto?")) return;
 
   await fetch(`${API}/products/${company}/${selectedProduct.id}`, {
     method: "DELETE",
@@ -884,7 +885,7 @@ async function deleteSelectedClient() {
     return;
   }
 
-  if (!confirm("¿Seguro que deseas eliminar este cliente?")) return;
+  if (!await appConfirm("¿Seguro que deseas eliminar este cliente?")) return;
 
   try {
     const res = await fetch(`${API}/clients/${company}/${selectedClientId}`, {
@@ -1270,7 +1271,7 @@ async function deleteSelectedSale() {
     return;
   }
 
-  if (!confirm("¿Eliminar esta venta y devolver la cantidad al inventario?")) return;
+  if (!await appConfirm("¿Eliminar esta venta y devolver la cantidad al inventario?")) return;
 
   const res = await deleteSaleRequest(selectedSale.id);
   const data = await res.json();
@@ -1304,7 +1305,7 @@ async function deleteMultipleSales() {
     return;
   }
 
-  if (!confirm(`¿Eliminar ${selectedSaleIds.size} ventas y devolver sus cantidades al inventario?`)) return;
+  if (!await appConfirm(`¿Eliminar ${selectedSaleIds.size} ventas y devolver sus cantidades al inventario?`)) return;
 
   for (const id of selectedSaleIds) {
     const res = await deleteSaleRequest(id);
