@@ -144,7 +144,6 @@
           <th>Precio</th>
           <th>Total</th>
           <th>Tipo</th>
-          <th id="saleActionsHeader">Acciones</th>
         </tr>
       </thead>
       <tbody id="salesBody"></tbody>
@@ -152,6 +151,10 @@
     </div>
 
     <button onclick="loadSales()">Cargar ventas</button>
+    <span id="saleDeleteActions">
+      <button id="btnDeleteSale" onclick="deleteSelectedSale()">Eliminar</button>
+      <button id="btnDeleteMultipleSales" onclick="deleteMultipleSales()">Eliminar Varios</button>
+    </span>
 
     <h3>Resumen</h3>
     <p>Rango: <span id="summaryLabel">Sin datos</span></p>
@@ -336,15 +339,9 @@ window.addEventListener("DOMContentLoaded", () => {
     deleteBtn.disabled = true;
     deleteBtn.title = "Solo un administrador puede eliminar productos";
   }
-   const editBtn = document.getElementById("btnEdit");
-  if (editBtn && userRole !== "Admin") {
-    editBtn.disabled = true;
-    editBtn.title = "Solo un administrador puede editar productos";
-  }
-
-  const saleActionsHeader = document.getElementById("saleActionsHeader");
-  if (saleActionsHeader && userRole !== "Admin") {
-    saleActionsHeader.style.display = "none";
+  const saleDeleteActions = document.getElementById("saleDeleteActions");
+  if (saleDeleteActions && userRole !== "Admin") {
+    saleDeleteActions.style.display = "none";
   }
 });
 
@@ -356,6 +353,9 @@ const pageSize = 100;
 
 let cart = [];
 let allSales = [];
+let selectedSale = null;
+let selectedSaleIds = new Set();
+let multiSaleSelection = false;
 let allClients = [];
 let filteredSales = [];
 
@@ -517,22 +517,15 @@ function renderInventoryTable() {
     deleteBtn.style.display =
       (userRole === "Usuario") ? "none" : "inline-block";
   }
-  // Ocultar botón Editar para rol "Usuario"
+  // Ambos roles pueden editar; Usuario solo puede cambiar código y nombre.
   const editBtn = document.getElementById("btnEdit");
   if (editBtn) {
-    editBtn.style.display =
-      (userRole === "Usuario") ? "none" : "inline-block";
+    editBtn.style.display = "inline-block";
   }
 }
 
 async function saveProduct() {
   const id = document.getElementById("productId").value;
-
-  if (id && userRole !== "Admin") {
-    alert("Solo un administrador puede editar productos existentes.");
-    clearForm();
-    return;
-  }
 
   const payload = {
     code: document.getElementById("code").value.trim(),
@@ -582,6 +575,8 @@ function editProduct(p) {
   document.getElementById("name").value = p.name || "";
   document.getElementById("qty").value = p.quantity;
   document.getElementById("price").value = p.price;
+  document.getElementById("qty").disabled = userRole !== "Admin";
+  document.getElementById("price").disabled = userRole !== "Admin";
 }
 
 async function deleteProduct(id) {
@@ -602,12 +597,6 @@ function selectRow(rowEl, id) {
 }
 
 function editSelected() {
-    // Bloqueo adicional por seguridad
-  if (userRole !== "Admin") {
-    alert("No tienes permiso para editar productos.");
-    return;
-  }
-
   if (!selectedProduct) {
     alert("Selecciona un producto de la tabla primero.");
     return;
@@ -645,6 +634,8 @@ function clearForm() {
   document.getElementById("name").value = "";
   document.getElementById("qty").value = "";
   document.getElementById("price").value = "";
+  document.getElementById("qty").disabled = false;
+  document.getElementById("price").disabled = false;
 }
 
 function searchInventory() {
@@ -1191,6 +1182,7 @@ async function loadSales() {
   }
 
   allSales = data;
+  resetSaleSelection();
 
   // por defecto: filtrar a HOY
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
@@ -1208,11 +1200,8 @@ function renderSalesTable(list) {
   list.forEach(s => {
     const fecha = s.date ? new Date(s.date).toLocaleString() : "";
     const tipo = s.paymentType || "Efectivo";
-    const actions = userRole === "Admin"
-      ? `<td><button type="button" onclick="deleteSale(${s.id})">Eliminar</button></td>`
-      : "";
     tbody.innerHTML += `
-      <tr>
+      <tr onclick="selectSaleRow(this, ${s.id})">
         <td>${fecha}</td>
         <td>${s.code}</td>
         <td>${s.name}</td>
@@ -1220,7 +1209,6 @@ function renderSalesTable(list) {
         <td>$${Number(s.price).toFixed(2)}</td>
         <td>$${Number(s.total).toFixed(2)}</td>
         <td>${tipo}</td>
-        ${actions}
       </tr>
     `;
   });
@@ -1231,18 +1219,60 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function deleteSale(id) {
+function selectSaleRow(row, id) {
+  if (multiSaleSelection) {
+    if (selectedSaleIds.has(id)) {
+      selectedSaleIds.delete(id);
+      row.classList.remove("selected-row");
+    } else {
+      selectedSaleIds.add(id);
+      row.classList.add("selected-row");
+    }
+    updateMultipleDeleteButton();
+    return;
+  }
+
+  selectedSale = allSales.find(sale => sale.id === id) || null;
+  document.querySelectorAll("#salesBody tr").forEach(item => item.classList.remove("selected-row"));
+  row.classList.add("selected-row");
+}
+
+function resetSaleSelection() {
+  selectedSale = null;
+  selectedSaleIds.clear();
+  multiSaleSelection = false;
+  updateMultipleDeleteButton();
+}
+
+function updateMultipleDeleteButton() {
+  const button = document.getElementById("btnDeleteMultipleSales");
+  if (!button) return;
+  button.textContent = multiSaleSelection
+    ? `Confirmar eliminación (${selectedSaleIds.size})`
+    : "Eliminar Varios";
+}
+
+async function deleteSaleRequest(id) {
+  return fetch(`${API}/sales/${company}/${id}`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+}
+
+async function deleteSelectedSale() {
   if (userRole !== "Admin") {
     alert("Solo un administrador puede eliminar ventas.");
     return;
   }
 
+  if (!selectedSale) {
+    alert("Selecciona una venta primero.");
+    return;
+  }
+
   if (!confirm("¿Eliminar esta venta y devolver la cantidad al inventario?")) return;
 
-  const res = await fetch(`${API}/sales/${company}/${id}`, {
-    method: "DELETE",
-    headers: authHeaders()
-  });
+  const res = await deleteSaleRequest(selectedSale.id);
   const data = await res.json();
 
   if (!res.ok) {
@@ -1250,6 +1280,42 @@ async function deleteSale(id) {
     return;
   }
 
+  await Promise.all([loadSales(), loadProducts()]);
+}
+
+async function deleteMultipleSales() {
+  if (userRole !== "Admin") {
+    alert("Solo un administrador puede eliminar ventas.");
+    return;
+  }
+
+  if (!multiSaleSelection) {
+    multiSaleSelection = true;
+    selectedSale = null;
+    selectedSaleIds.clear();
+    document.querySelectorAll("#salesBody tr").forEach(row => row.classList.remove("selected-row"));
+    updateMultipleDeleteButton();
+    alert("Selecciona las ventas que deseas eliminar y vuelve a pulsar el botón para confirmar.");
+    return;
+  }
+
+  if (!selectedSaleIds.size) {
+    alert("Selecciona al menos una venta.");
+    return;
+  }
+
+  if (!confirm(`¿Eliminar ${selectedSaleIds.size} ventas y devolver sus cantidades al inventario?`)) return;
+
+  for (const id of selectedSaleIds) {
+    const res = await deleteSaleRequest(id);
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || "No se pudieron eliminar todas las ventas.");
+      break;
+    }
+  }
+
+  resetSaleSelection();
   await Promise.all([loadSales(), loadProducts()]);
 }
 

@@ -200,15 +200,19 @@ function requireAuthenticatedUser(req, res, next) {
 }
 
 function requireUserAdmin(req, res, next) {
-  requireAuthenticatedUser(req, res, () => {
+  requireCompanyUser(req, res, () => {
     if (req.user.role !== "Admin") {
       return res.status(403).json({ error: "Solo un administrador puede realizar esta acción." });
     }
+    next();
+  });
+}
 
+function requireCompanyUser(req, res, next) {
+  requireAuthenticatedUser(req, res, () => {
     if (req.params.company && req.params.company !== req.user.company) {
       return res.status(403).json({ error: "No puedes modificar otra tienda." });
     }
-
     next();
   });
 }
@@ -453,9 +457,20 @@ app.post("/products/import/:company", (req, res) => {
 });
 
 
-app.put("/products/:company/:id", requireUserAdmin, (req, res) => {
+app.put("/products/:company/:id", requireCompanyUser, (req, res) => {
   const { code, name, quantity, price } = req.body;
   const { company, id } = req.params;
+
+  if (req.user.role !== "Admin") {
+    return db.run(
+      "UPDATE products SET code = ?, name = ? WHERE id = ? AND company = ?",
+      [code, name, id, company],
+      function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ updated: this.changes });
+      }
+    );
+  }
 
   db.run(
     "UPDATE products SET code = ?, name = ?, quantity = ?, price = ? WHERE id = ? AND company = ?",
