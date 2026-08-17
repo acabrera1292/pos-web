@@ -151,7 +151,7 @@ app.post("/auth/login", (req, res) => {
       const ok = await bcrypt.compare(password, user.password);
       if (!ok) return res.status(401).json({ error: "Contraseña incorrecta" });
 
-      const token = jwt.sign({ id: user.id }, SECRET);
+      const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: "12h" });
 
       res.json({
         token,
@@ -167,6 +167,50 @@ function requireAdmin(req, res, next) {
     return res.status(403).json({ error: "No autorizado" });
   }
   next();
+}
+
+function requireAuthenticatedUser(req, res, next) {
+  const authorization = req.get("Authorization") || "";
+  const [scheme, token] = authorization.split(" ");
+
+  if (scheme !== "Bearer" || !token) {
+    return res.status(401).json({ error: "Inicia sesión para continuar." });
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(token, SECRET);
+  } catch {
+    return res.status(401).json({ error: "La sesión no es válida o expiró." });
+  }
+
+  db.get(
+    "SELECT id, username, company, role, active FROM users WHERE id = ?",
+    [payload.id],
+    (err, user) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!user || !user.active) {
+        return res.status(401).json({ error: "Usuario no autorizado." });
+      }
+
+      req.user = user;
+      next();
+    }
+  );
+}
+
+function requireUserAdmin(req, res, next) {
+  requireAuthenticatedUser(req, res, () => {
+    if (req.user.role !== "Admin") {
+      return res.status(403).json({ error: "Solo un administrador puede realizar esta acción." });
+    }
+
+    if (req.params.company && req.params.company !== req.user.company) {
+      return res.status(403).json({ error: "No puedes modificar otra tienda." });
+    }
+
+    next();
+  });
 }
 
 // GET lista de tiendas (una fila por company)
@@ -409,7 +453,7 @@ app.post("/products/import/:company", (req, res) => {
 });
 
 
-app.put("/products/:company/:id", (req, res) => {
+app.put("/products/:company/:id", requireUserAdmin, (req, res) => {
   const { code, name, quantity, price } = req.body;
   const { company, id } = req.params;
 
@@ -423,7 +467,7 @@ app.put("/products/:company/:id", (req, res) => {
   );
 });
 
-app.delete("/products/:company/:id", (req, res) => {
+app.delete("/products/:company/:id", requireUserAdmin, (req, res) => {
   const { company, id } = req.params;
 
   db.run(
@@ -631,6 +675,42 @@ app.delete("/clients/:company/:id", (req, res) => {
 // ✅ Route for frontend (Render needs this)
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "../frontend/index.html"));
+});
+
+app.delete("/sales/:company/:id", requireUserAdmin, (req, res) => {
+  const { company, id } = req.params;
+
+  db.get(
+    "SELECT id, productId, quantity FROM sales WHERE id = ? AND company = ?",
+    [id, company],
+    (err, sale) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!sale) return res.status(404).json({ error: "Venta no encontrada." });
+
+      db.serialize(() => {
+        db.run("BEGIN TRANSACTION");
+        db.run(
+          "UPDATE products SET quantity = quantity + ? WHERE id = ? AND company = ?",
+          [sale.quantity, sale.productId, company]
+        );
+        db.run(
+          "DELETE FROM sales WHERE id = ? AND company = ?",
+          [id, company],
+          function (deleteErr) {
+            if (deleteErr) {
+              db.run("ROLLBACK");
+              return res.status(500).json({ error: deleteErr.message });
+            }
+
+            db.run("COMMIT", (commitErr) => {
+              if (commitErr) return res.status(500).json({ error: commitErr.message });
+              res.json({ deleted: this.changes });
+            });
+          }
+        );
+      });
+    }
+  );
 });
 
 app.get("/health", (req, res) => {

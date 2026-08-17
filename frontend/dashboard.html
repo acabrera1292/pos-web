@@ -144,6 +144,7 @@
           <th>Precio</th>
           <th>Total</th>
           <th>Tipo</th>
+          <th id="saleActionsHeader">Acciones</th>
         </tr>
       </thead>
       <tbody id="salesBody"></tbody>
@@ -340,6 +341,11 @@ window.addEventListener("DOMContentLoaded", () => {
     editBtn.disabled = true;
     editBtn.title = "Solo un administrador puede editar productos";
   }
+
+  const saleActionsHeader = document.getElementById("saleActionsHeader");
+  if (saleActionsHeader && userRole !== "Admin") {
+    saleActionsHeader.style.display = "none";
+  }
 });
 
 let selectedProduct = null;
@@ -522,6 +528,12 @@ function renderInventoryTable() {
 async function saveProduct() {
   const id = document.getElementById("productId").value;
 
+  if (id && userRole !== "Admin") {
+    alert("Solo un administrador puede editar productos existentes.");
+    clearForm();
+    return;
+  }
+
   const payload = {
     code: document.getElementById("code").value.trim(),
     name: document.getElementById("name").value.trim(),
@@ -546,7 +558,10 @@ async function saveProduct() {
 
   const res = await fetch(url, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders()
+    },
     body: JSON.stringify(payload)
   });
 
@@ -572,7 +587,8 @@ function editProduct(p) {
 async function deleteProduct(id) {
   if (!id) return;
   await fetch(`${API}/products/${company}/${id}`, {
-    method: "DELETE"
+    method: "DELETE",
+    headers: authHeaders()
   });
   loadProducts();
 }
@@ -615,7 +631,8 @@ async function deleteSelected() {
   if (!confirm("¿Eliminar este producto?")) return;
 
   await fetch(`${API}/products/${company}/${selectedProduct.id}`, {
-    method: "DELETE"
+    method: "DELETE",
+    headers: authHeaders()
   });
 
   selectedProduct = null;
@@ -1191,6 +1208,9 @@ function renderSalesTable(list) {
   list.forEach(s => {
     const fecha = s.date ? new Date(s.date).toLocaleString() : "";
     const tipo = s.paymentType || "Efectivo";
+    const actions = userRole === "Admin"
+      ? `<td><button type="button" onclick="deleteSale(${s.id})">Eliminar</button></td>`
+      : "";
     tbody.innerHTML += `
       <tr>
         <td>${fecha}</td>
@@ -1200,9 +1220,37 @@ function renderSalesTable(list) {
         <td>$${Number(s.price).toFixed(2)}</td>
         <td>$${Number(s.total).toFixed(2)}</td>
         <td>${tipo}</td>
+        ${actions}
       </tr>
     `;
   });
+}
+
+function authHeaders() {
+  const token = localStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function deleteSale(id) {
+  if (userRole !== "Admin") {
+    alert("Solo un administrador puede eliminar ventas.");
+    return;
+  }
+
+  if (!confirm("¿Eliminar esta venta y devolver la cantidad al inventario?")) return;
+
+  const res = await fetch(`${API}/sales/${company}/${id}`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  const data = await res.json();
+
+  if (!res.ok) {
+    alert(data.error || "No se pudo eliminar la venta.");
+    return;
+  }
+
+  await Promise.all([loadSales(), loadProducts()]);
 }
 
 function filterSalesByDate() {
