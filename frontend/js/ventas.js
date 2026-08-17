@@ -2,7 +2,7 @@
 // VENTAS MODULE
 // ============================
 
-const API = "http://localhost:4000";
+const API = "";
 let allSales = [];
 let filteredSales = [];
 

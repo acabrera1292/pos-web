@@ -1,4 +1,4 @@
-const API = "http://localhost:4000";
+const API = "";
 
 async function request(path, method = "GET", body = null) {
   const token = localStorage.getItem("token");

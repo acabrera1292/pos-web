@@ -2,7 +2,7 @@
 // CONFIGURACIÓN MODULE
 // ============================
 
-const API = "http://localhost:4000";
+const API = "";
 
 export function initConfig() {
   const container = document.getElementById("config");

@@ -12,7 +12,8 @@ app.use(express.json());
 // Serve frontend
 app.use(express.static(path.join(__dirname, "../frontend")));
 
-const db = new sqlite3.Database("./database.sqlite");
+const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "database.sqlite");
+const db = new sqlite3.Database(dbPath);
 
 // ---------- UTIL ----------
 

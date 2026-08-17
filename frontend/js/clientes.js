@@ -2,7 +2,7 @@
 // CLIENTES MODULE
 // ============================
 
-const API = "http://localhost:4000";
+const API = "";
 
 let allClients = [];
 let filteredClients = [];

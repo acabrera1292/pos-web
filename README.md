@@ -1,4 +1,4 @@
-🧾 README.md
+cd🧾 README.md
 # POS Web (JavaScript + Node + SQLite)
 
 This is a simple web‑based POS system with:

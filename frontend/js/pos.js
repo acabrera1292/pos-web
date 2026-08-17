@@ -2,7 +2,7 @@
 // PUNTO DE VENTA MODULE
 // ============================
 
-const API = "http://localhost:4000";
+const API = "";
 
 let cart = [];
 let allProducts = [];
