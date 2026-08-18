@@ -30,7 +30,7 @@ function getETLocalISO() {
 
 db.serialize(() => {
   db.run(`
-  CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE,
     password TEXT,
@@ -39,6 +39,17 @@ db.serialize(() => {
     active INTEGER DEFAULT 1
   )
 `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS store_licenses (
+      company TEXT PRIMARY KEY,
+      active INTEGER DEFAULT 1,
+      expiresAt TEXT,
+      userLimit INTEGER DEFAULT 3,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+  `);
 
 // Si la base ya existía, intenta añadir la columna role (la ignoramos si ya existe).
 db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
@@ -226,6 +237,15 @@ app.post("/auth/login", (req, res) => {
 
       const ok = await bcrypt.compare(password, user.password);
       if (!ok) return res.status(401).json({ error: "Contraseña incorrecta" });
+
+      const license = await dbGet("SELECT * FROM store_licenses WHERE company = ?", [user.company]);
+      if (license && !license.active) {
+        return res.status(403).json({ error: "La licencia de esta tienda está inactiva." });
+      }
+      const today = getETLocalISO().slice(0, 10);
+      if (license?.expiresAt && license.expiresAt < today) {
+        return res.status(403).json({ error: "La licencia de esta tienda expiró. Contacta al administrador." });
+      }
 
       const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: "12h" });
 
@@ -589,10 +609,16 @@ app.post("/client-intake/claim/:company", requireCompanyUser, async (req, res) =
 app.get("/admin/tiendas", requireAdmin, (req, res) => {
   db.all(
     `
-    SELECT MIN(id) AS id, company, MIN(active) AS active
-    FROM users
-    GROUP BY company
-    ORDER BY company
+    SELECT MIN(u.id) AS id, u.company,
+           COALESCE(l.active, MIN(u.active), 1) AS active,
+           l.expiresAt,
+           COALESCE(l.userLimit, CASE WHEN COUNT(u.id) < 3 THEN 3 ELSE COUNT(u.id) END) AS userLimit,
+           COUNT(u.id) AS userCount,
+           l.createdAt, l.updatedAt
+    FROM users u
+    LEFT JOIN store_licenses l ON l.company = u.company
+    GROUP BY u.company
+    ORDER BY u.company
     `,
     [],
     (err, rows) => {
@@ -607,9 +633,12 @@ app.post("/admin/tiendas/estado", requireAdmin, (req, res) => {
   const { company, active } = req.body;
   const val = active ? 1 : 0;
 
+  const now = getETLocalISO();
   db.run(
-    "UPDATE users SET active = ? WHERE company = ?",
-    [val, company],
+    `INSERT INTO store_licenses (company, active, userLimit, createdAt, updatedAt)
+     VALUES (?, ?, 3, ?, ?)
+     ON CONFLICT(company) DO UPDATE SET active=excluded.active, updatedAt=excluded.updatedAt`,
+    [company, val, now, now],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ updated: this.changes });
@@ -618,16 +647,19 @@ app.post("/admin/tiendas/estado", requireAdmin, (req, res) => {
 });
 
 // Eliminar tienda completa (usuarios, productos, ventas)
-app.delete("/admin/tiendas/:company", requireAdmin, (req, res) => {
+app.delete("/admin/tiendas/:company", requireAdmin, async (req, res) => {
   const company = req.params.company;
-
-  db.serialize(() => {
-    db.run("DELETE FROM users     WHERE company = ?", [company]);
-    db.run("DELETE FROM products  WHERE company = ?", [company]);
-    db.run("DELETE FROM sales     WHERE company = ?", [company]);
-  });
-
-  res.json({ ok: true });
+  const tables = ["client_intake_submissions", "client_intake_tokens", "sri_certificates",
+    "sri_settings", "invoices", "clients", "sales", "products", "users", "store_licenses"];
+  try {
+    await dbRun("BEGIN IMMEDIATE TRANSACTION");
+    for (const table of tables) await dbRun(`DELETE FROM ${table} WHERE company = ?`, [company]);
+    await dbRun("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    try { await dbRun("ROLLBACK"); } catch {}
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Lista de todos los usuarios
@@ -651,6 +683,11 @@ app.post("/admin/usuarios", requireAdmin, async (req, res) => {
   const { username, password, company, role } = req.body;
 
   try {
+    const license = await dbGet("SELECT * FROM store_licenses WHERE company = ?", [company]);
+    const count = await dbGet("SELECT COUNT(*) AS total FROM users WHERE company = ?", [company]);
+    if (license && !license.active) return res.status(403).json({ error: "La licencia de la tienda está inactiva." });
+    if (license?.expiresAt && license.expiresAt < getETLocalISO().slice(0, 10)) return res.status(403).json({ error: "La licencia de la tienda está vencida." });
+    if (license && count.total >= license.userLimit) return res.status(409).json({ error: `Límite alcanzado: ${count.total} de ${license.userLimit} usuarios.` });
     const hashed = await bcrypt.hash(password, 10);
 
     db.run(
@@ -977,6 +1014,39 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
   }
 });
 
+app.put("/admin/usuarios/:id/password", requireAdmin, async (req, res) => {
+  const password = String(req.body.password || "");
+  if (password.length < 6) return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres." });
+  try {
+    const hashed = await bcrypt.hash(password, 10);
+    const result = await dbRun("UPDATE users SET password = ? WHERE id = ?", [hashed, req.params.id]);
+    if (!result.changes) return res.status(404).json({ error: "Usuario no encontrado." });
+    res.json({ updated: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/tiendas", requireAdmin, async (req, res) => {
+  const { company, username, password, expiresAt, userLimit } = req.body;
+  if (!company || !username || !password) return res.status(400).json({ error: "Tienda, usuario inicial y contraseña son obligatorios." });
+  const limit = Math.max(1, Number(userLimit) || 1);
+  const now = getETLocalISO();
+  try {
+    const existing = await dbGet("SELECT id FROM users WHERE company = ? OR username = ?", [company, username]);
+    if (existing) return res.status(409).json({ error: "La tienda o el usuario ya existe." });
+    const hashed = await bcrypt.hash(password, 10);
+    await dbRun("BEGIN IMMEDIATE TRANSACTION");
+    const user = await dbRun("INSERT INTO users (username, password, company, role, active) VALUES (?, ?, ?, 'Admin', 1)", [username, hashed, company]);
+    await dbRun("INSERT INTO store_licenses (company, active, expiresAt, userLimit, createdAt, updatedAt) VALUES (?, 1, ?, ?, ?, ?)", [company, expiresAt || null, limit, now, now]);
+    await dbRun("COMMIT");
+    res.json({ id: user.lastID, company });
+  } catch (err) {
+    try { await dbRun("ROLLBACK"); } catch {}
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/sales/:company", (req, res) => {
   db.all(
     "SELECT * FROM sales WHERE company = ? ORDER BY date DESC",
@@ -1228,6 +1298,29 @@ app.delete("/sales/:company/:id", requireUserAdmin, (req, res) => {
       });
     }
   );
+});
+
+app.put("/admin/tiendas/:company/licencia", requireAdmin, async (req, res) => {
+  const company = req.params.company;
+  const active = req.body.active ? 1 : 0;
+  const expiresAt = req.body.expiresAt || null;
+  const userLimit = Math.max(1, Number(req.body.userLimit) || 1);
+  const now = getETLocalISO();
+  try {
+    const count = await dbGet("SELECT COUNT(*) AS total FROM users WHERE company = ?", [company]);
+    if (!count?.total) return res.status(404).json({ error: "Tienda no encontrada." });
+    if (userLimit < count.total) return res.status(400).json({ error: `La tienda ya tiene ${count.total} usuarios. El límite no puede ser menor.` });
+    await dbRun(
+      `INSERT INTO store_licenses (company, active, expiresAt, userLimit, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(company) DO UPDATE SET active=excluded.active, expiresAt=excluded.expiresAt,
+         userLimit=excluded.userLimit, updatedAt=excluded.updatedAt`,
+      [company, active, expiresAt, userLimit, now, now]
+    );
+    res.json({ saved: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/health", (req, res) => {

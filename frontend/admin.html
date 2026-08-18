@@ -2,81 +2,81 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Administración de Tiendas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control de Licencias</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
-<body class="main-shell">
+<body class="license-admin-page">
+  <div class="license-admin-shell">
+    <aside class="license-sidebar">
+      <div class="license-brand">POS Simple</div>
+      <p>Control de clientes</p>
+      <nav id="licenseFilters">
+        <button class="active" data-filter="all" onclick="setStoreFilter('all', this)">Todas <span id="countAll">0</span></button>
+        <button data-filter="expiring" onclick="setStoreFilter('expiring', this)">Por vencer <span id="countExpiring">0</span></button>
+        <button data-filter="expired" onclick="setStoreFilter('expired', this)">Vencidas <span id="countExpired">0</span></button>
+        <button data-filter="inactive" onclick="setStoreFilter('inactive', this)">Inactivas <span id="countInactive">0</span></button>
+        <button data-filter="limit" onclick="setStoreFilter('limit', this)">Límite alcanzado <span id="countLimit">0</span></button>
+      </nav>
+    </aside>
 
-<main class="main-area">
-  <header class="topbar">
-    <div class="topbar-title">Administración de Tiendas</div>
-  </header>
+    <main class="license-main">
+      <header class="license-topbar">
+        <div><h1>Licencias y tiendas</h1><p>Administra el acceso de cada cliente y sus usuarios.</p></div>
+        <div class="admin-unlock"><input type="password" id="adminSecret" placeholder="Clave ADMIN_SECRET"><button onclick="loadAll()">Desbloquear</button></div>
+      </header>
 
-  <section class="app-card">
-    <p>
-      Esta pantalla es solo para ti (administrador).
-      Usa tu clave secreta para ver, crear y activar / desactivar tiendas y usuarios.
-    </p>
+      <section class="license-summary">
+        <article><span>Tiendas</span><strong id="summaryStores">0</strong></article>
+        <article><span>Activas</span><strong id="summaryActive">0</strong></article>
+        <article><span>Por vencer</span><strong id="summaryExpiring">0</strong></article>
+        <article><span>Usuarios</span><strong id="summaryUsers">0</strong></article>
+      </section>
 
-    <div style="margin-bottom:16px;">
-      <label>Clave admin (ADMIN_SECRET):</label>
-      <input type="password" id="adminSecret" style="width:200px;">
-      <button onclick="loadAll()">Cargar datos</button>
-    </div>
+      <section class="license-card">
+        <div class="license-section-heading"><div><h2>Nueva tienda</h2><p>Crea la licencia y el primer usuario Admin.</p></div></div>
+        <div class="license-form-grid">
+          <label>Tienda <input id="newStore" placeholder="Nombre de la tienda"></label>
+          <label>Admin inicial <input id="newEmail" type="email" placeholder="correo@tienda.com"></label>
+          <label>Contraseña inicial <input id="newPassword" type="password"></label>
+          <label>Vencimiento <input id="newExpiration" type="date"></label>
+          <label>Usuarios permitidos <input id="newUserLimit" type="number" min="1" value="3"></label>
+          <button class="license-form-action" onclick="createStore()">Crear tienda</button>
+        </div>
+      </section>
 
-    <!-- TIENDAS -->
-    <h3>Crear nueva tienda / cliente</h3>
-    <div class="config-form-row">
-      <input id="newEmail" type="text" placeholder="Correo admin inicial">
-      <input id="newPassword" type="password" placeholder="Contraseña inicial">
-      <input id="newStore" type="text" placeholder="Nombre de Tienda">
-      <button onclick="createStore()">Crear tienda</button>
-    </div>
+      <section id="licenseEditor" class="license-card hidden">
+        <div class="license-section-heading"><div><h2>Editar licencia</h2><p id="licenseEditorStore"></p></div><button onclick="closeLicenseEditor()">Cerrar</button></div>
+        <div class="license-form-grid compact">
+          <label>Estado <select id="editLicenseActive"><option value="1">Activa</option><option value="0">Inactiva</option></select></label>
+          <label>Vencimiento <input id="editLicenseExpiration" type="date"></label>
+          <label>Usuarios permitidos <input id="editLicenseLimit" type="number" min="1"></label>
+          <button class="license-form-action" onclick="saveLicense()">Guardar licencia</button>
+        </div>
+      </section>
 
-    <h3>Tiendas</h3>
-    <table>
-      <thead>
-        <tr>
-          <th>Tienda</th>
-          <th>Estado</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody id="storesBody"></tbody>
-    </table>
+      <section class="license-card">
+        <div class="license-section-heading"><div><h2>Tiendas</h2><p id="storeFilterLabel">Todas las tiendas</p></div><input id="storeSearch" placeholder="Buscar tienda" oninput="renderStores()"></div>
+        <div class="table-scroll"><table class="license-table"><thead><tr><th>Tienda</th><th>Estado</th><th>Vencimiento</th><th>Usuarios</th><th>Acciones</th></tr></thead><tbody id="storesBody"></tbody></table></div>
+      </section>
 
-    <hr style="margin:24px 0;">
-
-    <!-- USUARIOS -->
-    <h3>Agregar usuario a tienda</h3>
-    <div class="config-form-row">
-      <select id="storeSelect"></select>
-      <input id="userEmail" type="text" placeholder="Correo / Usuario">
-      <input id="userPass" type="password" placeholder="Contraseña">
-      <select id="userRole">
-        <option value="Admin">Admin</option>
-        <option value="Usuario">Usuario</option>
-      </select>
-      <button onclick="createUser()">Crear usuario</button>
-    </div>
-
-    <h3>Usuarios</h3>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Usuario</th>
-          <th>Tienda</th>
-          <th>Rol</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody id="usersBody"></tbody>
-    </table>
-  </section>
-</main>
-
-<script src="js/dialogs.js"></script>
-<script src="js/admin.js"></script>
+      <section class="license-card">
+        <div class="license-section-heading"><div><h2>Usuarios</h2><p>Crea y administra cuentas dentro de sus licencias.</p></div></div>
+        <div class="license-form-grid user-create-grid">
+          <label>Tienda <select id="storeSelect"></select></label>
+          <label>Correo / Usuario <input id="userEmail"></label>
+          <label>Contraseña <input id="userPass" type="password"></label>
+          <label>Rol <select id="userRole"><option value="Admin">Admin</option><option value="Usuario">Usuario</option></select></label>
+          <button class="license-form-action" onclick="createUser()">Crear usuario</button>
+        </div>
+        <div id="passwordResetPanel" class="password-reset-panel hidden">
+          <span id="passwordResetUser"></span><input id="passwordResetValue" type="password" placeholder="Nueva contraseña"><button onclick="resetUserPassword()">Guardar clave</button><button onclick="closePasswordReset()">Cancelar</button>
+        </div>
+        <div class="table-scroll"><table class="license-table"><thead><tr><th>Usuario</th><th>Tienda</th><th>Rol</th><th>Acciones</th></tr></thead><tbody id="usersBody"></tbody></table></div>
+      </section>
+    </main>
+  </div>
+  <script src="js/dialogs.js"></script>
+  <script src="js/admin.js"></script>
 </body>
 </html>

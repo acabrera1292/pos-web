@@ -689,6 +689,66 @@ tbody tr.selected-row {
   .intake-lock { display: none; }
 }
 
+/* Master license administration */
+.license-admin-page { min-height: 100%; background: #f3f4f6; }
+.license-admin-shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+.license-sidebar { padding: 22px 14px; border-right: 1px solid #d1d5db; background: #e5e7eb; }
+.license-brand { font-size: 20px; font-weight: 700; }
+.license-sidebar > p { margin: 4px 0 24px; color: #6b7280; }
+.license-sidebar nav { display: grid; gap: 5px; }
+.license-sidebar nav button { display: flex; justify-content: space-between; width: 100%; padding: 9px 10px; border: 1px solid transparent; background: transparent; text-align: left; }
+.license-sidebar nav button.active,
+.license-sidebar nav button:hover { border-color: #9ca3af; background: #f9fafb; }
+.license-sidebar nav span { min-width: 24px; padding: 1px 6px; border-radius: 10px; background: #d1d5db; text-align: center; }
+.license-main { min-width: 0; padding: 24px; }
+.license-topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+.license-topbar h1 { margin: 0; }
+.license-topbar p { margin: 4px 0 0; color: #6b7280; }
+.admin-unlock { display: flex; gap: 8px; }
+.license-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.license-summary article { padding: 16px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
+.license-summary span { display: block; color: #6b7280; }
+.license-summary strong { display: block; margin-top: 5px; font-size: 26px; }
+.license-card { margin-bottom: 16px; padding: 18px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
+.license-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.license-section-heading h2 { margin: 0; font-size: 18px; }
+.license-section-heading p { margin: 3px 0 0; color: #6b7280; }
+.license-form-grid { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)) auto; gap: 10px; align-items: end; }
+.license-form-grid.compact { grid-template-columns: repeat(3, minmax(160px, 1fr)) auto; }
+.license-form-grid label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; }
+.license-form-action { min-height: 35px; }
+.license-table { width: 100%; }
+.license-badge { display: inline-block; padding: 4px 8px; border: 1px solid #9ca3af; border-radius: 12px; background: #e5e7eb; font-size: 12px; }
+.license-badge.expiring { background: #fef3c7; border-color: #d6a834; }
+.license-badge.expired,
+.license-badge.inactive { background: #fee2e2; border-color: #c96d6d; }
+.license-badge.limit { background: #ede9fe; border-color: #8b7ab8; }
+.license-usage { display: grid; gap: 4px; min-width: 100px; }
+.license-usage progress { width: 100%; height: 7px; }
+.license-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.danger-button { color: #991b1b; }
+.empty-table { padding: 22px !important; color: #6b7280; text-align: center; }
+.password-reset-panel { display: flex; align-items: center; gap: 8px; margin: 14px 0; padding: 12px; border: 1px solid #9ca3af; border-radius: 6px; background: #f3f4f6; }
+.password-reset-panel span { font-weight: 600; }
+
+@media (max-width: 1050px) {
+  .license-form-grid,
+  .license-form-grid.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .license-summary { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 760px) {
+  .license-admin-shell { grid-template-columns: 1fr; }
+  .license-sidebar { border-right: 0; border-bottom: 1px solid #d1d5db; }
+  .license-sidebar nav { grid-template-columns: repeat(2, 1fr); }
+  .license-main { padding: 14px; }
+  .license-topbar { align-items: stretch; flex-direction: column; }
+  .admin-unlock { display: grid; grid-template-columns: 1fr auto; }
+  .license-form-grid,
+  .license-form-grid.compact { grid-template-columns: 1fr; }
+  .password-reset-panel { align-items: stretch; flex-direction: column; }
+}
+
 /* when low stock JS sets background-color, keep font a bit bolder */
 
 tbody tr[style*="background-color"] {
