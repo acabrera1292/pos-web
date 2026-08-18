@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registro para Factura</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="intake-page">
+  <main class="intake-window">
+    <header class="intake-header">
+      <div>
+        <p class="intake-eyebrow">Datos para facturación</p>
+        <h1 id="intakeStoreName">Registro de cliente</h1>
+      </div>
+      <span class="intake-lock">Conexión segura</span>
+    </header>
+
+    <div id="intakeUnavailable" class="intake-message hidden"></div>
+
+    <form id="intakeForm" class="intake-form">
+      <p>Ingresa tus datos exactamente como aparecen en tu documento de identificación.</p>
+      <label>Tipo de identificación
+        <select id="intakeIdType" required>
+          <option value="Cedula">Cédula</option>
+          <option value="RUC">RUC</option>
+          <option value="Pasaporte">Pasaporte</option>
+        </select>
+      </label>
+      <label>Número de identificación
+        <input id="intakeIdNumber" inputmode="numeric" autocomplete="off" required>
+      </label>
+      <label>Nombre completo / Razón social
+        <input id="intakeName" autocomplete="name" required>
+      </label>
+      <label>Nombre comercial <span>(opcional)</span>
+        <input id="intakeCommercialName" autocomplete="organization">
+      </label>
+      <label>Ciudad
+        <input id="intakeCity" autocomplete="address-level2">
+      </label>
+      <label>Dirección
+        <input id="intakeAddress" autocomplete="street-address">
+      </label>
+      <label>Correo electrónico
+        <input id="intakeEmail" type="email" autocomplete="email">
+      </label>
+      <label>Teléfono
+        <input id="intakePhone" type="tel" autocomplete="tel">
+      </label>
+      <label>Celular
+        <input id="intakeMobile" type="tel" autocomplete="tel">
+      </label>
+      <label class="intake-consent">
+        <input id="intakeConsent" type="checkbox" required>
+        Confirmo que los datos son correctos y autorizo su uso para emitir mi factura.
+      </label>
+      <button class="intake-submit" type="submit">Enviar datos</button>
+    </form>
+
+    <section id="intakeSuccess" class="intake-success hidden">
+      <div class="intake-success-icon">✓</div>
+      <h2>Datos enviados correctamente</h2>
+      <p>Ya puedes continuar con tu compra. El personal de caja encontrará tus datos en Clientes.</p>
+      <button type="button" onclick="resetIntakeForm()">Registrar otra persona</button>
+    </section>
+  </main>
+  <script src="js/dialogs.js"></script>
+  <script src="js/client-intake.js"></script>
+</body>
+</html>

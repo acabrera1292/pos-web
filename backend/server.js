@@ -129,6 +129,15 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
     )
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS client_intake_tokens (
+      company TEXT PRIMARY KEY,
+      tokenHash TEXT NOT NULL UNIQUE,
+      active INTEGER DEFAULT 1,
+      createdAt TEXT NOT NULL
+    )
+  `);
+
     db.run(`
     CREATE TABLE IF NOT EXISTS clients (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,6 +266,32 @@ function encryptCertificateValue(value) {
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(value), cipher.final()]);
   return ["v1", iv.toString("base64"), cipher.getAuthTag().toString("base64"), encrypted.toString("base64")].join(":");
+}
+
+function hashIntakeToken(token) {
+  return crypto.createHash("sha256").update(String(token), "utf8").digest("hex");
+}
+
+function normalizeClientPayload(input = {}) {
+  return {
+    idType: ["Cedula", "RUC", "Pasaporte"].includes(input.idType) ? input.idType : "Cedula",
+    idNumber: String(input.idNumber || "").trim(),
+    razonSocial: String(input.razonSocial || "").trim(),
+    nombreComercial: String(input.nombreComercial || "").trim(),
+    ciudad: String(input.ciudad || "").trim(),
+    direccion: String(input.direccion || "").trim(),
+    email: String(input.email || "").trim().toLowerCase(),
+    telefono: String(input.telefono || "").trim(),
+    celular: String(input.celular || "").trim()
+  };
+}
+
+function validateClientPayload(client) {
+  if (!client.idNumber || !client.razonSocial) return "Identificación y nombre son obligatorios.";
+  if (client.idType === "Cedula" && !/^\d{10}$/.test(client.idNumber)) return "La cédula debe contener 10 dígitos.";
+  if (client.idType === "RUC" && !/^\d{13}$/.test(client.idNumber)) return "El RUC debe contener 13 dígitos.";
+  if (client.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(client.email)) return "El correo electrónico no es válido.";
+  return null;
 }
 
 function requireAuthenticatedUser(req, res, next) {
@@ -424,6 +459,85 @@ app.delete("/settings/sri/:company/certificate", requireUserAdmin, async (req, r
       [req.params.company]
     );
     res.json({ removed: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/settings/client-intake/:company", requireUserAdmin, async (req, res) => {
+  try {
+    const row = await dbGet("SELECT active, createdAt FROM client_intake_tokens WHERE company = ?", [req.params.company]);
+    res.json({ configured: Boolean(row), active: Boolean(row?.active), createdAt: row?.createdAt || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/settings/client-intake/:company/token", requireUserAdmin, async (req, res) => {
+  try {
+    const token = crypto.randomBytes(32).toString("base64url");
+    const createdAt = getETLocalISO();
+    await dbRun(
+      `INSERT INTO client_intake_tokens (company, tokenHash, active, createdAt)
+       VALUES (?, ?, 1, ?)
+       ON CONFLICT(company) DO UPDATE SET tokenHash=excluded.tokenHash, active=1, createdAt=excluded.createdAt`,
+      [req.params.company, hashIntakeToken(token), createdAt]
+    );
+    res.json({ token, createdAt });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/settings/client-intake/:company/token", requireUserAdmin, async (req, res) => {
+  try {
+    await dbRun("DELETE FROM client_intake_tokens WHERE company = ?", [req.params.company]);
+    res.json({ disabled: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/public/client-intake/:token", async (req, res) => {
+  try {
+    const row = await dbGet(
+      `SELECT t.company, s.commercialName, s.legalName
+       FROM client_intake_tokens t
+       LEFT JOIN sri_settings s ON s.company = t.company
+       WHERE t.tokenHash = ? AND t.active = 1`,
+      [hashIntakeToken(req.params.token)]
+    );
+    if (!row) return res.status(404).json({ error: "Este enlace no es válido o fue desactivado." });
+    res.json({ storeName: row.commercialName || row.legalName || row.company });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/public/client-intake/:token", async (req, res) => {
+  try {
+    const tokenRow = await dbGet(
+      "SELECT company FROM client_intake_tokens WHERE tokenHash = ? AND active = 1",
+      [hashIntakeToken(req.params.token)]
+    );
+    if (!tokenRow) return res.status(404).json({ error: "Este enlace no es válido o fue desactivado." });
+    const client = normalizeClientPayload(req.body);
+    const validationError = validateClientPayload(client);
+    if (validationError) return res.status(400).json({ error: validationError });
+    const duplicate = await dbGet(
+      "SELECT id FROM clients WHERE company = ? AND idNumber = ?",
+      [tokenRow.company, client.idNumber]
+    );
+    if (duplicate) return res.status(409).json({ error: "Ya existe un cliente con esta identificación." });
+    const result = await dbRun(
+      `INSERT INTO clients
+       (company, idType, idNumber, razonSocial, nombreComercial, ciudad, direccion, email, telefono, celular)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [tokenRow.company, client.idType, client.idNumber, client.razonSocial,
+        client.nombreComercial, client.ciudad, client.direccion, client.email,
+        client.telefono, client.celular]
+    );
+    res.json({ saved: true, id: result.lastID });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -975,6 +1089,55 @@ app.delete("/clients/:company/:id", (req, res) => {
 // ✅ Route for frontend (Render needs this)
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "../frontend/index.html"));
+});
+
+app.post("/clients/import/:company", requireUserAdmin, async (req, res) => {
+  const rows = Array.isArray(req.body?.clients) ? req.body.clients : [];
+  if (!rows.length) return res.status(400).json({ error: "El archivo no contiene clientes." });
+  if (rows.length > 5000) return res.status(400).json({ error: "Importa un máximo de 5,000 clientes por archivo." });
+
+  const summary = { inserted: 0, updated: 0, skipped: 0, errors: [] };
+  try {
+    await dbRun("BEGIN IMMEDIATE TRANSACTION");
+    for (let index = 0; index < rows.length; index += 1) {
+      const client = normalizeClientPayload(rows[index]);
+      const validationError = validateClientPayload(client);
+      if (validationError) {
+        summary.skipped += 1;
+        if (summary.errors.length < 20) summary.errors.push({ row: index + 2, error: validationError });
+        continue;
+      }
+      const existing = await dbGet(
+        "SELECT id FROM clients WHERE company = ? AND idNumber = ?",
+        [req.params.company, client.idNumber]
+      );
+      if (existing) {
+        await dbRun(
+          `UPDATE clients SET idType=?, razonSocial=?, nombreComercial=?, ciudad=?,
+           direccion=?, email=?, telefono=?, celular=? WHERE id=? AND company=?`,
+          [client.idType, client.razonSocial, client.nombreComercial, client.ciudad,
+            client.direccion, client.email, client.telefono, client.celular,
+            existing.id, req.params.company]
+        );
+        summary.updated += 1;
+      } else {
+        await dbRun(
+          `INSERT INTO clients
+           (company, idType, idNumber, razonSocial, nombreComercial, ciudad, direccion, email, telefono, celular)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [req.params.company, client.idType, client.idNumber, client.razonSocial,
+            client.nombreComercial, client.ciudad, client.direccion, client.email,
+            client.telefono, client.celular]
+        );
+        summary.inserted += 1;
+      }
+    }
+    await dbRun("COMMIT");
+    res.json(summary);
+  } catch (err) {
+    try { await dbRun("ROLLBACK"); } catch {}
+    res.status(500).json({ error: err.message });
+  }
 });
 
 function addColumnIfMissing(table, definition) {

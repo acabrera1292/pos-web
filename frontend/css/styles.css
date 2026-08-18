@@ -601,6 +601,12 @@ tbody tr.selected-row {
   margin: 10px 0 6px;
 }
 
+.tablet-link-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto auto;
+  gap: 8px;
+}
+
 @media (max-width: 700px) {
   .quick-client-form,
   .sri-settings-grid {
@@ -609,6 +615,69 @@ tbody tr.selected-row {
   .certificate-install-form {
     grid-template-columns: 1fr;
   }
+  .tablet-link-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Tablet client intake */
+.intake-page {
+  min-height: 100%;
+  padding: 24px;
+  background: #e5e7eb;
+}
+
+.intake-window {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid #9ca3af;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .18);
+}
+
+.intake-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 28px;
+  border-bottom: 1px solid #d1d5db;
+  background: linear-gradient(#f9fafb, #e5e7eb);
+}
+
+.intake-header h1 { margin: 4px 0 0; font-size: 24px; }
+.intake-eyebrow { margin: 0; color: #6b7280; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+.intake-lock { align-self: center; color: #4b5563; font-size: 12px; }
+
+.intake-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 26px 28px 30px;
+}
+
+.intake-form > p,
+.intake-consent,
+.intake-submit { grid-column: 1 / -1; }
+.intake-form > p { margin: 0 0 4px; color: #4b5563; }
+.intake-form label { display: grid; gap: 6px; font-weight: 600; }
+.intake-form label span { color: #6b7280; font-weight: 400; }
+.intake-form input,
+.intake-form select { min-height: 44px; font-size: 16px; }
+.intake-consent { display: flex !important; align-items: flex-start; font-weight: 400 !important; line-height: 1.4; }
+.intake-consent input { flex: 0 0 auto; min-height: auto; margin-top: 3px; }
+.intake-submit { min-height: 48px; font-size: 16px; font-weight: 700; }
+.intake-message { margin: 28px; padding: 18px; border: 1px solid #b91c1c; border-radius: 8px; background: #fef2f2; color: #7f1d1d; }
+.intake-success { padding: 50px 28px; text-align: center; }
+.intake-success-icon { display: grid; width: 64px; height: 64px; margin: 0 auto 18px; place-items: center; border: 2px solid #6b7280; border-radius: 50%; background: #e5e7eb; font-size: 34px; }
+
+@media (max-width: 620px) {
+  .intake-page { padding: 0; background: #fff; }
+  .intake-window { min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+  .intake-header { padding: 20px; }
+  .intake-form { grid-template-columns: 1fr; padding: 22px 20px; }
+  .intake-lock { display: none; }
 }
 
 /* when low stock JS sets background-color, keep font a bit bolder */
