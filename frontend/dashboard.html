@@ -291,7 +291,16 @@
             <label>Correo remitente <input id="sriSenderEmail" type="email"></label>
             <label>Correo copia Admin <input id="sriAdminCopyEmail" type="email"></label>
           </div>
-          <p class="certificate-status">Firma electrónica: <strong id="sriCertificateStatus">No configurada</strong></p>
+          <div class="certificate-status">
+            Firma electrónica: <strong id="sriCertificateStatus">No configurada</strong>
+            <div class="certificate-install-form">
+              <input id="sriCertificateFile" type="file" accept=".p12,.pfx,application/x-pkcs12">
+              <input id="sriCertificatePassword" type="password" autocomplete="new-password" placeholder="Contraseña del certificado">
+              <button type="button" onclick="installSriCertificate()">Instalar firma</button>
+              <button type="button" onclick="removeSriCertificate()">Quitar firma</button>
+            </div>
+            <small>El archivo y su contraseña se cifran en el servidor y nunca se vuelven a mostrar.</small>
+          </div>
           <button type="button" onclick="saveSriSettings()">Guardar configuración SRI</button>
         </div>
       </section>
@@ -415,6 +424,7 @@ let multiSaleSelection = false;
 let allClients = [];
 let invoiceType = "CONSUMIDOR_FINAL";
 let selectedInvoiceClient = null;
+let sriCertificateValidated = false;
 let filteredSales = [];
 
 
@@ -1060,7 +1070,9 @@ async function loadSriSettings() {
     const input = document.getElementById(id);
     if (input && data[key] != null) input.value = data[key];
   });
-  document.getElementById("sriCertificateStatus").textContent = data.certificateConfigured ? "Configurada" : "No configurada";
+  sriCertificateValidated = Boolean(data.certificateValidated);
+  document.getElementById("sriCertificateStatus").textContent = data.certificateValidated
+    ? "Validada" : data.certificateConfigured ? "Instalada, pendiente de validación" : "No configurada";
 }
 
 async function saveSriSettings() {
@@ -1068,10 +1080,9 @@ async function saveSriSettings() {
   const payload = {};
   Object.entries(sriFieldMap).forEach(([key, id]) => payload[key] = document.getElementById(id).value.trim());
   payload.nextSequence = Number(payload.nextSequence) || 1;
-  payload.certificateConfigured = document.getElementById("sriCertificateStatus").textContent === "Configurada";
   if (!/^\d{13}$/.test(payload.ruc)) return alert("El RUC debe contener 13 dígitos.");
   if (!payload.legalName || !payload.mainAddress) return alert("Razón social y dirección matriz son obligatorias.");
-  if (payload.environment === "PRODUCTION" && !payload.certificateConfigured) return alert("No puedes activar Producción sin configurar y validar la firma electrónica.");
+  if (payload.environment === "PRODUCTION" && !sriCertificateValidated) return alert("No puedes activar Producción sin validar la firma electrónica con el SRI.");
   const res = await fetch(`${API}/settings/sri/${company}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -1080,6 +1091,47 @@ async function saveSriSettings() {
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudo guardar la configuración SRI.");
   alert("Configuración SRI guardada en ambiente de " + (data.environment === "TEST" ? "Pruebas." : "Producción."));
+}
+
+async function installSriCertificate() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede instalar la firma.");
+  const file = document.getElementById("sriCertificateFile").files[0];
+  const passwordInput = document.getElementById("sriCertificatePassword");
+  const password = passwordInput.value;
+  if (!file || !password) return alert("Selecciona el archivo .p12/.pfx e ingresa su contraseña.");
+  if (file.size > 5 * 1024 * 1024) return alert("El certificado debe pesar menos de 5 MB.");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  const res = await fetch(`${API}/settings/sri/${company}/certificate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ filename: file.name, certificateBase64: btoa(binary), password })
+  });
+  passwordInput.value = "";
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo instalar la firma.");
+  sriCertificateValidated = false;
+  document.getElementById("sriEnvironment").value = "TEST";
+  document.getElementById("sriCertificateStatus").textContent = "Instalada, pendiente de validación";
+  alert("Firma instalada y cifrada. El siguiente paso es validarla en el ambiente de pruebas del SRI.");
+}
+
+async function removeSriCertificate() {
+  if (!await appConfirm("¿Quitar la firma electrónica instalada?")) return;
+  const res = await fetch(`${API}/settings/sri/${company}/certificate`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo quitar la firma.");
+  sriCertificateValidated = false;
+  document.getElementById("sriCertificateStatus").textContent = "No configurada";
+  document.getElementById("sriEnvironment").value = "TEST";
+  document.getElementById("sriCertificateFile").value = "";
+  alert("Firma electrónica eliminada.");
 }
 
 // ------- CSV EXPORT -------

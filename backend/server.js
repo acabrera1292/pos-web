@@ -4,10 +4,11 @@ const sqlite3 = require("sqlite3").verbose();
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const path = require("path");
+const crypto = require("crypto");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "6mb" }));
 
 // Serve frontend
 app.use(express.static(path.join(__dirname, "../frontend")));
@@ -113,7 +114,18 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       taxRegime TEXT,
       senderEmail TEXT,
       adminCopyEmail TEXT,
-      certificateConfigured INTEGER DEFAULT 0
+      certificateConfigured INTEGER DEFAULT 0,
+      certificateValidated INTEGER DEFAULT 0
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sri_certificates (
+      company TEXT PRIMARY KEY,
+      filename TEXT NOT NULL,
+      certificateEncrypted TEXT NOT NULL,
+      passwordEncrypted TEXT NOT NULL,
+      installedAt TEXT NOT NULL
     )
   `);
 
@@ -233,6 +245,20 @@ function money(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
+function certificateEncryptionKey() {
+  const secret = process.env.SRI_CERT_ENCRYPTION_KEY;
+  return secret ? crypto.createHash("sha256").update(secret, "utf8").digest() : null;
+}
+
+function encryptCertificateValue(value) {
+  const key = certificateEncryptionKey();
+  if (!key) throw new Error("SRI_CERT_ENCRYPTION_KEY no está configurada en el servidor.");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(value), cipher.final()]);
+  return ["v1", iv.toString("base64"), cipher.getAuthTag().toString("base64"), encrypted.toString("base64")].join(":");
+}
+
 function requireAuthenticatedUser(req, res, next) {
   const authorization = req.get("Authorization") || "";
   const [scheme, token] = authorization.split(" ");
@@ -307,13 +333,19 @@ app.put("/settings/sri/:company", requireUserAdmin, async (req, res) => {
   const environment = values.environment === "PRODUCTION" ? "PRODUCTION" : "TEST";
 
   try {
+    const existing = await dbGet("SELECT certificateConfigured, certificateValidated FROM sri_settings WHERE company = ?", [company]);
+    const certificateConfigured = existing?.certificateConfigured ? 1 : 0;
+    const certificateValidated = existing?.certificateValidated ? 1 : 0;
+    if (environment === "PRODUCTION" && !certificateValidated) {
+      return res.status(400).json({ error: "La firma debe validarse con el SRI antes de activar Producción." });
+    }
     await dbRun(
       `INSERT INTO sri_settings
        (company, environment, ruc, legalName, commercialName, mainAddress,
         establishmentAddress, establishmentCode, emissionPoint, nextSequence,
         accountingRequired, specialTaxpayerNumber, taxRegime, senderEmail,
-        adminCopyEmail, certificateConfigured)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        adminCopyEmail, certificateConfigured, certificateValidated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(company) DO UPDATE SET
          environment=excluded.environment, ruc=excluded.ruc,
          legalName=excluded.legalName, commercialName=excluded.commercialName,
@@ -326,7 +358,8 @@ app.put("/settings/sri/:company", requireUserAdmin, async (req, res) => {
          specialTaxpayerNumber=excluded.specialTaxpayerNumber,
          taxRegime=excluded.taxRegime, senderEmail=excluded.senderEmail,
          adminCopyEmail=excluded.adminCopyEmail,
-         certificateConfigured=excluded.certificateConfigured`,
+         certificateConfigured=excluded.certificateConfigured,
+         certificateValidated=excluded.certificateValidated`,
       [
         company, environment, values.ruc || "", values.legalName || "",
         values.commercialName || "", values.mainAddress || "",
@@ -335,10 +368,62 @@ app.put("/settings/sri/:company", requireUserAdmin, async (req, res) => {
         values.accountingRequired === "SI" ? "SI" : "NO",
         values.specialTaxpayerNumber || "", values.taxRegime || "",
         values.senderEmail || "", values.adminCopyEmail || "",
-        values.certificateConfigured ? 1 : 0
+        certificateConfigured, certificateValidated
       ]
     );
     res.json({ saved: true, environment });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/settings/sri/:company/certificate", requireUserAdmin, async (req, res) => {
+  const { company } = req.params;
+  const { filename, certificateBase64, password } = req.body || {};
+  if (!filename || !/\.(p12|pfx)$/i.test(filename)) {
+    return res.status(400).json({ error: "Selecciona un certificado .p12 o .pfx." });
+  }
+  if (!certificateBase64 || !password) {
+    return res.status(400).json({ error: "El certificado y su contraseña son obligatorios." });
+  }
+
+  try {
+    const certificate = Buffer.from(certificateBase64, "base64");
+    if (!certificate.length || certificate.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ error: "El certificado debe pesar menos de 5 MB." });
+    }
+    const certificateEncrypted = encryptCertificateValue(certificate);
+    const passwordEncrypted = encryptCertificateValue(Buffer.from(password, "utf8"));
+    const installedAt = getETLocalISO();
+    await dbRun(
+      `INSERT INTO sri_certificates
+       (company, filename, certificateEncrypted, passwordEncrypted, installedAt)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(company) DO UPDATE SET filename=excluded.filename,
+         certificateEncrypted=excluded.certificateEncrypted,
+         passwordEncrypted=excluded.passwordEncrypted, installedAt=excluded.installedAt`,
+      [company, path.basename(filename), certificateEncrypted, passwordEncrypted, installedAt]
+    );
+    await dbRun(
+      `INSERT INTO sri_settings (company, certificateConfigured, certificateValidated)
+       VALUES (?, 1, 0)
+       ON CONFLICT(company) DO UPDATE SET certificateConfigured=1, certificateValidated=0, environment='TEST'`,
+      [company]
+    );
+    res.json({ configured: true, validated: false, filename: path.basename(filename), installedAt });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/settings/sri/:company/certificate", requireUserAdmin, async (req, res) => {
+  try {
+    await dbRun("DELETE FROM sri_certificates WHERE company = ?", [req.params.company]);
+    await dbRun(
+      "UPDATE sri_settings SET certificateConfigured = 0, certificateValidated = 0, environment = 'TEST' WHERE company = ?",
+      [req.params.company]
+    );
+    res.json({ removed: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -673,8 +758,11 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
     const establishment = settings?.establishmentCode || "001";
     const emissionPoint = settings?.emissionPoint || "001";
     const invoiceNumber = `${establishment}-${emissionPoint}-${String(sequence).padStart(9, "0")}`;
-    const configured = Boolean(settings?.ruc && settings?.legalName && settings?.mainAddress && settings?.certificateConfigured);
-    const status = configured ? "PENDING_SRI" : "CONFIGURATION_REQUIRED";
+    const issuerConfigured = Boolean(settings?.ruc && settings?.legalName && settings?.mainAddress);
+    const configured = issuerConfigured && Boolean(settings?.certificateValidated);
+    const status = configured
+      ? "PENDING_SRI"
+      : settings?.certificateConfigured ? "CERTIFICATE_PENDING_VALIDATION" : "CONFIGURATION_REQUIRED";
 
     await dbRun("BEGIN IMMEDIATE TRANSACTION");
     const invoice = await dbRun(
@@ -899,6 +987,7 @@ function addColumnIfMissing(table, definition) {
 
 addColumnIfMissing("products", "taxRate REAL DEFAULT 15");
 addColumnIfMissing("sales", "invoiceId INTEGER");
+addColumnIfMissing("sri_settings", "certificateValidated INTEGER DEFAULT 0");
 
 app.delete("/sales/:company/:id", requireUserAdmin, (req, res) => {
   const { company, id } = req.params;
