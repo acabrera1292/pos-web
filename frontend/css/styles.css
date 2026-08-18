@@ -520,6 +520,15 @@ tbody tr.selected-row {
   margin: 6px 0 8px;
 }
 
+.tablet-client-status {
+  margin: 8px 0 12px;
+  padding: 9px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #eef0f3;
+  color: #374151;
+}
+
 .invoice-client-results {
   display: grid;
   gap: 5px;

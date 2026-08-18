@@ -130,6 +130,7 @@
 
         <div id="invoiceClientPanel" class="invoice-client-panel hidden">
           <h3>Datos del cliente</h3>
+          <p id="tabletClientStatus" class="tablet-client-status">Esperando datos desde la tablet...</p>
           <label for="invoiceClientSearch">Buscar por cédula, RUC o nombre</label>
           <input id="invoiceClientSearch" type="text" placeholder="Empieza a escribir..." oninput="searchInvoiceClients()">
           <div id="invoiceClientResults" class="invoice-client-results"></div>
@@ -438,6 +439,8 @@ let multiSaleSelection = false;
 let allClients = [];
 let invoiceType = "CONSUMIDOR_FINAL";
 let selectedInvoiceClient = null;
+let tabletClientPolling = null;
+let tabletClaimInProgress = false;
 let sriCertificateValidated = false;
 let filteredSales = [];
 
@@ -1350,7 +1353,51 @@ function setInvoiceType(type) {
   document.getElementById("btnConsumerFinal").classList.toggle("active", invoiceType === "CONSUMIDOR_FINAL");
   document.getElementById("btnInvoice").classList.toggle("active", invoiceType === "FACTURA");
   document.getElementById("invoiceClientPanel").classList.toggle("hidden", invoiceType !== "FACTURA");
-  if (invoiceType === "FACTURA") loadClients();
+  if (invoiceType === "FACTURA") {
+    loadClients();
+    startTabletClientPolling();
+  } else {
+    stopTabletClientPolling();
+    selectedInvoiceClient = null;
+    const selected = document.getElementById("selectedInvoiceClient");
+    if (selected) selected.classList.add("hidden");
+  }
+}
+
+function startTabletClientPolling() {
+  stopTabletClientPolling();
+  const status = document.getElementById("tabletClientStatus");
+  if (status) status.textContent = selectedInvoiceClient ? "Cliente seleccionado." : "Esperando datos desde la tablet...";
+  if (selectedInvoiceClient) return;
+  claimTabletClient();
+  tabletClientPolling = setInterval(claimTabletClient, 2500);
+}
+
+function stopTabletClientPolling() {
+  if (tabletClientPolling) clearInterval(tabletClientPolling);
+  tabletClientPolling = null;
+}
+
+async function claimTabletClient() {
+  if (invoiceType !== "FACTURA" || selectedInvoiceClient || tabletClaimInProgress) return;
+  tabletClaimInProgress = true;
+  try {
+    const res = await fetch(`${API}/client-intake/claim/${company}`, {
+      method: "POST",
+      headers: authHeaders()
+    });
+    const data = await res.json();
+    if (res.ok && data.client) {
+      allClients = allClients.filter(client => client.id !== data.client.id);
+      allClients.push(data.client);
+      selectInvoiceClient(data.client);
+      alert(`Cliente recibido desde la tablet:\n${data.client.razonSocial}`);
+    }
+  } catch (err) {
+    console.error("Error esperando cliente de tablet:", err);
+  } finally {
+    tabletClaimInProgress = false;
+  }
 }
 
 function searchInvoiceClients() {
@@ -1375,11 +1422,14 @@ function searchInvoiceClients() {
 
 function selectInvoiceClient(client) {
   selectedInvoiceClient = client;
+  stopTabletClientPolling();
   const selected = document.getElementById("selectedInvoiceClient");
   selected.classList.remove("hidden");
   selected.innerHTML = `<strong>${client.razonSocial}</strong><br>${client.idType}: ${client.idNumber}<br>${client.direccion || "Sin dirección"}<br>${client.email || "Sin correo"}`;
   document.getElementById("invoiceClientResults").innerHTML = "";
   document.getElementById("invoiceClientSearch").value = "";
+  const status = document.getElementById("tabletClientStatus");
+  if (status) status.textContent = "Cliente seleccionado para esta factura.";
 }
 
 function toggleQuickClientForm(show) {

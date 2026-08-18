@@ -138,6 +138,16 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
     )
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS client_intake_submissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company TEXT NOT NULL,
+      clientId INTEGER NOT NULL,
+      createdAt TEXT NOT NULL,
+      claimedAt TEXT
+    )
+  `);
+
     db.run(`
     CREATE TABLE IF NOT EXISTS clients (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -537,8 +547,40 @@ app.post("/public/client-intake/:token", async (req, res) => {
         client.nombreComercial, client.ciudad, client.direccion, client.email,
         client.telefono, client.celular]
     );
+    await dbRun(
+      "INSERT INTO client_intake_submissions (company, clientId, createdAt) VALUES (?, ?, ?)",
+      [tokenRow.company, result.lastID, getETLocalISO()]
+    );
     res.json({ saved: true, id: result.lastID });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/client-intake/claim/:company", requireCompanyUser, async (req, res) => {
+  try {
+    await dbRun("BEGIN IMMEDIATE TRANSACTION");
+    const submission = await dbGet(
+      `SELECT id, clientId FROM client_intake_submissions
+       WHERE company = ? AND claimedAt IS NULL ORDER BY id ASC LIMIT 1`,
+      [req.params.company]
+    );
+    if (!submission) {
+      await dbRun("COMMIT");
+      return res.json({ client: null });
+    }
+    await dbRun(
+      "UPDATE client_intake_submissions SET claimedAt = ? WHERE id = ? AND claimedAt IS NULL",
+      [getETLocalISO(), submission.id]
+    );
+    const client = await dbGet(
+      "SELECT * FROM clients WHERE id = ? AND company = ?",
+      [submission.clientId, req.params.company]
+    );
+    await dbRun("COMMIT");
+    res.json({ client });
+  } catch (err) {
+    try { await dbRun("ROLLBACK"); } catch {}
     res.status(500).json({ error: err.message });
   }
 });
