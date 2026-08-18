@@ -191,7 +191,7 @@
         <tbody id="salesBody"></tbody>
       </table>
     </div>
-    <button onclick="loadSales()">Cargar ventas</button>
+    <button onclick="loadSales(true)">Actualizar</button>
     <span id="saleDeleteActions">
       <button id="btnDeleteSale" onclick="deleteSelectedSale()">Eliminar</button>
       <button id="btnDeleteMultipleSales" onclick="deleteMultipleSales()">Eliminar Varios</button>
@@ -419,8 +419,8 @@
       </label>
     </div>
 
-    <button onclick="applyCustomSalesFilter()">Aplicar filtro</button>
-    <button onclick="clearSalesFilter()">Limpiar filtro</button>
+    <button onclick="applyCustomSalesFilter()">Seleccionar fechas</button>
+    <button onclick="clearSalesFilter()">Todas las ventas</button>
     <button onclick="exportSales()">Exportar ventas (CSV)</button>
   </div>
 </aside>
@@ -1647,7 +1647,7 @@ async function finishSale() {
 
 // ------- VENTAS (LISTADO) -------
 
-async function loadSales() {
+async function loadSales(preserveFilter = false) {
   const res = await fetch(`${API}/sales/${company}`);
   const data = await res.json();
 
@@ -1659,6 +1659,10 @@ async function loadSales() {
   allSales = data;
   resetSaleSelection();
 
+  if (preserveFilter) {
+    filterSalesByDate();
+    return;
+  }
   const todayButton = document.querySelector(".sales-quick-filters button");
   setSalesQuickRange("today", todayButton);
 }
@@ -1834,7 +1838,7 @@ async function deleteSelectedSale() {
     return;
   }
 
-  await Promise.all([loadSales(), loadProducts()]);
+  await Promise.all([loadSales(true), loadProducts()]);
 }
 
 async function deleteMultipleSales() {
@@ -1870,7 +1874,7 @@ async function deleteMultipleSales() {
   }
 
   resetSaleSelection();
-  await Promise.all([loadSales(), loadProducts()]);
+  await Promise.all([loadSales(true), loadProducts()]);
 }
 
 function filterSalesByDate() {
