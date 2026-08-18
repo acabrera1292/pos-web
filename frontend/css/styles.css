@@ -853,6 +853,34 @@ td button {
   margin: 2px 0;
 }
 
+.sales-quick-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.right-panel .sales-quick-filters button { display: block; width: 100%; margin: 0; }
+.sales-quick-filters button.active { border-color: #9ca3af; background: #d1d5db; }
+.sales-report-heading { display: flex; justify-content: space-between; margin-top: 14px; }
+.sales-report-heading h3 { margin-top: 0 !important; }
+.sales-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 12px 0 18px; }
+.sales-kpis article { padding: 13px; border: 1px solid #d1d5db; border-radius: 5px; background: #f9fafb; }
+.sales-kpis span { display: block; color: #6b7280; font-size: 12px; }
+.sales-kpis strong { display: block; margin-top: 5px; color: #111827; font-size: 21px; }
+.sales-kpis strong span { display: inline; color: inherit; font-size: inherit; }
+.sales-insights { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr); gap: 18px; }
+.sales-insights > section { min-width: 0; }
+.sales-detail-title { margin-top: 20px !important; padding-top: 14px; border-top: 1px solid #d1d5db; }
+.payment-summary { border: 1px solid #e5e7eb; }
+.payment-summary > div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 10px; border-bottom: 1px solid #e5e7eb; }
+.payment-summary > div:last-child { border-bottom: 0; }
+.payment-summary .empty-table { margin: 0; padding: 16px; }
+
+@media (max-width: 900px) {
+  .sales-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sales-insights { grid-template-columns: 1fr; }
+}
+
 /* --------------------------------------------------
    LOGIN PAGE
 -------------------------------------------------- */

@@ -164,34 +164,38 @@
 <section id="ventas" class="tab-section hidden">
   <div class="app-card">
     <h2>Ventas</h2>
-
-    <div class="table-scroll">
-    <table>
-      <thead>
-        <tr>
-          <th>Fecha</th>
-          <th>Código</th>
-          <th>Nombre</th>
-          <th>Cant.</th>
-          <th>Precio</th>
-          <th>Total</th>
-          <th>Tipo</th>
-        </tr>
-      </thead>
-      <tbody id="salesBody"></tbody>
-    </table>
+    <div class="sales-report-heading">
+      <div><h3>Resumen</h3><p>Rango: <span id="summaryLabel">Sin datos</span></p></div>
+    </div>
+    <div class="sales-kpis">
+      <article><span>Total vendido</span><strong>$<span id="summaryTotal">0.00</span></strong></article>
+      <article><span>Número de ventas</span><strong id="summaryTransactions">0</strong></article>
+      <article><span>Productos vendidos</span><strong id="summaryUnits">0</strong></article>
+      <article><span>Venta promedio</span><strong>$<span id="summaryAverage">0.00</span></strong></article>
+    </div>
+    <div class="sales-insights">
+      <section>
+        <h3>Productos más vendidos</h3>
+        <div class="table-scroll"><table><thead><tr><th>Producto</th><th>Unidades</th><th>Total</th></tr></thead><tbody id="topProductsBody"></tbody></table></div>
+      </section>
+      <section>
+        <h3>Métodos de pago</h3>
+        <div id="paymentSummary" class="payment-summary"></div>
+      </section>
     </div>
 
+    <h3 class="sales-detail-title">Detalle de ventas</h3>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Fecha</th><th>Código</th><th>Nombre</th><th>Cant.</th><th>Precio</th><th>Total</th><th>Tipo</th></tr></thead>
+        <tbody id="salesBody"></tbody>
+      </table>
+    </div>
     <button onclick="loadSales()">Cargar ventas</button>
     <span id="saleDeleteActions">
       <button id="btnDeleteSale" onclick="deleteSelectedSale()">Eliminar</button>
       <button id="btnDeleteMultipleSales" onclick="deleteMultipleSales()">Eliminar Varios</button>
     </span>
-
-    <h3>Resumen</h3>
-    <p>Rango: <span id="summaryLabel">Sin datos</span></p>
-    <p>Total vendido: $<span id="summaryTotal">0.00</span></p>
-    <p>Número de líneas: <span id="summaryCount">0</span></p>
 
   </div>
 </section>
@@ -397,6 +401,13 @@
   <div id="salesFilters" class="filter-group hidden">
     <div class="filter-banner">FILTROS VENTAS</div>
 
+    <div class="sales-quick-filters">
+      <button onclick="setSalesQuickRange('today', this)">Hoy</button>
+      <button onclick="setSalesQuickRange('yesterday', this)">Ayer</button>
+      <button onclick="setSalesQuickRange('week', this)">Últimos 7 días</button>
+      <button onclick="setSalesQuickRange('month', this)">Este mes</button>
+    </div>
+
     <div class="ventas-date-group">
       <label>
         Desde:
@@ -408,7 +419,7 @@
       </label>
     </div>
 
-    <button onclick="filterSalesByDate()">Aplicar filtro</button>
+    <button onclick="applyCustomSalesFilter()">Aplicar filtro</button>
     <button onclick="clearSalesFilter()">Limpiar filtro</button>
     <button onclick="exportSales()">Exportar ventas (CSV)</button>
   </div>
@@ -1648,14 +1659,8 @@ async function loadSales() {
   allSales = data;
   resetSaleSelection();
 
-  // por defecto: filtrar a HOY
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const fromInput = document.getElementById("fromDate");
-  const toInput = document.getElementById("toDate");
-  if (fromInput) fromInput.value = today;
-  if (toInput) toInput.value = today;
-
-  filterSalesByDate();
+  const todayButton = document.querySelector(".sales-quick-filters button");
+  setSalesQuickRange("today", todayButton);
 }
 
 function renderSalesTable(list) {
@@ -1870,11 +1875,9 @@ async function deleteMultipleSales() {
 
 function filterSalesByDate() {
   if (!Array.isArray(allSales) || !allSales.length) {
-    document.getElementById("summaryLabel").innerText = "Sin datos";
-    document.getElementById("summaryTotal").innerText = "0.00";
-    document.getElementById("summaryCount").innerText = "0";
     filteredSales = [];
     renderSalesTable([]);
+    renderSalesReport([], "Sin datos");
     return;
   }
 
@@ -1897,8 +1900,6 @@ function filterSalesByDate() {
     });
   }
 
-  const total = filtered.reduce((sum, s) => sum + Number(s.total || 0), 0);
-
   let label = "Todo";
   if (fromVal || toVal) {
     const fromText = fromVal || "...";
@@ -1907,12 +1908,87 @@ function filterSalesByDate() {
   }
 
   filteredSales = filtered;
-
-  document.getElementById("summaryLabel").innerText = label;
-  document.getElementById("summaryTotal").innerText = total.toFixed(2);
-  document.getElementById("summaryCount").innerText = String(filtered.length);
-
   renderSalesTable(filtered);
+  renderSalesReport(filtered, label);
+}
+
+function salesDateValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function setSalesQuickRange(range, button) {
+  const end = new Date();
+  const start = new Date(end);
+  if (range === "yesterday") {
+    start.setDate(start.getDate() - 1);
+    end.setDate(end.getDate() - 1);
+  } else if (range === "week") {
+    start.setDate(start.getDate() - 6);
+  } else if (range === "month") {
+    start.setDate(1);
+  }
+  document.getElementById("fromDate").value = salesDateValue(start);
+  document.getElementById("toDate").value = salesDateValue(end);
+  document.querySelectorAll(".sales-quick-filters button").forEach(item => item.classList.toggle("active", item === button));
+  filterSalesByDate();
+}
+
+function applyCustomSalesFilter() {
+  document.querySelectorAll(".sales-quick-filters button").forEach(item => item.classList.remove("active"));
+  filterSalesByDate();
+}
+
+function renderSalesReport(list, label) {
+  const total = list.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+  const units = list.reduce((sum, sale) => sum + Number(sale.quantity || 0), 0);
+  const transactionIds = new Set(list.map(sale => sale.invoiceId ? `invoice-${sale.invoiceId}` : `line-${sale.id}`));
+  const transactionCount = transactionIds.size;
+  document.getElementById("summaryLabel").textContent = label;
+  document.getElementById("summaryTotal").textContent = total.toFixed(2);
+  document.getElementById("summaryTransactions").textContent = transactionCount;
+  document.getElementById("summaryUnits").textContent = units;
+  document.getElementById("summaryAverage").textContent = (transactionCount ? total / transactionCount : 0).toFixed(2);
+
+  const products = new Map();
+  list.forEach(sale => {
+    const key = `${sale.code || ""}::${sale.name || "Producto"}`;
+    const item = products.get(key) || { name: sale.name || sale.code || "Producto", units: 0, total: 0 };
+    item.units += Number(sale.quantity || 0);
+    item.total += Number(sale.total || 0);
+    products.set(key, item);
+  });
+  const topBody = document.getElementById("topProductsBody");
+  topBody.innerHTML = "";
+  [...products.values()].sort((a, b) => b.units - a.units || b.total - a.total).slice(0, 5).forEach(item => {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td></td><td></td><td></td>";
+    row.children[0].textContent = item.name;
+    row.children[1].textContent = item.units;
+    row.children[2].textContent = `$${item.total.toFixed(2)}`;
+    topBody.appendChild(row);
+  });
+  if (!topBody.children.length) topBody.innerHTML = '<tr><td colspan="3" class="empty-table">No hay productos en este rango.</td></tr>';
+
+  const payments = new Map();
+  list.forEach(sale => {
+    const type = sale.paymentType || "Efectivo";
+    payments.set(type, (payments.get(type) || 0) + Number(sale.total || 0));
+  });
+  const paymentSummary = document.getElementById("paymentSummary");
+  paymentSummary.innerHTML = "";
+  [...payments.entries()].sort((a, b) => b[1] - a[1]).forEach(([type, amount]) => {
+    const row = document.createElement("div");
+    const labelSpan = document.createElement("span");
+    const amountStrong = document.createElement("strong");
+    labelSpan.textContent = type;
+    amountStrong.textContent = `$${amount.toFixed(2)}`;
+    row.append(labelSpan, amountStrong);
+    paymentSummary.appendChild(row);
+  });
+  if (!paymentSummary.children.length) paymentSummary.innerHTML = '<p class="empty-table">No hay pagos en este rango.</p>';
 }
 
 function clearSalesFilter() {
@@ -1922,17 +1998,13 @@ function clearSalesFilter() {
   if (toInput) toInput.value = "";
 
   filteredSales = allSales;
-
-  const total = allSales.reduce((sum, s) => sum + Number(s.total || 0), 0);
-  document.getElementById("summaryLabel").innerText = "Todo";
-  document.getElementById("summaryTotal").innerText = total.toFixed(2);
-  document.getElementById("summaryCount").innerText = String(allSales.length);
-
+  document.querySelectorAll(".sales-quick-filters button").forEach(item => item.classList.remove("active"));
   renderSalesTable(allSales);
+  renderSalesReport(allSales, "Todo");
 }
 
 function exportSales() {
-  const list = (filteredSales && filteredSales.length) ? filteredSales : allSales;
+  const list = Array.isArray(filteredSales) ? filteredSales : allSales;
 
   if (!list || !list.length) {
     alert("No hay ventas para exportar.");
