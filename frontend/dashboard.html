@@ -23,6 +23,9 @@
       </button>
       <button id="nav-clientes" onclick="showTab('clientes')">
         Clientes</button>
+      <button id="nav-usuarios" onclick="showTab('usuarios')">
+        Usuarios
+      </button>
       <button id="nav-config" onclick="showTab('config')">
         Configuración
       </button>
@@ -251,19 +254,9 @@
 
 </section>
 
-      <!-- TAB: CONFIGURACIÓN -->
-      <section id="config" class="tab-section app-card";">
-        <h2>Configuración</h2>
-
-        <h3>Stock Bajo</h3>
-        <label>
-          Umbral stock bajo:
-          <input id="lowThreshold" type="number" style="width:80px;">
-        </label>
-        <button onclick="saveThreshold()">Guardar umbral</button>
-
-        <hr style="margin:16px 0;">
-
+      <!-- TAB: USUARIOS -->
+      <section id="usuarios" class="tab-section app-card hidden">
+        <h2>Usuarios</h2>
         <h3>Cambiar contraseña</h3>
         <div class="config-form-row">
           <input id="currentPass" type="password" placeholder="Contraseña actual">
@@ -292,6 +285,19 @@
             <button type="button" class="danger-button" onclick="deleteSelectedStoreUser()">Eliminar</button>
           </div>
         </div>
+
+      </section>
+
+      <!-- TAB: CONFIGURACIÓN -->
+      <section id="config" class="tab-section app-card hidden">
+        <h2>Configuración</h2>
+
+        <h3>Stock Bajo</h3>
+        <label>
+          Umbral stock bajo:
+          <input id="lowThreshold" type="number" style="width:80px;">
+        </label>
+        <button onclick="saveThreshold()">Guardar umbral</button>
 
         <div id="sriAdminSettings">
           <hr style="margin:20px 0;">
@@ -484,7 +490,7 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inventario", "pos", "ventas", "clientes", "config"].forEach(id => {
+  ["inventario", "pos", "ventas", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
@@ -492,6 +498,7 @@ function showTab(tabId) {
   // cargar datos según pestaña
   if (tabId === "ventas")   loadSales();
   if (tabId === "clientes") loadClients();
+  if (tabId === "usuarios" && userRole === "Admin") loadStoreUsers();
 
   // actualizar panel derecho
   updateRightPanel(tabId);
