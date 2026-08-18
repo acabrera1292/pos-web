@@ -57,7 +57,12 @@
 
       <section class="license-card">
         <div class="license-section-heading"><div><h2>Tiendas</h2><p id="storeFilterLabel">Todas las tiendas</p></div><input id="storeSearch" placeholder="Buscar tienda" oninput="renderStores()"></div>
-        <div class="table-scroll"><table class="license-table"><thead><tr><th>Tienda</th><th>Estado</th><th>Vencimiento</th><th>Usuarios</th><th>Acciones</th></tr></thead><tbody id="storesBody"></tbody></table></div>
+        <div class="table-scroll"><table class="license-table"><thead><tr><th>Tienda</th><th>Estado</th><th>Vencimiento</th><th>Usuarios</th></tr></thead><tbody id="storesBody"></tbody></table></div>
+        <div class="inventory-actions license-table-actions">
+          <button onclick="editSelectedStoreLicense()">Editar licencia</button>
+          <button id="btnToggleSelectedStore" onclick="toggleSelectedStore()">Activar / Desactivar</button>
+          <button class="danger-button" onclick="deleteSelectedStore()">Eliminar</button>
+        </div>
       </section>
 
       <section class="license-card">
@@ -72,7 +77,11 @@
         <div id="passwordResetPanel" class="password-reset-panel hidden">
           <span id="passwordResetUser"></span><input id="passwordResetValue" type="password" placeholder="Nueva contraseña"><button onclick="resetUserPassword()">Guardar clave</button><button onclick="closePasswordReset()">Cancelar</button>
         </div>
-        <div class="table-scroll"><table class="license-table"><thead><tr><th>Usuario</th><th>Tienda</th><th>Rol</th><th>Acciones</th></tr></thead><tbody id="usersBody"></tbody></table></div>
+        <div class="table-scroll"><table class="license-table"><thead><tr><th>Usuario</th><th>Tienda</th><th>Rol</th></tr></thead><tbody id="usersBody"></tbody></table></div>
+        <div class="inventory-actions license-table-actions">
+          <button onclick="resetSelectedUserPassword()">Cambiar clave</button>
+          <button class="danger-button" onclick="deleteSelectedUser()">Eliminar</button>
+        </div>
       </section>
     </main>
   </div>

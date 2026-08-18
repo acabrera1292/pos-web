@@ -4,6 +4,8 @@ let stores = [];
 let users = [];
 let currentFilter = "all";
 let selectedStore = null;
+let selectedStoreRow = null;
+let selectedUser = null;
 let passwordResetUserId = null;
 
 function getSecret() {
@@ -85,6 +87,9 @@ function setStoreFilter(filter, button) {
 function renderStores() {
   const tbody = document.getElementById("storesBody");
   const search = document.getElementById("storeSearch").value.trim().toLowerCase();
+  selectedStoreRow = null;
+  const toggleButton = document.getElementById("btnToggleSelectedStore");
+  if (toggleButton) toggleButton.textContent = "Activar / Desactivar";
   tbody.innerHTML = "";
   stores.filter(store => {
     const state = storeState(store);
@@ -94,16 +99,40 @@ function renderStores() {
     const days = daysUntil(store.expiresAt);
     const expiration = !store.expiresAt ? "Sin vencimiento" : days < 0 ? `Venció ${store.expiresAt}` : days === 0 ? "Vence hoy" : `${store.expiresAt} (${days} días)`;
     const row = document.createElement("tr");
-    row.innerHTML = `<td><strong></strong></td><td><span class="license-badge ${state}">${stateLabel(state)}</span></td><td></td><td><div class="license-usage"><span>${store.userCount} / ${store.userLimit}</span><progress max="${store.userLimit}" value="${store.userCount}"></progress></div></td><td class="license-actions"></td>`;
+    row.innerHTML = `<td><strong></strong></td><td><span class="license-badge ${state}">${stateLabel(state)}</span></td><td></td><td><div class="license-usage"><span>${store.userCount} / ${store.userLimit}</span><progress max="${store.userLimit}" value="${store.userCount}"></progress></div></td>`;
     row.children[0].querySelector("strong").textContent = store.company;
     row.children[2].textContent = expiration;
-    const edit = document.createElement("button"); edit.textContent = "Editar licencia"; edit.onclick = () => openLicenseEditor(store.company);
-    const toggle = document.createElement("button"); toggle.textContent = store.active ? "Desactivar" : "Activar"; toggle.onclick = () => changeStoreState(store.company, !store.active);
-    const remove = document.createElement("button"); remove.textContent = "Eliminar"; remove.className = "danger-button"; remove.onclick = () => deleteStore(store.company);
-    row.querySelector(".license-actions").append(edit, toggle, remove);
+    row.onclick = () => selectStoreRow(store, row);
     tbody.appendChild(row);
   });
-  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="5" class="empty-table">No hay tiendas en este filtro.</td></tr>';
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="4" class="empty-table">No hay tiendas en este filtro.</td></tr>';
+}
+
+function selectStoreRow(store, row) {
+  selectedStoreRow = store;
+  document.querySelectorAll("#storesBody tr").forEach(item => item.classList.remove("selected-row"));
+  row.classList.add("selected-row");
+  document.getElementById("btnToggleSelectedStore").textContent = store.active ? "Desactivar" : "Activar";
+}
+
+function requireSelectedStore() {
+  if (!selectedStoreRow) alert("Selecciona una tienda de la tabla primero.");
+  return selectedStoreRow;
+}
+
+function editSelectedStoreLicense() {
+  const store = requireSelectedStore();
+  if (store) openLicenseEditor(store.company);
+}
+
+function toggleSelectedStore() {
+  const store = requireSelectedStore();
+  if (store) changeStoreState(store.company, !store.active);
+}
+
+function deleteSelectedStore() {
+  const store = requireSelectedStore();
+  if (store) deleteStore(store.company);
 }
 
 function renderSummary() {
@@ -113,7 +142,7 @@ function renderSummary() {
     ["expiring", "expired", "inactive", "limit"].forEach(filter => {
       if (matchesStoreFilter(store, filter)) counts[filter] += 1;
     });
-    if (store.active && state !== "expired") activeCount += 1;
+    if (store.active && storeState(store) !== "expired") activeCount += 1;
   });
   document.getElementById("summaryStores").textContent = counts.all;
   document.getElementById("summaryActive").textContent = activeCount;
@@ -195,15 +224,33 @@ async function deleteStore(company) {
 }
 
 function renderUsers() {
-  const tbody = document.getElementById("usersBody"); tbody.innerHTML = "";
+  const tbody = document.getElementById("usersBody");
+  selectedUser = null;
+  tbody.innerHTML = "";
   users.forEach(user => {
     const row = document.createElement("tr");
-    row.innerHTML = "<td></td><td></td><td></td><td class=license-actions></td>";
+    row.innerHTML = "<td></td><td></td><td></td>";
     row.children[0].textContent = user.username; row.children[1].textContent = user.company; row.children[2].textContent = user.role || "Admin";
-    const password = document.createElement("button"); password.textContent = "Cambiar clave"; password.onclick = () => openPasswordReset(user);
-    const remove = document.createElement("button"); remove.textContent = "Eliminar"; remove.className = "danger-button"; remove.onclick = () => deleteUser(user.id);
-    row.children[3].append(password, remove); tbody.appendChild(row);
+    row.onclick = () => selectUserRow(user, row);
+    tbody.appendChild(row);
   });
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="3" class="empty-table">No hay usuarios.</td></tr>';
+}
+
+function selectUserRow(user, row) {
+  selectedUser = user;
+  document.querySelectorAll("#usersBody tr").forEach(item => item.classList.remove("selected-row"));
+  row.classList.add("selected-row");
+}
+
+function resetSelectedUserPassword() {
+  if (!selectedUser) return alert("Selecciona un usuario de la tabla primero.");
+  openPasswordReset(selectedUser);
+}
+
+function deleteSelectedUser() {
+  if (!selectedUser) return alert("Selecciona un usuario de la tabla primero.");
+  deleteUser(selectedUser.id);
 }
 
 async function createUser() {
