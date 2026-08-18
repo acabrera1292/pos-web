@@ -36,7 +36,9 @@ db.serialize(() => {
     password TEXT,
     company TEXT,
     role TEXT DEFAULT 'Admin',
-    active INTEGER DEFAULT 1
+    active INTEGER DEFAULT 1,
+    fullName TEXT DEFAULT '',
+    mustChangePassword INTEGER DEFAULT 0
   )
 `);
 
@@ -48,6 +50,17 @@ db.serialize(() => {
       userLimit INTEGER DEFAULT 3,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS password_reset_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId INTEGER NOT NULL,
+      codeHash TEXT NOT NULL,
+      expiresAt TEXT NOT NULL,
+      usedAt TEXT,
+      createdAt TEXT NOT NULL
     )
   `);
 
@@ -194,7 +207,7 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET || "posmaster";
 // ---------- AUTH ----------
 
 // Registro de nueva tienda/usuario (lo usará solo admin.html)
-app.post("/auth/register", async (req, res) => {
+app.post("/auth/register", requireAdmin, async (req, res) => {
   const { username, password, company, role } = req.body;
 
   // Solo 2 roles permitidos, por defecto Admin
@@ -247,11 +260,17 @@ app.post("/auth/login", (req, res) => {
         return res.status(403).json({ error: "La licencia de esta tienda expiró. Contacta al administrador." });
       }
 
+      if (user.mustChangePassword) {
+        const setupToken = jwt.sign({ id: user.id, purpose: "create-password" }, SECRET, { expiresIn: "15m" });
+        return res.json({ passwordChangeRequired: true, setupToken, username: user.username });
+      }
+
       const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: "12h" });
 
       res.json({
         token,
         company: user.company,
+        username: user.username,
         role: user.role || "Admin"
       });
     }
@@ -278,6 +297,22 @@ function dbRun(sql, params = []) {
       else resolve({ lastID: this.lastID, changes: this.changes });
     });
   });
+}
+
+function resetCodeHash(userId, code) {
+  return crypto.createHash("sha256").update(`${userId}:${code}:${SECRET}`).digest("hex");
+}
+
+async function sendTransactionalEmail(to, subject, html) {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  const from = process.env.SENDGRID_FROM_EMAIL || process.env.EMAIL_FROM;
+  if (!apiKey || !from) throw new Error("Configura SENDGRID_API_KEY y SENDGRID_FROM_EMAIL en Render.");
+  const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ personalizations: [{ to: [{ email: to }] }], from: { email: from, name: "POS Simple" }, subject, content: [{ type: "text/html", value: html }] })
+  });
+  if (!response.ok) throw new Error(`SendGrid rechazó el correo (${response.status}).`);
 }
 
 function money(value) {
@@ -391,6 +426,17 @@ app.get("/settings/sri/:company", requireCompanyUser, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+for (const migration of [
+  "ALTER TABLE users ADD COLUMN fullName TEXT DEFAULT ''",
+  "ALTER TABLE users ADD COLUMN mustChangePassword INTEGER DEFAULT 0"
+]) {
+  db.run(migration, err => {
+    if (err && !String(err.message).includes("duplicate column")) {
+      console.error("Error actualizando users:", err.message);
+    }
+  });
+}
 
 app.put("/settings/sri/:company", requireUserAdmin, async (req, res) => {
   const { company } = req.params;
@@ -653,6 +699,7 @@ app.delete("/admin/tiendas/:company", requireAdmin, async (req, res) => {
     "sri_settings", "invoices", "clients", "sales", "products", "users", "store_licenses"];
   try {
     await dbRun("BEGIN IMMEDIATE TRANSACTION");
+    await dbRun("DELETE FROM password_reset_codes WHERE userId IN (SELECT id FROM users WHERE company = ?)", [company]);
     for (const table of tables) await dbRun(`DELETE FROM ${table} WHERE company = ?`, [company]);
     await dbRun("COMMIT");
     res.json({ ok: true });
@@ -666,7 +713,7 @@ app.delete("/admin/tiendas/:company", requireAdmin, async (req, res) => {
 app.get("/admin/usuarios", requireAdmin, (req, res) => {
   db.all(
     `
-    SELECT id, username, company, role, active
+    SELECT id, username, fullName, company, role, active, mustChangePassword
     FROM users
     ORDER BY company, username
     `,
@@ -680,7 +727,10 @@ app.get("/admin/usuarios", requireAdmin, (req, res) => {
 
 // Crear usuario para una tienda
 app.post("/admin/usuarios", requireAdmin, async (req, res) => {
-  const { username, password, company, role } = req.body;
+  const { username, password, company, role, fullName } = req.body;
+  if (!String(fullName || "").trim() || !/^\S+@\S+\.\S+$/.test(String(username || "").trim()) || String(password || "").length < 8) {
+    return res.status(400).json({ error: "Completa el nombre, un correo válido y una contraseña temporal de al menos 8 caracteres." });
+  }
 
   try {
     const license = await dbGet("SELECT * FROM store_licenses WHERE company = ?", [company]);
@@ -692,10 +742,10 @@ app.post("/admin/usuarios", requireAdmin, async (req, res) => {
 
     db.run(
       `
-      INSERT INTO users (username, password, company, role, active)
-      VALUES (?, ?, ?, ?, 1)
+      INSERT INTO users (username, password, company, role, active, fullName, mustChangePassword)
+      VALUES (?, ?, ?, ?, 1, ?, 1)
       `,
-      [username, hashed, company, role || "Admin"],
+      [String(username).trim().toLowerCase(), hashed, company, role === "Usuario" ? "Usuario" : "Admin", String(fullName || "").trim()],
       function (err) {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ id: this.lastID });
@@ -708,9 +758,12 @@ app.post("/admin/usuarios", requireAdmin, async (req, res) => {
 
 // Eliminar usuario
 app.delete("/admin/usuarios/:id", requireAdmin, (req, res) => {
-  db.run("DELETE FROM users WHERE id = ?", [req.params.id], function (err) {
+  db.run("DELETE FROM password_reset_codes WHERE userId = ?", [req.params.id], err => {
+    if (err) return res.status(500).json({ error: err.message });
+    db.run("DELETE FROM users WHERE id = ?", [req.params.id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ deleted: this.changes });
+    });
   });
 });
 
@@ -722,6 +775,7 @@ app.post("/auth/change-password", (req, res) => {
   if (!username || !oldPassword || !newPassword) {
     return res.status(400).json({ error: "Datos incompletos." });
   }
+  if (String(newPassword).length < 8) return res.status(400).json({ error: "La nueva contraseña debe tener al menos 8 caracteres." });
 
   // Solo para depurar: ver qué llega
   console.log("POST /auth/change-password", username);
@@ -749,7 +803,7 @@ app.post("/auth/change-password", (req, res) => {
       try {
         const hashed = await bcrypt.hash(newPassword, 10);
         db.run(
-          "UPDATE users SET password = ? WHERE id = ?",
+          "UPDATE users SET password = ?, mustChangePassword = 0 WHERE id = ?",
           [hashed, user.id],
           function (err2) {
             if (err2) {
@@ -1016,10 +1070,10 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
 
 app.put("/admin/usuarios/:id/password", requireAdmin, async (req, res) => {
   const password = String(req.body.password || "");
-  if (password.length < 6) return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres." });
+  if (password.length < 8) return res.status(400).json({ error: "La contraseña temporal debe tener al menos 8 caracteres." });
   try {
     const hashed = await bcrypt.hash(password, 10);
-    const result = await dbRun("UPDATE users SET password = ? WHERE id = ?", [hashed, req.params.id]);
+    const result = await dbRun("UPDATE users SET password = ?, mustChangePassword = 1 WHERE id = ?", [hashed, req.params.id]);
     if (!result.changes) return res.status(404).json({ error: "Usuario no encontrado." });
     res.json({ updated: true });
   } catch (err) {
@@ -1028,8 +1082,8 @@ app.put("/admin/usuarios/:id/password", requireAdmin, async (req, res) => {
 });
 
 app.post("/admin/tiendas", requireAdmin, async (req, res) => {
-  const { company, username, password, expiresAt, userLimit } = req.body;
-  if (!company || !username || !password) return res.status(400).json({ error: "Tienda, usuario inicial y contraseña son obligatorios." });
+  const { company, username, password, expiresAt, userLimit, fullName } = req.body;
+  if (!company || !String(fullName || "").trim() || !/^\S+@\S+\.\S+$/.test(String(username || "").trim()) || String(password || "").length < 8) return res.status(400).json({ error: "Completa tienda, nombre del Admin, correo válido y contraseña temporal de al menos 8 caracteres." });
   const limit = Math.max(1, Number(userLimit) || 1);
   const now = getETLocalISO();
   try {
@@ -1037,12 +1091,95 @@ app.post("/admin/tiendas", requireAdmin, async (req, res) => {
     if (existing) return res.status(409).json({ error: "La tienda o el usuario ya existe." });
     const hashed = await bcrypt.hash(password, 10);
     await dbRun("BEGIN IMMEDIATE TRANSACTION");
-    const user = await dbRun("INSERT INTO users (username, password, company, role, active) VALUES (?, ?, ?, 'Admin', 1)", [username, hashed, company]);
+    const user = await dbRun("INSERT INTO users (username, password, company, role, active, fullName, mustChangePassword) VALUES (?, ?, ?, 'Admin', 1, ?, 1)", [String(username).trim().toLowerCase(), hashed, company, String(fullName || "").trim()]);
     await dbRun("INSERT INTO store_licenses (company, active, expiresAt, userLimit, createdAt, updatedAt) VALUES (?, 1, ?, ?, ?, ?)", [company, expiresAt || null, limit, now, now]);
     await dbRun("COMMIT");
     res.json({ id: user.lastID, company });
   } catch (err) {
     try { await dbRun("ROLLBACK"); } catch {}
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/store/users", requireUserAdmin, async (req, res) => {
+  try {
+    const rows = await new Promise((resolve, reject) => db.all(
+      "SELECT id, username, fullName, role, active, mustChangePassword FROM users WHERE company = ? ORDER BY fullName, username",
+      [req.user.company], (err, data) => err ? reject(err) : resolve(data)
+    ));
+    const license = await dbGet("SELECT userLimit FROM store_licenses WHERE company = ?", [req.user.company]);
+    res.json({ users: rows, userLimit: Number(license?.userLimit || 1), currentUserId: req.user.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/store/users", requireUserAdmin, async (req, res) => {
+  const username = String(req.body.username || "").trim().toLowerCase();
+  const fullName = String(req.body.fullName || "").trim();
+  const password = String(req.body.password || "");
+  const role = req.body.role === "Usuario" ? "Usuario" : "Admin";
+  if (!fullName || !/^\S+@\S+\.\S+$/.test(username) || password.length < 8) {
+    return res.status(400).json({ error: "Completa el nombre, un correo válido y una contraseña temporal de al menos 8 caracteres." });
+  }
+  try {
+    const license = await dbGet("SELECT * FROM store_licenses WHERE company = ?", [req.user.company]);
+    const count = await dbGet("SELECT COUNT(*) AS total FROM users WHERE company = ?", [req.user.company]);
+    if (license && count.total >= license.userLimit) {
+      return res.status(409).json({ error: "Has alcanzado el límite de tu licencia. Contacta a POS Simple para comprar usuarios adicionales." });
+    }
+    const hashed = await bcrypt.hash(password, 10);
+    const result = await dbRun("INSERT INTO users (username, password, company, role, active, fullName, mustChangePassword) VALUES (?, ?, ?, ?, 1, ?, 1)", [username, hashed, req.user.company, role, fullName]);
+    res.json({ id: result.lastID });
+  } catch (err) {
+    const duplicate = String(err.message).includes("UNIQUE");
+    res.status(duplicate ? 409 : 500).json({ error: duplicate ? "Ese correo ya está registrado." : err.message });
+  }
+});
+
+app.put("/store/users/:id/temporary-password", requireUserAdmin, async (req, res) => {
+  const password = String(req.body.password || "");
+  if (password.length < 8) return res.status(400).json({ error: "La contraseña temporal debe tener al menos 8 caracteres." });
+  try {
+    const hashed = await bcrypt.hash(password, 10);
+    const result = await dbRun("UPDATE users SET password = ?, mustChangePassword = 1 WHERE id = ? AND company = ?", [hashed, req.params.id, req.user.company]);
+    if (!result.changes) return res.status(404).json({ error: "Usuario no encontrado." });
+    res.json({ updated: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/store/users/:id/role", requireUserAdmin, async (req, res) => {
+  const role = req.body.role === "Usuario" ? "Usuario" : "Admin";
+  try {
+    const target = await dbGet("SELECT id, role FROM users WHERE id = ? AND company = ?", [req.params.id, req.user.company]);
+    if (!target) return res.status(404).json({ error: "Usuario no encontrado." });
+    if (target.role === "Admin" && role === "Usuario") {
+      const admins = await dbGet("SELECT COUNT(*) AS total FROM users WHERE company = ? AND role = 'Admin'", [req.user.company]);
+      if (admins.total <= 1) return res.status(400).json({ error: "La tienda debe conservar al menos un administrador." });
+    }
+    await dbRun("UPDATE users SET role = ? WHERE id = ? AND company = ?", [role, req.params.id, req.user.company]);
+    res.json({ updated: true, role });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/store/users/:id", requireUserAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (id === req.user.id) return res.status(400).json({ error: "No puedes eliminar tu propia cuenta." });
+  try {
+    const target = await dbGet("SELECT role FROM users WHERE id = ? AND company = ?", [id, req.user.company]);
+    if (!target) return res.status(404).json({ error: "Usuario no encontrado." });
+    if (target.role === "Admin") {
+      const admins = await dbGet("SELECT COUNT(*) AS total FROM users WHERE company = ? AND role = 'Admin'", [req.user.company]);
+      if (admins.total <= 1) return res.status(400).json({ error: "La tienda debe conservar al menos un administrador." });
+    }
+    await dbRun("DELETE FROM password_reset_codes WHERE userId = ?", [id]);
+    await dbRun("DELETE FROM users WHERE id = ? AND company = ?", [id, req.user.company]);
+    res.json({ deleted: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -1298,6 +1435,63 @@ app.delete("/sales/:company/:id", requireUserAdmin, (req, res) => {
       });
     }
   );
+});
+
+app.post("/auth/create-password", async (req, res) => {
+  const password = String(req.body.password || "");
+  if (password.length < 8) return res.status(400).json({ error: "La contraseña debe tener al menos 8 caracteres." });
+  try {
+    const payload = jwt.verify(String(req.body.setupToken || ""), SECRET);
+    if (payload.purpose !== "create-password") throw new Error("invalid purpose");
+    const hashed = await bcrypt.hash(password, 10);
+    const result = await dbRun("UPDATE users SET password = ?, mustChangePassword = 0 WHERE id = ? AND mustChangePassword = 1", [hashed, payload.id]);
+    if (!result.changes) return res.status(400).json({ error: "Esta contraseña ya fue creada. Inicia sesión nuevamente." });
+    res.json({ updated: true });
+  } catch {
+    res.status(400).json({ error: "La sesión para crear la contraseña expiró. Inicia sesión nuevamente." });
+  }
+});
+
+app.post("/auth/forgot-password", async (req, res) => {
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const generic = { sent: true, message: "Si el correo está registrado, recibirás un código en unos minutos." };
+  try {
+    const user = await dbGet("SELECT id, username FROM users WHERE lower(username) = ? AND active = 1", [email]);
+    if (!user) return res.json(generic);
+    const code = String(crypto.randomInt(100000, 1000000));
+    const now = new Date();
+    const expires = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+    await dbRun("UPDATE password_reset_codes SET usedAt = ? WHERE userId = ? AND usedAt IS NULL", [now.toISOString(), user.id]);
+    await dbRun("INSERT INTO password_reset_codes (userId, codeHash, expiresAt, createdAt) VALUES (?, ?, ?, ?)", [user.id, resetCodeHash(user.id, code), expires, now.toISOString()]);
+    await sendTransactionalEmail(user.username, "Código para restablecer tu contraseña", `<div style="font-family:Arial,sans-serif"><h2>POS Simple</h2><p>Tu código para restablecer la contraseña es:</p><p style="font-size:30px;font-weight:bold;letter-spacing:6px">${code}</p><p>Este código vence en 15 minutos. Si no lo solicitaste, ignora este correo.</p></div>`);
+    res.json(generic);
+  } catch (err) {
+    console.error("No se pudo enviar recuperación:", err.message);
+    res.status(503).json({ error: "No se pudo enviar el código en este momento. Intenta nuevamente." });
+  }
+});
+
+app.post("/auth/reset-password", async (req, res) => {
+  const email = String(req.body.email || "").trim().toLowerCase();
+  const code = String(req.body.code || "").trim();
+  const password = String(req.body.password || "");
+  if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: "Ingresa el código de 6 dígitos." });
+  if (password.length < 8) return res.status(400).json({ error: "La contraseña debe tener al menos 8 caracteres." });
+  try {
+    const user = await dbGet("SELECT id FROM users WHERE lower(username) = ? AND active = 1", [email]);
+    if (!user) return res.status(400).json({ error: "El código no es válido o ya expiró." });
+    const reset = await dbGet("SELECT * FROM password_reset_codes WHERE userId = ? AND codeHash = ? AND usedAt IS NULL ORDER BY id DESC LIMIT 1", [user.id, resetCodeHash(user.id, code)]);
+    if (!reset || reset.expiresAt < new Date().toISOString()) return res.status(400).json({ error: "El código no es válido o ya expiró." });
+    const hashed = await bcrypt.hash(password, 10);
+    await dbRun("BEGIN IMMEDIATE TRANSACTION");
+    await dbRun("UPDATE users SET password = ?, mustChangePassword = 0 WHERE id = ?", [hashed, user.id]);
+    await dbRun("UPDATE password_reset_codes SET usedAt = ? WHERE id = ?", [new Date().toISOString(), reset.id]);
+    await dbRun("COMMIT");
+    res.json({ updated: true });
+  } catch (err) {
+    try { await dbRun("ROLLBACK"); } catch {}
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.put("/admin/tiendas/:company/licencia", requireAdmin, async (req, res) => {

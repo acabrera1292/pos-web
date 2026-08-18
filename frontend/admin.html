@@ -37,6 +37,7 @@
         <div class="license-section-heading"><div><h2>Nueva tienda</h2><p>Crea la licencia y el primer usuario Admin.</p></div></div>
         <div class="license-form-grid">
           <label>Tienda <input id="newStore" placeholder="Nombre de la tienda"></label>
+          <label>Nombre del Admin <input id="newAdminName" placeholder="Nombre completo"></label>
           <label>Admin inicial <input id="newEmail" type="email" placeholder="correo@tienda.com"></label>
           <label>Contraseña inicial <input id="newPassword" type="password"></label>
           <label>Vencimiento <input id="newExpiration" type="date"></label>
@@ -69,6 +70,7 @@
         <div class="license-section-heading"><div><h2>Usuarios</h2><p>Crea y administra cuentas dentro de sus licencias.</p></div></div>
         <div class="license-form-grid user-create-grid">
           <label>Tienda <select id="storeSelect"></select></label>
+          <label>Nombre <input id="userFullName"></label>
           <label>Correo / Usuario <input id="userEmail"></label>
           <label>Contraseña <input id="userPass" type="password"></label>
           <label>Rol <select id="userRole"><option value="Admin">Admin</option><option value="Usuario">Usuario</option></select></label>
@@ -77,7 +79,11 @@
         <div id="passwordResetPanel" class="password-reset-panel hidden">
           <span id="passwordResetUser"></span><input id="passwordResetValue" type="password" placeholder="Nueva contraseña"><button onclick="resetUserPassword()">Guardar clave</button><button onclick="closePasswordReset()">Cancelar</button>
         </div>
-        <div class="table-scroll"><table class="license-table"><thead><tr><th>Usuario</th><th>Tienda</th><th>Rol</th></tr></thead><tbody id="usersBody"></tbody></table></div>
+        <div class="license-user-filters">
+          <select id="userStoreFilter" onchange="renderUsers()"><option value="">Todas las tiendas</option></select>
+          <input id="userSearch" placeholder="Buscar por nombre o correo" oninput="renderUsers()">
+        </div>
+        <div class="table-scroll"><table class="license-table"><thead><tr><th>Nombre</th><th>Usuario</th><th>Tienda</th><th>Rol</th></tr></thead><tbody id="usersBody"></tbody></table></div>
         <div class="inventory-actions license-table-actions">
           <button onclick="resetSelectedUserPassword()">Cambiar clave</button>
           <button class="danger-button" onclick="deleteSelectedUser()">Eliminar</button>

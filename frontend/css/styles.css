@@ -709,6 +709,11 @@ tbody tr.selected-row {
 .license-summary article { padding: 16px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
 .license-summary span { display: block; color: #6b7280; }
 .license-summary strong { display: block; margin-top: 5px; font-size: 26px; }
+.license-user-filters { display: grid; grid-template-columns: minmax(180px, 260px) minmax(220px, 1fr); gap: 10px; margin: 14px 0 10px; }
+.user-create-grid { grid-template-columns: repeat(3, minmax(160px, 1fr)); }
+.store-user-form { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)) auto; gap: 10px; align-items: end; margin: 12px 0; }
+.store-user-form label { display: grid; gap: 5px; }
+.store-user-search { width: min(420px, 100%); margin: 8px 0 10px; }
 .license-card { margin-bottom: 16px; padding: 18px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
 .license-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .license-section-heading h2 { margin: 0; font-size: 18px; }
@@ -919,6 +924,19 @@ body.login-page {
   background-color: #3bab5a;
 }
 
+.login-card .login-link-button {
+  border: 0;
+  background: transparent;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: underline;
+}
+.login-card .login-link-button:hover { background: transparent; color: #111827; }
+.login-help { margin: 0 0 14px; color: #4b5563; font-size: 13px; line-height: 1.4; }
+.app-dialog-message-area { flex: 1; min-width: 0; }
+.app-dialog-input { width: 100%; margin-top: 10px; }
+
 /* Make all table borders light gray */
 table,
 table th,
@@ -940,6 +958,7 @@ tbody td {
 -------------------------------------------------- */
 
 @media (max-width: 900px) {
+  .store-user-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .app-shell {
     grid-template-columns: 200px 1fr;
   }
@@ -949,6 +968,8 @@ tbody td {
 }
 
 @media (max-width: 700px) {
+  .store-user-form,
+  .license-user-filters { grid-template-columns: 1fr; }
   .app-shell {
     grid-template-columns: 1fr;
   }

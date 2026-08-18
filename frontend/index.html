@@ -7,7 +7,7 @@
 </head>
 <body class="login-page">
 
-  <div class="login-card">
+  <div id="loginPanel" class="login-card">
     <h2>Iniciar Sesión</h2>
 
     <div class="field">
@@ -21,10 +21,37 @@
     </div>
 
     <button onclick="login()">Entrar</button>
+    <button class="login-link-button" onclick="showForgotPassword()">¿Olvidaste tu contraseña?</button>
 
     <p style="font-size:12px; color:#6b7280; margin-top:10px;">
       Si no tienes acceso, contacta a tu administrador para que te cree una cuenta.
     </p>
+  </div>
+
+  <div id="createPasswordPanel" class="login-card hidden">
+    <h2>Crea tu contraseña</h2>
+    <p class="login-help">La contraseña que recibiste era temporal. Crea una contraseña personal para continuar.</p>
+    <div class="field"><label for="createPass">Nueva contraseña</label><input id="createPass" type="password" autocomplete="new-password"></div>
+    <div class="field"><label for="createPass2">Confirmar contraseña</label><input id="createPass2" type="password" autocomplete="new-password"></div>
+    <button onclick="createPassword()">Crear contraseña</button>
+  </div>
+
+  <div id="forgotPanel" class="login-card hidden">
+    <h2>Recuperar contraseña</h2>
+    <p class="login-help">Escribe el correo registrado y te enviaremos un código de 6 dígitos.</p>
+    <div class="field"><label for="forgotEmail">Correo electrónico</label><input id="forgotEmail" type="email" autocomplete="email"></div>
+    <button onclick="sendResetCode()">Enviar código</button>
+    <button class="login-link-button" onclick="showLogin()">Volver al inicio</button>
+  </div>
+
+  <div id="resetPanel" class="login-card hidden">
+    <h2>Escribe el código</h2>
+    <p class="login-help">El código vence en 15 minutos.</p>
+    <div class="field"><label for="resetCode">Código</label><input id="resetCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div>
+    <div class="field"><label for="resetPass">Nueva contraseña</label><input id="resetPass" type="password" autocomplete="new-password"></div>
+    <div class="field"><label for="resetPass2">Confirmar contraseña</label><input id="resetPass2" type="password" autocomplete="new-password"></div>
+    <button onclick="resetPassword()">Guardar contraseña</button>
+    <button class="login-link-button" onclick="sendResetCode()">Enviar otro código</button>
   </div>
 
   <script src="js/dialogs.js"></script>

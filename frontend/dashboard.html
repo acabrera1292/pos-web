@@ -272,6 +272,27 @@
           <button onclick="changePassword()">Guardar nueva contraseña</button>
         </div>
 
+        <div id="storeUserAdminSettings">
+          <hr style="margin:20px 0;">
+          <h3>Usuarios de la tienda</h3>
+          <p class="settings-note">Crea cuentas con una contraseña temporal. En su primer acceso, cada persona deberá crear su propia contraseña.</p>
+          <p id="storeUserLicenseStatus" class="settings-note"></p>
+          <div class="store-user-form">
+            <label>Nombre <input id="storeUserName" autocomplete="name"></label>
+            <label>Correo <input id="storeUserEmail" type="email" autocomplete="email"></label>
+            <label>Contraseña temporal <input id="storeUserTemporaryPassword" type="password" autocomplete="new-password"></label>
+            <label>Rol <select id="storeUserRole"><option value="Usuario">Usuario</option><option value="Admin">Admin</option></select></label>
+            <button type="button" onclick="createStoreUser()">Agregar usuario</button>
+          </div>
+          <input id="storeUserSearch" class="store-user-search" placeholder="Buscar por nombre o correo" oninput="renderStoreUsers()">
+          <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th></tr></thead><tbody id="storeUsersBody"></tbody></table></div>
+          <div class="inventory-actions">
+            <button type="button" onclick="changeSelectedStoreUserRole()">Cambiar rol</button>
+            <button type="button" onclick="setSelectedStoreUserTemporaryPassword()">Contraseña temporal</button>
+            <button type="button" class="danger-button" onclick="deleteSelectedStoreUser()">Eliminar</button>
+          </div>
+        </div>
+
         <div id="sriAdminSettings">
           <hr style="margin:20px 0;">
           <h3>Facturación Electrónica SRI</h3>
@@ -417,9 +438,12 @@ window.addEventListener("DOMContentLoaded", () => {
   }
   const sriAdminSettings = document.getElementById("sriAdminSettings");
   if (sriAdminSettings) sriAdminSettings.style.display = userRole === "Admin" ? "block" : "none";
+  const storeUserAdminSettings = document.getElementById("storeUserAdminSettings");
+  if (storeUserAdminSettings) storeUserAdminSettings.style.display = userRole === "Admin" ? "block" : "none";
   if (userRole === "Admin") {
     loadSriSettings();
     loadClientIntakeStatus();
+    loadStoreUsers();
   }
   const clientImportAdminOnly = document.getElementById("clientImportAdminOnly");
   if (clientImportAdminOnly) clientImportAdminOnly.style.display = userRole === "Admin" ? "block" : "none";
@@ -443,6 +467,10 @@ let tabletClientPolling = null;
 let tabletClaimInProgress = false;
 let sriCertificateValidated = false;
 let filteredSales = [];
+let storeUsers = [];
+let selectedStoreUser = null;
+let currentStoreUserId = null;
+let storeUserLimit = 0;
 
 
 // --- NUEVO showTab para layout + filtros ---
@@ -1641,6 +1669,91 @@ function renderSalesTable(list) {
       </tr>
     `;
   });
+}
+
+async function loadStoreUsers() {
+  if (userRole !== "Admin") return;
+  const res = await fetch(`${API}/store/users`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudieron cargar los usuarios.");
+  storeUsers = data.users || [];
+  currentStoreUserId = data.currentUserId;
+  storeUserLimit = data.userLimit;
+  selectedStoreUser = null;
+  document.getElementById("storeUserLicenseStatus").textContent = `${storeUsers.length} de ${storeUserLimit} usuarios disponibles en tu licencia.`;
+  renderStoreUsers();
+}
+
+function renderStoreUsers() {
+  const tbody = document.getElementById("storeUsersBody");
+  if (!tbody) return;
+  const search = document.getElementById("storeUserSearch").value.trim().toLowerCase();
+  selectedStoreUser = null;
+  tbody.innerHTML = "";
+  storeUsers.filter(user => !search || `${user.fullName || ""} ${user.username}`.toLowerCase().includes(search)).forEach(user => {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td></td><td></td><td></td><td></td>";
+    row.children[0].textContent = user.fullName || "—";
+    row.children[1].textContent = user.username;
+    row.children[2].textContent = user.role;
+    row.children[3].textContent = user.mustChangePassword ? "Pendiente de crear contraseña" : "Activo";
+    row.onclick = () => {
+      selectedStoreUser = user;
+      tbody.querySelectorAll("tr").forEach(item => item.classList.remove("selected-row"));
+      row.classList.add("selected-row");
+    };
+    tbody.appendChild(row);
+  });
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="4" class="empty-table">No hay usuarios con esa búsqueda.</td></tr>';
+}
+
+async function createStoreUser() {
+  const payload = {
+    fullName: document.getElementById("storeUserName").value.trim(),
+    username: document.getElementById("storeUserEmail").value.trim(),
+    password: document.getElementById("storeUserTemporaryPassword").value,
+    role: document.getElementById("storeUserRole").value
+  };
+  const res = await fetch(`${API}/store/users`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo crear el usuario.");
+  ["storeUserName", "storeUserEmail", "storeUserTemporaryPassword"].forEach(id => document.getElementById(id).value = "");
+  await loadStoreUsers();
+  alert("Usuario creado. Envíale su correo y contraseña temporal.");
+}
+
+async function setSelectedStoreUserTemporaryPassword() {
+  if (!selectedStoreUser) return alert("Selecciona un usuario de la tabla primero.");
+  const password = await appPrompt(`Escribe una contraseña temporal para ${selectedStoreUser.username}:`, "", { inputType: "password" });
+  if (password === null) return;
+  const res = await fetch(`${API}/store/users/${selectedStoreUser.id}/temporary-password`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo asignar la contraseña temporal.");
+  await loadStoreUsers();
+  alert("Contraseña temporal asignada. El usuario deberá crear una nueva al iniciar sesión.");
+}
+
+async function changeSelectedStoreUserRole() {
+  if (!selectedStoreUser) return alert("Selecciona un usuario de la tabla primero.");
+  const isCurrentUser = selectedStoreUser.id === currentStoreUserId;
+  const role = selectedStoreUser.role === "Admin" ? "Usuario" : "Admin";
+  if (!await appConfirm(`¿Cambiar a ${selectedStoreUser.fullName || selectedStoreUser.username} al rol ${role}?`)) return;
+  const res = await fetch(`${API}/store/users/${selectedStoreUser.id}/role`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ role }) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cambiar el rol.");
+  if (isCurrentUser) localStorage.setItem("role", role);
+  if (isCurrentUser && role === "Usuario") return location.reload();
+  await loadStoreUsers();
+}
+
+async function deleteSelectedStoreUser() {
+  if (!selectedStoreUser) return alert("Selecciona un usuario de la tabla primero.");
+  if (selectedStoreUser.id === currentStoreUserId) return alert("No puedes eliminar tu propia cuenta.");
+  if (!await appConfirm(`¿Eliminar a ${selectedStoreUser.fullName || selectedStoreUser.username}?`)) return;
+  const res = await fetch(`${API}/store/users/${selectedStoreUser.id}`, { method: "DELETE", headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo eliminar el usuario.");
+  await loadStoreUsers();
 }
 
 function authHeaders() {

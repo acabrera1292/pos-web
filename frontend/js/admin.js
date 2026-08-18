@@ -157,19 +157,30 @@ function renderSummary() {
 
 function fillStoreSelect() {
   const select = document.getElementById("storeSelect");
+  const filter = document.getElementById("userStoreFilter");
+  const selectedFilter = filter ? filter.value : "";
   select.innerHTML = "";
+  if (filter) filter.innerHTML = '<option value="">Todas las tiendas</option>';
   stores.forEach(store => {
     const option = document.createElement("option");
     option.value = store.company;
     option.textContent = `${store.company} (${store.userCount}/${store.userLimit})`;
     option.disabled = storeState(store) !== "active";
     select.appendChild(option);
+    if (filter) {
+      const filterOption = document.createElement("option");
+      filterOption.value = store.company;
+      filterOption.textContent = store.company;
+      filter.appendChild(filterOption);
+    }
   });
+  if (filter && stores.some(store => store.company === selectedFilter)) filter.value = selectedFilter;
 }
 
 async function createStore() {
   const payload = {
     company: document.getElementById("newStore").value.trim(),
+    fullName: document.getElementById("newAdminName").value.trim(),
     username: document.getElementById("newEmail").value.trim(),
     password: document.getElementById("newPassword").value,
     expiresAt: document.getElementById("newExpiration").value || null,
@@ -179,7 +190,7 @@ async function createStore() {
   const res = await fetch(adminUrl("/admin/tiendas"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudo crear la tienda.");
-  ["newStore", "newEmail", "newPassword", "newExpiration"].forEach(id => document.getElementById(id).value = "");
+  ["newStore", "newAdminName", "newEmail", "newPassword", "newExpiration"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("newUserLimit").value = "3";
   await loadAll();
   alert("Tienda y licencia creadas.");
@@ -225,16 +236,18 @@ async function deleteStore(company) {
 
 function renderUsers() {
   const tbody = document.getElementById("usersBody");
+  const companyFilter = document.getElementById("userStoreFilter")?.value || "";
+  const search = document.getElementById("userSearch")?.value.trim().toLowerCase() || "";
   selectedUser = null;
   tbody.innerHTML = "";
-  users.forEach(user => {
+  users.filter(user => (!companyFilter || user.company === companyFilter) && (!search || `${user.fullName || ""} ${user.username}`.toLowerCase().includes(search))).forEach(user => {
     const row = document.createElement("tr");
-    row.innerHTML = "<td></td><td></td><td></td>";
-    row.children[0].textContent = user.username; row.children[1].textContent = user.company; row.children[2].textContent = user.role || "Admin";
+    row.innerHTML = "<td></td><td></td><td></td><td></td>";
+    row.children[0].textContent = user.fullName || "—"; row.children[1].textContent = user.username; row.children[2].textContent = user.company; row.children[3].textContent = user.role || "Admin";
     row.onclick = () => selectUserRow(user, row);
     tbody.appendChild(row);
   });
-  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="3" class="empty-table">No hay usuarios.</td></tr>';
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="4" class="empty-table">No hay usuarios con esos filtros.</td></tr>';
 }
 
 function selectUserRow(user, row) {
@@ -254,12 +267,12 @@ function deleteSelectedUser() {
 }
 
 async function createUser() {
-  const payload = { company: document.getElementById("storeSelect").value, username: document.getElementById("userEmail").value.trim(), password: document.getElementById("userPass").value, role: document.getElementById("userRole").value };
+  const payload = { company: document.getElementById("storeSelect").value, fullName: document.getElementById("userFullName").value.trim(), username: document.getElementById("userEmail").value.trim(), password: document.getElementById("userPass").value, role: document.getElementById("userRole").value };
   if (!payload.company || !payload.username || !payload.password) return alert("Selecciona tienda y completa usuario y contraseña.");
   const res = await fetch(adminUrl("/admin/usuarios"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudo crear el usuario.");
-  document.getElementById("userEmail").value = ""; document.getElementById("userPass").value = ""; await loadAll();
+  document.getElementById("userFullName").value = ""; document.getElementById("userEmail").value = ""; document.getElementById("userPass").value = ""; await loadAll();
 }
 
 function openPasswordReset(user) { passwordResetUserId = user.id; document.getElementById("passwordResetUser").textContent = `Nueva clave para ${user.username}`; document.getElementById("passwordResetPanel").classList.remove("hidden"); document.getElementById("passwordResetValue").focus(); }
