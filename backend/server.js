@@ -1,10 +1,10 @@
 const express = require("express");
 const cors = require("cors");
-const sqlite3 = require("sqlite3").verbose();
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const path = require("path");
 const crypto = require("crypto");
+const { createDatabase } = require("./database");
 
 const app = express();
 app.use(cors());
@@ -13,8 +13,22 @@ app.use(express.json({ limit: "6mb" }));
 // Serve frontend
 app.use(express.static(path.join(__dirname, "../frontend")));
 
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, "database.sqlite");
-const db = new sqlite3.Database(dbPath);
+const dataStore = createDatabase();
+const db = {
+  serialize(work) { work(); },
+  get(sql, params, callback) {
+    if (typeof params === "function") { callback = params; params = []; }
+    dataStore.get(sql, params || []).then(row => callback?.(null, row)).catch(err => callback?.(err));
+  },
+  all(sql, params, callback) {
+    if (typeof params === "function") { callback = params; params = []; }
+    dataStore.all(sql, params || []).then(rows => callback?.(null, rows)).catch(err => callback?.(err));
+  },
+  run(sql, params, callback) {
+    if (typeof params === "function") { callback = params; params = []; }
+    dataStore.run(sql, params || []).then(result => callback?.call(result, null)).catch(err => callback?.(err));
+  }
+};
 
 // ---------- UTIL ----------
 
@@ -28,7 +42,7 @@ function getETLocalISO() {
 
 // ---------- CREACIÓN DE TABLAS ----------
 
-db.serialize(() => {
+if (!dataStore.postgres) db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -191,7 +205,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
 });
 
 // Migración por si la BD es vieja: asegurar columna 'active'
-db.run("ALTER TABLE users ADD COLUMN active INTEGER DEFAULT 1", (err) => {
+if (!dataStore.postgres) db.run("ALTER TABLE users ADD COLUMN active INTEGER DEFAULT 1", (err) => {
   if (err) {
     if (!String(err.message).includes("duplicate column")) {
       console.error("Error agregando columna 'active':", err.message);
@@ -285,18 +299,11 @@ function requireAdmin(req, res, next) {
 }
 
 function dbGet(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
-  });
+  return dataStore.get(sql, params);
 }
 
 function dbRun(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve({ lastID: this.lastID, changes: this.changes });
-    });
-  });
+  return dataStore.run(sql, params);
 }
 
 function resetCodeHash(userId, code) {
@@ -427,7 +434,7 @@ app.get("/settings/sri/:company", requireCompanyUser, async (req, res) => {
   }
 });
 
-for (const migration of [
+if (!dataStore.postgres) for (const migration of [
   "ALTER TABLE users ADD COLUMN fullName TEXT DEFAULT ''",
   "ALTER TABLE users ADD COLUMN mustChangePassword INTEGER DEFAULT 0"
 ]) {
@@ -625,28 +632,21 @@ app.post("/public/client-intake/:token", async (req, res) => {
 
 app.post("/client-intake/claim/:company", requireCompanyUser, async (req, res) => {
   try {
-    await dbRun("BEGIN IMMEDIATE TRANSACTION");
-    const submission = await dbGet(
-      `SELECT id, clientId FROM client_intake_submissions
-       WHERE company = ? AND claimedAt IS NULL ORDER BY id ASC LIMIT 1`,
-      [req.params.company]
-    );
-    if (!submission) {
-      await dbRun("COMMIT");
-      return res.json({ client: null });
-    }
-    await dbRun(
-      "UPDATE client_intake_submissions SET claimedAt = ? WHERE id = ? AND claimedAt IS NULL",
-      [getETLocalISO(), submission.id]
-    );
-    const client = await dbGet(
-      "SELECT * FROM clients WHERE id = ? AND company = ?",
-      [submission.clientId, req.params.company]
-    );
-    await dbRun("COMMIT");
+    const client = await dataStore.transaction(async () => {
+      const submission = await dbGet(
+        `SELECT id, clientId FROM client_intake_submissions
+         WHERE company = ? AND claimedAt IS NULL ORDER BY id ASC LIMIT 1`,
+        [req.params.company]
+      );
+      if (!submission) return null;
+      await dbRun(
+        "UPDATE client_intake_submissions SET claimedAt = ? WHERE id = ? AND claimedAt IS NULL",
+        [getETLocalISO(), submission.id]
+      );
+      return dbGet("SELECT * FROM clients WHERE id = ? AND company = ?", [submission.clientId, req.params.company]);
+    });
     res.json({ client });
   } catch (err) {
-    try { await dbRun("ROLLBACK"); } catch {}
     res.status(500).json({ error: err.message });
   }
 });
@@ -656,11 +656,11 @@ app.get("/admin/tiendas", requireAdmin, (req, res) => {
   db.all(
     `
     SELECT MIN(u.id) AS id, u.company,
-           COALESCE(l.active, MIN(u.active), 1) AS active,
-           l.expiresAt,
-           COALESCE(l.userLimit, CASE WHEN COUNT(u.id) < 3 THEN 3 ELSE COUNT(u.id) END) AS userLimit,
-           COUNT(u.id) AS userCount,
-           l.createdAt, l.updatedAt
+           COALESCE(MAX(l.active), MIN(u.active), 1) AS active,
+           MAX(l.expiresAt) AS expiresAt,
+           COALESCE(MAX(l.userLimit), CASE WHEN COUNT(u.id) < 3 THEN 3 ELSE CAST(COUNT(u.id) AS INTEGER) END) AS userLimit,
+           CAST(COUNT(u.id) AS INTEGER) AS userCount,
+           MAX(l.createdAt) AS createdAt, MAX(l.updatedAt) AS updatedAt
     FROM users u
     LEFT JOIN store_licenses l ON l.company = u.company
     GROUP BY u.company
@@ -698,13 +698,12 @@ app.delete("/admin/tiendas/:company", requireAdmin, async (req, res) => {
   const tables = ["client_intake_submissions", "client_intake_tokens", "sri_certificates",
     "sri_settings", "invoices", "clients", "sales", "products", "users", "store_licenses"];
   try {
-    await dbRun("BEGIN IMMEDIATE TRANSACTION");
-    await dbRun("DELETE FROM password_reset_codes WHERE userId IN (SELECT id FROM users WHERE company = ?)", [company]);
-    for (const table of tables) await dbRun(`DELETE FROM ${table} WHERE company = ?`, [company]);
-    await dbRun("COMMIT");
+    await dataStore.transaction(async () => {
+      await dbRun("DELETE FROM password_reset_codes WHERE userId IN (SELECT id FROM users WHERE company = ?)", [company]);
+      for (const table of tables) await dbRun(`DELETE FROM ${table} WHERE company = ?`, [company]);
+    });
     res.json({ ok: true });
   } catch (err) {
-    try { await dbRun("ROLLBACK"); } catch {}
     res.status(500).json({ error: err.message });
   }
 });
@@ -1011,8 +1010,8 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       ? "PENDING_SRI"
       : settings?.certificateConfigured ? "CERTIFICATE_PENDING_VALIDATION" : "CONFIGURATION_REQUIRED";
 
-    await dbRun("BEGIN IMMEDIATE TRANSACTION");
-    const invoice = await dbRun(
+    const invoice = await dataStore.transaction(async () => {
+      const createdInvoice = await dbRun(
       `INSERT INTO invoices
        (company, invoiceType, clientId, buyerIdType, buyerIdNumber, buyerName,
         buyerAddress, buyerEmail, subtotal, taxAmount, total, paymentType,
@@ -1027,29 +1026,30 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
         configured ? "Pendiente de firma y envío al SRI." : "Complete la configuración SRI.",
         date
       ]
-    );
+      );
 
-    for (const line of lines) {
-      await dbRun(
+      for (const line of lines) {
+        await dbRun(
         `INSERT INTO sales
          (productId, code, name, quantity, price, total, date, paymentType, invoiceId, company)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [line.product.id, line.product.code, line.product.name, line.quantity,
-          line.product.price, line.gross, date, payType, invoice.lastID, company]
-      );
-      await dbRun(
-        "UPDATE products SET quantity = quantity - ? WHERE id = ? AND company = ?",
-        [line.quantity, line.product.id, company]
-      );
-    }
+            line.product.price, line.gross, date, payType, createdInvoice.lastID, company]
+        );
+        await dbRun(
+          "UPDATE products SET quantity = quantity - ? WHERE id = ? AND company = ?",
+          [line.quantity, line.product.id, company]
+        );
+      }
 
-    await dbRun(
-      `INSERT INTO sri_settings (company, nextSequence)
-       VALUES (?, ?)
-       ON CONFLICT(company) DO UPDATE SET nextSequence = ?`,
-      [company, sequence + 1, sequence + 1]
-    );
-    await dbRun("COMMIT");
+      await dbRun(
+        `INSERT INTO sri_settings (company, nextSequence)
+         VALUES (?, ?)
+         ON CONFLICT(company) DO UPDATE SET nextSequence = ?`,
+        [company, sequence + 1, sequence + 1]
+      );
+      return createdInvoice;
+    });
 
     res.json({
       msg: "Venta registrada",
@@ -1063,7 +1063,6 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       paymentType: payType
     });
   } catch (err) {
-    try { await dbRun("ROLLBACK"); } catch {}
     res.status(500).json({ error: err.message });
   }
 });
@@ -1090,13 +1089,13 @@ app.post("/admin/tiendas", requireAdmin, async (req, res) => {
     const existing = await dbGet("SELECT id FROM users WHERE company = ? OR username = ?", [company, username]);
     if (existing) return res.status(409).json({ error: "La tienda o el usuario ya existe." });
     const hashed = await bcrypt.hash(password, 10);
-    await dbRun("BEGIN IMMEDIATE TRANSACTION");
-    const user = await dbRun("INSERT INTO users (username, password, company, role, active, fullName, mustChangePassword) VALUES (?, ?, ?, 'Admin', 1, ?, 1)", [String(username).trim().toLowerCase(), hashed, company, String(fullName || "").trim()]);
-    await dbRun("INSERT INTO store_licenses (company, active, expiresAt, userLimit, createdAt, updatedAt) VALUES (?, 1, ?, ?, ?, ?)", [company, expiresAt || null, limit, now, now]);
-    await dbRun("COMMIT");
+    const user = await dataStore.transaction(async () => {
+      const createdUser = await dbRun("INSERT INTO users (username, password, company, role, active, fullName, mustChangePassword) VALUES (?, ?, ?, 'Admin', 1, ?, 1)", [String(username).trim().toLowerCase(), hashed, company, String(fullName || "").trim()]);
+      await dbRun("INSERT INTO store_licenses (company, active, expiresAt, userLimit, createdAt, updatedAt) VALUES (?, 1, ?, ?, ?, ?)", [company, expiresAt || null, limit, now, now]);
+      return createdUser;
+    });
     res.json({ id: user.lastID, company });
   } catch (err) {
-    try { await dbRun("ROLLBACK"); } catch {}
     res.status(500).json({ error: err.message });
   }
 });
@@ -1347,8 +1346,8 @@ app.post("/clients/import/:company", requireUserAdmin, async (req, res) => {
 
   const summary = { inserted: 0, updated: 0, skipped: 0, errors: [] };
   try {
-    await dbRun("BEGIN IMMEDIATE TRANSACTION");
-    for (let index = 0; index < rows.length; index += 1) {
+    await dataStore.transaction(async () => {
+      for (let index = 0; index < rows.length; index += 1) {
       const client = normalizeClientPayload(rows[index]);
       const validationError = validateClientPayload(client);
       if (validationError) {
@@ -1380,11 +1379,10 @@ app.post("/clients/import/:company", requireUserAdmin, async (req, res) => {
         );
         summary.inserted += 1;
       }
-    }
-    await dbRun("COMMIT");
+      }
+    });
     res.json(summary);
   } catch (err) {
-    try { await dbRun("ROLLBACK"); } catch {}
     res.status(500).json({ error: err.message });
   }
 });
@@ -1397,44 +1395,26 @@ function addColumnIfMissing(table, definition) {
   });
 }
 
-addColumnIfMissing("products", "taxRate REAL DEFAULT 15");
-addColumnIfMissing("sales", "invoiceId INTEGER");
-addColumnIfMissing("sri_settings", "certificateValidated INTEGER DEFAULT 0");
+if (!dataStore.postgres) {
+  addColumnIfMissing("products", "taxRate REAL DEFAULT 15");
+  addColumnIfMissing("sales", "invoiceId INTEGER");
+  addColumnIfMissing("sri_settings", "certificateValidated INTEGER DEFAULT 0");
+}
 
-app.delete("/sales/:company/:id", requireUserAdmin, (req, res) => {
+app.delete("/sales/:company/:id", requireUserAdmin, async (req, res) => {
   const { company, id } = req.params;
-
-  db.get(
-    "SELECT id, productId, quantity FROM sales WHERE id = ? AND company = ?",
-    [id, company],
-    (err, sale) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (!sale) return res.status(404).json({ error: "Venta no encontrada." });
-
-      db.serialize(() => {
-        db.run("BEGIN TRANSACTION");
-        db.run(
-          "UPDATE products SET quantity = quantity + ? WHERE id = ? AND company = ?",
-          [sale.quantity, sale.productId, company]
-        );
-        db.run(
-          "DELETE FROM sales WHERE id = ? AND company = ?",
-          [id, company],
-          function (deleteErr) {
-            if (deleteErr) {
-              db.run("ROLLBACK");
-              return res.status(500).json({ error: deleteErr.message });
-            }
-
-            db.run("COMMIT", (commitErr) => {
-              if (commitErr) return res.status(500).json({ error: commitErr.message });
-              res.json({ deleted: this.changes });
-            });
-          }
-        );
-      });
-    }
-  );
+  try {
+    const deleted = await dataStore.transaction(async () => {
+      const sale = await dbGet("SELECT id, productId, quantity FROM sales WHERE id = ? AND company = ?", [id, company]);
+      if (!sale) return null;
+      await dbRun("UPDATE products SET quantity = quantity + ? WHERE id = ? AND company = ?", [sale.quantity, sale.productId, company]);
+      return dbRun("DELETE FROM sales WHERE id = ? AND company = ?", [id, company]);
+    });
+    if (!deleted) return res.status(404).json({ error: "Venta no encontrada." });
+    res.json({ deleted: deleted.changes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/auth/create-password", async (req, res) => {
@@ -1483,13 +1463,12 @@ app.post("/auth/reset-password", async (req, res) => {
     const reset = await dbGet("SELECT * FROM password_reset_codes WHERE userId = ? AND codeHash = ? AND usedAt IS NULL ORDER BY id DESC LIMIT 1", [user.id, resetCodeHash(user.id, code)]);
     if (!reset || reset.expiresAt < new Date().toISOString()) return res.status(400).json({ error: "El código no es válido o ya expiró." });
     const hashed = await bcrypt.hash(password, 10);
-    await dbRun("BEGIN IMMEDIATE TRANSACTION");
-    await dbRun("UPDATE users SET password = ?, mustChangePassword = 0 WHERE id = ?", [hashed, user.id]);
-    await dbRun("UPDATE password_reset_codes SET usedAt = ? WHERE id = ?", [new Date().toISOString(), reset.id]);
-    await dbRun("COMMIT");
+    await dataStore.transaction(async () => {
+      await dbRun("UPDATE users SET password = ?, mustChangePassword = 0 WHERE id = ?", [hashed, user.id]);
+      await dbRun("UPDATE password_reset_codes SET usedAt = ? WHERE id = ?", [new Date().toISOString(), reset.id]);
+    });
     res.json({ updated: true });
   } catch (err) {
-    try { await dbRun("ROLLBACK"); } catch {}
     res.status(500).json({ error: err.message });
   }
 });
@@ -1518,10 +1497,37 @@ app.put("/admin/tiendas/:company/licencia", requireAdmin, async (req, res) => {
 });
 
 app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", database: dataStore.postgres ? "postgresql" : "sqlite" });
 });
 
+async function initializePostgres() {
+  if (!dataStore.postgres) return;
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE, password TEXT, company TEXT, role TEXT DEFAULT 'Admin', active INTEGER DEFAULT 1, fullName TEXT DEFAULT '', mustChangePassword INTEGER DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS store_licenses (company TEXT PRIMARY KEY, active INTEGER DEFAULT 1, expiresAt TEXT, userLimit INTEGER DEFAULT 3, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS password_reset_codes (id SERIAL PRIMARY KEY, userId INTEGER NOT NULL, codeHash TEXT NOT NULL, expiresAt TEXT NOT NULL, usedAt TEXT, createdAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, taxRate DOUBLE PRECISION DEFAULT 15, company TEXT)`,
+    `CREATE TABLE IF NOT EXISTS sales (id SERIAL PRIMARY KEY, productId INTEGER, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, total DOUBLE PRECISION, date TEXT, paymentType TEXT, invoiceId INTEGER, company TEXT)`,
+    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceType TEXT NOT NULL, clientId INTEGER, buyerIdType TEXT, buyerIdNumber TEXT, buyerName TEXT NOT NULL, buyerAddress TEXT, buyerEmail TEXT, subtotal DOUBLE PRECISION NOT NULL, taxAmount DOUBLE PRECISION NOT NULL, total DOUBLE PRECISION NOT NULL, paymentType TEXT NOT NULL, invoiceNumber TEXT, status TEXT DEFAULT 'CONFIGURATION_REQUIRED', sriMessage TEXT, date TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS sri_settings (company TEXT PRIMARY KEY, environment TEXT DEFAULT 'TEST', ruc TEXT, legalName TEXT, commercialName TEXT, mainAddress TEXT, establishmentAddress TEXT, establishmentCode TEXT DEFAULT '001', emissionPoint TEXT DEFAULT '001', nextSequence INTEGER DEFAULT 1, accountingRequired TEXT DEFAULT 'NO', specialTaxpayerNumber TEXT, taxRegime TEXT, senderEmail TEXT, adminCopyEmail TEXT, certificateConfigured INTEGER DEFAULT 0, certificateValidated INTEGER DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS sri_certificates (company TEXT PRIMARY KEY, filename TEXT NOT NULL, certificateEncrypted TEXT NOT NULL, passwordEncrypted TEXT NOT NULL, installedAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS client_intake_tokens (company TEXT PRIMARY KEY, tokenHash TEXT NOT NULL UNIQUE, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS client_intake_submissions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, clientId INTEGER NOT NULL, createdAt TEXT NOT NULL, claimedAt TEXT)`,
+    `CREATE TABLE IF NOT EXISTS clients (id SERIAL PRIMARY KEY, company TEXT, idType TEXT, idNumber TEXT, razonSocial TEXT, nombreComercial TEXT, ciudad TEXT, direccion TEXT, email TEXT, telefono TEXT, celular TEXT)`,
+    `CREATE INDEX IF NOT EXISTS idx_users_company ON users(company)`,
+    `CREATE INDEX IF NOT EXISTS idx_products_company ON products(company)`,
+    `CREATE INDEX IF NOT EXISTS idx_sales_company_date ON sales(company, date)`,
+    `CREATE INDEX IF NOT EXISTS idx_clients_company ON clients(company)`,
+    `CREATE INDEX IF NOT EXISTS idx_invoices_company_date ON invoices(company, date)`
+  ];
+  for (const statement of statements) await dataStore.run(statement);
+  console.log("PostgreSQL conectado y tablas verificadas.");
+}
+
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`✅ Backend running on http://localhost:${PORT}`);
-});
+initializePostgres()
+  .then(() => app.listen(PORT, () => console.log(`✅ Backend running on http://localhost:${PORT}`)))
+  .catch(err => {
+    console.error("No se pudo inicializar la base de datos:", err);
+    process.exit(1);
+  });
