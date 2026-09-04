@@ -42,6 +42,7 @@
           <label>Contraseña inicial <input id="newPassword" type="password"></label>
           <label>Vencimiento <input id="newExpiration" type="date"></label>
           <label>Usuarios permitidos <input id="newUserLimit" type="number" min="1" value="3"></label>
+          <label>Tipo de negocio <select id="newBusinessType"><option value="SHOP">Tienda</option><option value="RESTAURANT">Restaurante</option></select></label>
           <button class="license-form-action" onclick="createStore()">Crear tienda</button>
         </div>
       </section>
@@ -52,13 +53,14 @@
           <label>Estado <select id="editLicenseActive"><option value="1">Activa</option><option value="0">Inactiva</option></select></label>
           <label>Vencimiento <input id="editLicenseExpiration" type="date"></label>
           <label>Usuarios permitidos <input id="editLicenseLimit" type="number" min="1"></label>
+          <label>Tipo de negocio <select id="editBusinessType"><option value="SHOP">Tienda</option><option value="RESTAURANT">Restaurante</option></select></label>
           <button class="license-form-action" onclick="saveLicense()">Guardar licencia</button>
         </div>
       </section>
 
       <section class="license-card">
         <div class="license-section-heading"><div><h2>Tiendas</h2><p id="storeFilterLabel">Todas las tiendas</p></div><input id="storeSearch" placeholder="Buscar tienda" oninput="renderStores()"></div>
-        <div class="table-scroll"><table class="license-table"><thead><tr><th>Tienda</th><th>Estado</th><th>Vencimiento</th><th>Usuarios</th></tr></thead><tbody id="storesBody"></tbody></table></div>
+        <div class="table-scroll"><table class="license-table"><thead><tr><th>Tienda</th><th>Tipo</th><th>Estado</th><th>Vencimiento</th><th>Usuarios</th></tr></thead><tbody id="storesBody"></tbody></table></div>
         <div class="inventory-actions license-table-actions">
           <button onclick="editSelectedStoreLicense()">Editar licencia</button>
           <button id="btnToggleSelectedStore" onclick="toggleSelectedStore()">Activar / Desactivar</button>

@@ -12,21 +12,21 @@
       <div class="logo">POS Simple</div>
 
       <div class="nav-section-title">Módulos</div>
-      <button id="nav-inventario" onclick="showTab('inventario'); loadProducts();">
+      <button id="nav-inventario" data-module="inventario" onclick="showTab('inventario'); loadProducts();">
         Inventario
       </button>
-      <button id="nav-pos" onclick="showTab('pos')">
+      <button id="nav-pos" data-module="pos" onclick="showTab('pos')">
         Punto de Venta
       </button>
-      <button id="nav-ventas" onclick="showTab('ventas')">
+      <button id="nav-ventas" data-module="ventas" onclick="showTab('ventas')">
         Ventas
       </button>
-      <button id="nav-clientes" onclick="showTab('clientes')">
+      <button id="nav-clientes" data-module="clientes" onclick="showTab('clientes')">
         Clientes</button>
-      <button id="nav-usuarios" onclick="showTab('usuarios')">
+      <button id="nav-usuarios" data-module="usuarios" onclick="showTab('usuarios')">
         Usuarios
       </button>
-      <button id="nav-config" onclick="showTab('config')">
+      <button id="nav-config" data-module="config" onclick="showTab('config')">
         Configuración
       </button>
     </aside>
@@ -431,6 +431,28 @@
 const API = "";
 const company = localStorage.getItem("company");
 const userRole = localStorage.getItem("role") || "Usuario";
+let businessType = localStorage.getItem("businessType") || "SHOP";
+let enabledModules = ["inventario", "pos", "ventas", "clientes", "usuarios", "config"];
+
+function applyModuleVisibility() {
+  document.querySelectorAll("[data-module]").forEach(element => {
+    element.classList.toggle("hidden", !enabledModules.includes(element.dataset.module));
+  });
+}
+
+async function loadStoreContext() {
+  try {
+    const res = await fetch(`${API}/store/context`, { headers: authHeaders() });
+    if (!res.ok) return;
+    const context = await res.json();
+    businessType = context.businessType || "SHOP";
+    enabledModules = Array.isArray(context.enabledModules) ? context.enabledModules : enabledModules;
+    localStorage.setItem("businessType", businessType);
+    applyModuleVisibility();
+  } catch (err) {
+    console.error("No se pudo cargar el tipo de negocio:", err);
+  }
+}
 
 
 if (!company) {
@@ -440,6 +462,8 @@ if (!company) {
 
 // Mostrar nombre de tienda al cargar
 window.addEventListener("DOMContentLoaded", () => {
+  applyModuleVisibility();
+  loadStoreContext();
   const label = document.getElementById("storeNameLabel");
   if (label) {
     label.textContent = company;
@@ -2059,6 +2083,7 @@ function logout() {
   localStorage.removeItem("company");
   localStorage.removeItem("username");
   localStorage.removeItem("role"); 
+  localStorage.removeItem("businessType");
   location.href = "index.html";
 }
 
