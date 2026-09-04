@@ -66,6 +66,10 @@ function stateLabel(state) {
   return ({ active: "Activa", inactive: "Inactiva", expired: "Vencida", expiring: "Por vencer", limit: "Límite alcanzado" })[state];
 }
 
+function businessTypeLabel(value) {
+  return value === "RESTAURANT" ? "Restaurante" : "Tienda";
+}
+
 function matchesStoreFilter(store, filter) {
   const days = daysUntil(store.expiresAt);
   if (filter === "all") return true;
@@ -99,13 +103,14 @@ function renderStores() {
     const days = daysUntil(store.expiresAt);
     const expiration = !store.expiresAt ? "Sin vencimiento" : days < 0 ? `Venció ${store.expiresAt}` : days === 0 ? "Vence hoy" : `${store.expiresAt} (${days} días)`;
     const row = document.createElement("tr");
-    row.innerHTML = `<td><strong></strong></td><td><span class="license-badge ${state}">${stateLabel(state)}</span></td><td></td><td><div class="license-usage"><span>${store.userCount} / ${store.userLimit}</span><progress max="${store.userLimit}" value="${store.userCount}"></progress></div></td>`;
+    row.innerHTML = `<td><strong></strong></td><td></td><td><span class="license-badge ${state}">${stateLabel(state)}</span></td><td></td><td><div class="license-usage"><span>${store.userCount} / ${store.userLimit}</span><progress max="${store.userLimit}" value="${store.userCount}"></progress></div></td>`;
     row.children[0].querySelector("strong").textContent = store.company;
-    row.children[2].textContent = expiration;
+    row.children[1].textContent = businessTypeLabel(store.businessType);
+    row.children[3].textContent = expiration;
     row.onclick = () => selectStoreRow(store, row);
     tbody.appendChild(row);
   });
-  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="4" class="empty-table">No hay tiendas en este filtro.</td></tr>';
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="5" class="empty-table">No hay tiendas en este filtro.</td></tr>';
 }
 
 function selectStoreRow(store, row) {
@@ -184,7 +189,8 @@ async function createStore() {
     username: document.getElementById("newEmail").value.trim(),
     password: document.getElementById("newPassword").value,
     expiresAt: document.getElementById("newExpiration").value || null,
-    userLimit: Number(document.getElementById("newUserLimit").value) || 1
+    userLimit: Number(document.getElementById("newUserLimit").value) || 1,
+    businessType: document.getElementById("newBusinessType").value
   };
   if (!payload.company || !payload.username || !payload.password || !payload.expiresAt) return alert("Completa tienda, Admin inicial, contraseña y vencimiento.");
   const res = await fetch(adminUrl("/admin/tiendas"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -192,6 +198,7 @@ async function createStore() {
   if (!res.ok) return alert(data.error || "No se pudo crear la tienda.");
   ["newStore", "newAdminName", "newEmail", "newPassword", "newExpiration"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("newUserLimit").value = "3";
+  document.getElementById("newBusinessType").value = "SHOP";
   await loadAll();
   alert("Tienda y licencia creadas.");
 }
@@ -204,6 +211,7 @@ function openLicenseEditor(company) {
   document.getElementById("editLicenseActive").value = store.active ? "1" : "0";
   document.getElementById("editLicenseExpiration").value = store.expiresAt || "";
   document.getElementById("editLicenseLimit").value = store.userLimit;
+  document.getElementById("editBusinessType").value = store.businessType === "RESTAURANT" ? "RESTAURANT" : "SHOP";
   document.getElementById("licenseEditor").classList.remove("hidden");
   document.getElementById("licenseEditor").scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -212,7 +220,12 @@ function closeLicenseEditor() { selectedStore = null; document.getElementById("l
 
 async function saveLicense() {
   if (!selectedStore) return;
-  const payload = { active: document.getElementById("editLicenseActive").value === "1", expiresAt: document.getElementById("editLicenseExpiration").value || null, userLimit: Number(document.getElementById("editLicenseLimit").value) || 1 };
+  const businessType = document.getElementById("editBusinessType").value;
+  if (businessType !== (selectedStore.businessType || "SHOP")) {
+    const nextLabel = businessTypeLabel(businessType);
+    if (!await appConfirm(`¿Cambiar ${selectedStore.company} a ${nextLabel}? Los datos actuales se conservarán y solo cambiarán los módulos disponibles.`)) return;
+  }
+  const payload = { active: document.getElementById("editLicenseActive").value === "1", expiresAt: document.getElementById("editLicenseExpiration").value || null, userLimit: Number(document.getElementById("editLicenseLimit").value) || 1, businessType };
   const res = await fetch(adminUrl(`/admin/tiendas/${encodeURIComponent(selectedStore.company)}/licencia`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudo guardar la licencia.");

@@ -48,6 +48,7 @@ async function login() {
     localStorage.setItem("company", data.company);
     localStorage.setItem("username", data.username || username);
     localStorage.setItem("role", data.role || "Admin");
+    localStorage.setItem("businessType", data.businessType || "SHOP");
 
     window.location.href = "dashboard.html";
   } catch (err) {
