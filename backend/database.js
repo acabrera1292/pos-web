@@ -44,7 +44,7 @@ function createDatabase() {
     max: Math.max(2, Number(process.env.PG_POOL_MAX) || 10)
   });
   const context = new AsyncLocalStorage();
-  const idTables = new Set(["users", "password_reset_codes", "products", "sales", "invoices", "client_intake_submissions", "clients"]);
+  const idTables = new Set(["users", "password_reset_codes", "products", "sales", "invoices", "client_intake_submissions", "clients", "restaurant_tables", "restaurant_table_sessions"]);
   const camelKeys = {
     fullname: "fullName", mustchangepassword: "mustChangePassword", expiresat: "expiresAt", userlimit: "userLimit", usercount: "userCount",
     createdat: "createdAt", updatedat: "updatedAt", userid: "userId", codehash: "codeHash", usedat: "usedAt",
@@ -56,7 +56,8 @@ function createDatabase() {
     emissionpoint: "emissionPoint", nextsequence: "nextSequence", accountingrequired: "accountingRequired",
     specialtaxpayernumber: "specialTaxpayerNumber", taxregime: "taxRegime", senderemail: "senderEmail",
     admincopyemail: "adminCopyEmail", certificateconfigured: "certificateConfigured", certificatevalidated: "certificateValidated",
-    businesstype: "businessType",
+    businesstype: "businessType", tableid: "tableId", sessionid: "sessionId", serveruserid: "serverUserId",
+    servername: "serverName", openedat: "openedAt", closedat: "closedAt", durationminutes: "durationMinutes",
     passwordencrypted: "passwordEncrypted", certificateencrypted: "certificateEncrypted", installedat: "installedAt",
     tokenhash: "tokenHash", claimedat: "claimedAt", idtype: "idType", idnumber: "idNumber",
     razonsocial: "razonSocial", nombrecomercial: "nombreComercial"
