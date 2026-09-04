@@ -787,6 +787,106 @@ tbody tr[style*="background-color"] {
   text-align: center;
 }
 
+/* Restaurante: Mesas */
+.restaurant-tables-section {
+  padding: 18px;
+}
+
+.restaurant-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.restaurant-section-heading h2,
+.restaurant-table-admin h3 {
+  margin-top: 0;
+}
+
+.restaurant-section-heading p {
+  margin: 4px 0 0;
+  color: #667085;
+}
+
+.restaurant-table-admin,
+.restaurant-table-selection,
+.restaurant-empty {
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.restaurant-table-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(120px, 180px) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.restaurant-table-form label {
+  display: grid;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.restaurant-tables-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.restaurant-table-card {
+  min-height: 140px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  text-align: left;
+  border: 2px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  cursor: pointer;
+}
+
+.restaurant-table-card:hover,
+.restaurant-table-card.selected {
+  border-color: #6b7280;
+  background: #f3f4f6;
+}
+
+.restaurant-table-card.available { border-left: 7px solid #6b8f71; }
+.restaurant-table-card.occupied { border-left: 7px solid #b7791f; }
+.restaurant-table-card.inactive { border-left: 7px solid #9ca3af; opacity: 0.7; }
+.restaurant-table-card strong { font-size: 18px; }
+.restaurant-table-status { font-weight: 700; }
+.restaurant-table-detail,
+.restaurant-table-card small { color: #667085; }
+
+.restaurant-table-selection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.restaurant-table-selection > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 760px) {
+  .restaurant-table-form { grid-template-columns: 1fr; }
+  .restaurant-table-selection { align-items: stretch; flex-direction: column; }
+  .restaurant-tables-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 /* buttons inside table cells */
 
 td button {
