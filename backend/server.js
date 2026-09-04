@@ -62,6 +62,7 @@ if (!dataStore.postgres) db.serialize(() => {
       active INTEGER DEFAULT 1,
       expiresAt TEXT,
       userLimit INTEGER DEFAULT 3,
+      businessType TEXT DEFAULT 'SHOP',
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     )
@@ -218,6 +219,22 @@ if (!dataStore.postgres) db.run("ALTER TABLE users ADD COLUMN active INTEGER DEF
 const SECRET = process.env.JWT_SECRET || "pos-secret";
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "posmaster";
 
+const BUSINESS_TYPES = Object.freeze({
+  SHOP: Object.freeze({
+    label: "Tienda",
+    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config"])
+  }),
+  RESTAURANT: Object.freeze({
+    label: "Restaurante",
+    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config", "mesas", "cocina", "reloj"])
+  })
+});
+
+function normalizeBusinessType(value) {
+  const type = String(value || "SHOP").trim().toUpperCase();
+  return BUSINESS_TYPES[type] ? type : "SHOP";
+}
+
 // ---------- AUTH ----------
 
 // Registro de nueva tienda/usuario (lo usará solo admin.html)
@@ -285,7 +302,9 @@ app.post("/auth/login", (req, res) => {
         token,
         company: user.company,
         username: user.username,
-        role: user.role || "Admin"
+        role: user.role || "Admin",
+        businessType: normalizeBusinessType(license?.businessType),
+        enabledModules: BUSINESS_TYPES[normalizeBusinessType(license?.businessType)].modules
       });
     }
   );
@@ -660,6 +679,7 @@ app.get("/admin/tiendas", requireAdmin, (req, res) => {
            MAX(l.expiresAt) AS expiresAt,
            COALESCE(MAX(l.userLimit), CASE WHEN COUNT(u.id) < 3 THEN 3 ELSE CAST(COUNT(u.id) AS INTEGER) END) AS userLimit,
            CAST(COUNT(u.id) AS INTEGER) AS userCount,
+           COALESCE(MAX(l.businessType), 'SHOP') AS businessType,
            MAX(l.createdAt) AS createdAt, MAX(l.updatedAt) AS updatedAt
     FROM users u
     LEFT JOIN store_licenses l ON l.company = u.company
@@ -1082,6 +1102,7 @@ app.put("/admin/usuarios/:id/password", requireAdmin, async (req, res) => {
 
 app.post("/admin/tiendas", requireAdmin, async (req, res) => {
   const { company, username, password, expiresAt, userLimit, fullName } = req.body;
+  const businessType = normalizeBusinessType(req.body.businessType);
   if (!company || !String(fullName || "").trim() || !/^\S+@\S+\.\S+$/.test(String(username || "").trim()) || String(password || "").length < 8) return res.status(400).json({ error: "Completa tienda, nombre del Admin, correo válido y contraseña temporal de al menos 8 caracteres." });
   const limit = Math.max(1, Number(userLimit) || 1);
   const now = getETLocalISO();
@@ -1091,7 +1112,7 @@ app.post("/admin/tiendas", requireAdmin, async (req, res) => {
     const hashed = await bcrypt.hash(password, 10);
     const user = await dataStore.transaction(async () => {
       const createdUser = await dbRun("INSERT INTO users (username, password, company, role, active, fullName, mustChangePassword) VALUES (?, ?, ?, 'Admin', 1, ?, 1)", [String(username).trim().toLowerCase(), hashed, company, String(fullName || "").trim()]);
-      await dbRun("INSERT INTO store_licenses (company, active, expiresAt, userLimit, createdAt, updatedAt) VALUES (?, 1, ?, ?, ?, ?)", [company, expiresAt || null, limit, now, now]);
+      await dbRun("INSERT INTO store_licenses (company, active, expiresAt, userLimit, businessType, createdAt, updatedAt) VALUES (?, 1, ?, ?, ?, ?, ?)", [company, expiresAt || null, limit, businessType, now, now]);
       return createdUser;
     });
     res.json({ id: user.lastID, company });
@@ -1108,6 +1129,21 @@ app.get("/store/users", requireUserAdmin, async (req, res) => {
     ));
     const license = await dbGet("SELECT userLimit FROM store_licenses WHERE company = ?", [req.user.company]);
     res.json({ users: rows, userLimit: Number(license?.userLimit || 1), currentUserId: req.user.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/store/context", requireCompanyUser, async (req, res) => {
+  try {
+    const license = await dbGet("SELECT businessType FROM store_licenses WHERE company = ?", [req.user.company]);
+    const businessType = normalizeBusinessType(license?.businessType);
+    res.json({
+      company: req.user.company,
+      businessType,
+      businessTypeLabel: BUSINESS_TYPES[businessType].label,
+      enabledModules: BUSINESS_TYPES[businessType].modules
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1399,6 +1435,7 @@ if (!dataStore.postgres) {
   addColumnIfMissing("products", "taxRate REAL DEFAULT 15");
   addColumnIfMissing("sales", "invoiceId INTEGER");
   addColumnIfMissing("sri_settings", "certificateValidated INTEGER DEFAULT 0");
+  addColumnIfMissing("store_licenses", "businessType TEXT DEFAULT 'SHOP'");
 }
 
 app.delete("/sales/:company/:id", requireUserAdmin, async (req, res) => {
@@ -1478,17 +1515,18 @@ app.put("/admin/tiendas/:company/licencia", requireAdmin, async (req, res) => {
   const active = req.body.active ? 1 : 0;
   const expiresAt = req.body.expiresAt || null;
   const userLimit = Math.max(1, Number(req.body.userLimit) || 1);
+  const businessType = normalizeBusinessType(req.body.businessType);
   const now = getETLocalISO();
   try {
     const count = await dbGet("SELECT COUNT(*) AS total FROM users WHERE company = ?", [company]);
     if (!count?.total) return res.status(404).json({ error: "Tienda no encontrada." });
     if (userLimit < count.total) return res.status(400).json({ error: `La tienda ya tiene ${count.total} usuarios. El límite no puede ser menor.` });
     await dbRun(
-      `INSERT INTO store_licenses (company, active, expiresAt, userLimit, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO store_licenses (company, active, expiresAt, userLimit, businessType, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(company) DO UPDATE SET active=excluded.active, expiresAt=excluded.expiresAt,
-         userLimit=excluded.userLimit, updatedAt=excluded.updatedAt`,
-      [company, active, expiresAt, userLimit, now, now]
+         userLimit=excluded.userLimit, businessType=excluded.businessType, updatedAt=excluded.updatedAt`,
+      [company, active, expiresAt, userLimit, businessType, now, now]
     );
     res.json({ saved: true });
   } catch (err) {
@@ -1504,7 +1542,8 @@ async function initializePostgres() {
   if (!dataStore.postgres) return;
   const statements = [
     `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE, password TEXT, company TEXT, role TEXT DEFAULT 'Admin', active INTEGER DEFAULT 1, fullName TEXT DEFAULT '', mustChangePassword INTEGER DEFAULT 0)`,
-    `CREATE TABLE IF NOT EXISTS store_licenses (company TEXT PRIMARY KEY, active INTEGER DEFAULT 1, expiresAt TEXT, userLimit INTEGER DEFAULT 3, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS store_licenses (company TEXT PRIMARY KEY, active INTEGER DEFAULT 1, expiresAt TEXT, userLimit INTEGER DEFAULT 3, businessType TEXT DEFAULT 'SHOP', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
+    `ALTER TABLE store_licenses ADD COLUMN IF NOT EXISTS businessType TEXT DEFAULT 'SHOP'`,
     `CREATE TABLE IF NOT EXISTS password_reset_codes (id SERIAL PRIMARY KEY, userId INTEGER NOT NULL, codeHash TEXT NOT NULL, expiresAt TEXT NOT NULL, usedAt TEXT, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, taxRate DOUBLE PRECISION DEFAULT 15, company TEXT)`,
     `CREATE TABLE IF NOT EXISTS sales (id SERIAL PRIMARY KEY, productId INTEGER, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, total DOUBLE PRECISION, date TEXT, paymentType TEXT, invoiceId INTEGER, company TEXT)`,

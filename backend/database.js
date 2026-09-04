@@ -56,6 +56,7 @@ function createDatabase() {
     emissionpoint: "emissionPoint", nextsequence: "nextSequence", accountingrequired: "accountingRequired",
     specialtaxpayernumber: "specialTaxpayerNumber", taxregime: "taxRegime", senderemail: "senderEmail",
     admincopyemail: "adminCopyEmail", certificateconfigured: "certificateConfigured", certificatevalidated: "certificateValidated",
+    businesstype: "businessType",
     passwordencrypted: "passwordEncrypted", certificateencrypted: "certificateEncrypted", installedat: "installedAt",
     tokenhash: "tokenHash", claimedat: "claimedAt", idtype: "idType", idnumber: "idNumber",
     razonsocial: "razonSocial", nombrecomercial: "nombreComercial"
