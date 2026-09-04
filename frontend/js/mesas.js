@@ -1,5 +1,7 @@
 (function () {
   let restaurantTables = [];
+  let restaurantServers = [];
+  let selectedRestaurantServer = null;
   let selectedRestaurantTable = null;
   let restaurantTableRefresh = null;
   let restaurantTimerRefresh = null;
@@ -12,6 +14,27 @@
   function minutesSince(value) {
     if (!value) return 0;
     return Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60000));
+  }
+
+  function formatDateTime(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString("es-EC", { dateStyle: "short", timeStyle: "short" });
+  }
+
+  function renderServerSelect() {
+    const select = document.getElementById("restaurantServerSelect");
+    if (!select) return;
+    const previous = select.value;
+    const activeServers = restaurantServers.filter(server => Boolean(server.active));
+    select.innerHTML = '<option value="">Seleccionar mesero</option>';
+    activeServers.forEach(server => {
+      const option = document.createElement("option");
+      option.value = server.id;
+      option.textContent = server.name;
+      select.appendChild(option);
+    });
+    if (activeServers.some(server => String(server.id) === previous)) select.value = previous;
   }
 
   function tableState(table) {
@@ -73,6 +96,7 @@
       : table.active ? `Disponible · capacidad ${table.capacity}` : "Mesa inactiva";
 
     document.getElementById("btnSeatRestaurantTable").classList.toggle("hidden", Boolean(table.sessionId) || !table.active);
+    document.getElementById("restaurantSeatFields").classList.toggle("hidden", Boolean(table.sessionId) || !table.active);
     document.getElementById("btnCloseRestaurantTable").classList.toggle("hidden", !table.sessionId);
     document.getElementById("btnEditRestaurantTable").classList.toggle("hidden", userRole !== "Admin" || Boolean(table.sessionId));
     const deleteButton = document.getElementById("btnDeleteRestaurantTable");
@@ -98,6 +122,10 @@
       const res = await fetch(`${API}/restaurant/tables`, { headers: headers(), cache: "no-store" });
       restaurantTables = await readResponse(res);
       renderRestaurantTables();
+      if (!silent) {
+        await loadRestaurantServers(true);
+        await loadRestaurantTableHistory(true);
+      }
     } catch (err) {
       if (!silent) alert(err.message);
     }
@@ -126,15 +154,15 @@
 
   async function seatSelectedRestaurantTable() {
     if (!selectedRestaurantTable || selectedRestaurantTable.sessionId) return;
-    const value = await appPrompt(`¿Cuántos clientes ocuparán ${selectedRestaurantTable.name}?`, "2");
-    if (value === null) return;
-    const guests = Number(value);
+    const guests = Number(document.getElementById("restaurantGuestsInput")?.value);
+    const restaurantServerId = Number(document.getElementById("restaurantServerSelect")?.value);
     if (!Number.isInteger(guests) || guests < 1 || guests > 99) return alert("Ingresa una cantidad válida de clientes.");
+    if (!Number.isInteger(restaurantServerId) || restaurantServerId < 1) return alert("Selecciona el mesero que atenderá la mesa.");
     try {
       const res = await fetch(`${API}/restaurant/tables/${selectedRestaurantTable.id}/seat`, {
         method: "POST",
         headers: { ...headers(), "Content-Type": "application/json" },
-        body: JSON.stringify({ guests })
+        body: JSON.stringify({ guests, restaurantServerId })
       });
       await readResponse(res);
       await loadRestaurantTables();
@@ -154,6 +182,135 @@
       const result = await readResponse(res);
       await loadRestaurantTables();
       alert(`Mesa liberada. Duración: ${result.durationMinutes} min.`);
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function loadRestaurantTableHistory(silent = false) {
+    if (businessType !== "RESTAURANT") return;
+    const tbody = document.getElementById("restaurantTableHistoryBody");
+    if (!tbody) return;
+    try {
+      const res = await fetch(`${API}/restaurant/table-sessions`, { headers: headers(), cache: "no-store" });
+      const history = await readResponse(res);
+      tbody.innerHTML = "";
+      history.forEach(session => {
+        const row = document.createElement("tr");
+        [
+          session.tableName || `Mesa ${session.tableId}`,
+          session.serverName,
+          session.guests,
+          formatDateTime(session.openedAt),
+          formatDateTime(session.closedAt),
+          `${session.durationMinutes ?? 0} min`
+        ].forEach(value => {
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.appendChild(cell);
+        });
+        tbody.appendChild(row);
+      });
+      if (!history.length) tbody.innerHTML = '<tr><td colspan="6" class="empty-table">Todavía no hay mesas liberadas.</td></tr>';
+    } catch (err) {
+      if (!silent) alert(err.message);
+    }
+  }
+
+  function renderRestaurantServers() {
+    const tbody = document.getElementById("restaurantServersBody");
+    if (!tbody) return;
+    selectedRestaurantServer = selectedRestaurantServer
+      ? restaurantServers.find(server => server.id === selectedRestaurantServer.id) || null
+      : null;
+    tbody.innerHTML = "";
+    restaurantServers.forEach(server => {
+      const row = document.createElement("tr");
+      if (selectedRestaurantServer?.id === server.id) row.classList.add("selected");
+      const name = document.createElement("td");
+      const status = document.createElement("td");
+      name.textContent = server.name;
+      status.textContent = server.active ? "Activo" : "Inactivo";
+      row.append(name, status);
+      row.addEventListener("click", () => {
+        selectedRestaurantServer = server;
+        renderRestaurantServers();
+      });
+      tbody.appendChild(row);
+    });
+    if (!restaurantServers.length) tbody.innerHTML = '<tr><td colspan="2" class="empty-table">No hay meseros configurados.</td></tr>';
+
+    const panel = document.getElementById("restaurantServerSelection");
+    panel?.classList.toggle("hidden", !selectedRestaurantServer || userRole !== "Admin");
+    if (selectedRestaurantServer) {
+      document.getElementById("selectedRestaurantServerName").textContent = selectedRestaurantServer.name;
+      document.getElementById("selectedRestaurantServerStatus").textContent = selectedRestaurantServer.active ? "Activo" : "Inactivo";
+      const button = document.getElementById("btnToggleRestaurantServer");
+      button.textContent = selectedRestaurantServer.active ? "Desactivar" : "Activar";
+      button.classList.toggle("danger-button", Boolean(selectedRestaurantServer.active));
+    }
+    renderServerSelect();
+  }
+
+  async function loadRestaurantServers(silent = false) {
+    if (businessType !== "RESTAURANT") return;
+    try {
+      const res = await fetch(`${API}/restaurant/servers`, { headers: headers(), cache: "no-store" });
+      restaurantServers = await readResponse(res);
+      renderRestaurantServers();
+    } catch (err) {
+      if (!silent) alert(err.message);
+    }
+  }
+
+  async function createRestaurantServer() {
+    if (userRole !== "Admin") return;
+    const input = document.getElementById("restaurantServerName");
+    const name = input.value.trim();
+    if (!name) return alert("Escribe el nombre del mesero.");
+    try {
+      const res = await fetch(`${API}/restaurant/servers`, {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      await readResponse(res);
+      input.value = "";
+      await loadRestaurantServers();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function editSelectedRestaurantServer() {
+    if (!selectedRestaurantServer || userRole !== "Admin") return;
+    const name = await appPrompt("Nombre del mesero:", selectedRestaurantServer.name);
+    if (name === null || !name.trim()) return;
+    try {
+      const res = await fetch(`${API}/restaurant/servers/${selectedRestaurantServer.id}`, {
+        method: "PUT",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), active: Boolean(selectedRestaurantServer.active) })
+      });
+      await readResponse(res);
+      await loadRestaurantServers();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function toggleSelectedRestaurantServer() {
+    if (!selectedRestaurantServer || userRole !== "Admin") return;
+    const active = !Boolean(selectedRestaurantServer.active);
+    if (!await appConfirm(`¿${active ? "Activar" : "Desactivar"} a ${selectedRestaurantServer.name}?`)) return;
+    try {
+      const res = await fetch(`${API}/restaurant/servers/${selectedRestaurantServer.id}`, {
+        method: "PUT",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: selectedRestaurantServer.name, active })
+      });
+      await readResponse(res);
+      await loadRestaurantServers();
     } catch (err) {
       alert(err.message);
     }
@@ -227,11 +384,22 @@
     }, 60000);
   }
 
+  function initializeRestaurantServers() {
+    const admin = document.getElementById("restaurantServerAdmin");
+    if (admin) admin.classList.toggle("hidden", userRole !== "Admin");
+  }
+
   window.initializeRestaurantTables = initializeRestaurantTables;
+  window.initializeRestaurantServers = initializeRestaurantServers;
   window.loadRestaurantTables = loadRestaurantTables;
+  window.loadRestaurantTableHistory = loadRestaurantTableHistory;
+  window.loadRestaurantServers = loadRestaurantServers;
   window.createRestaurantTable = createRestaurantTable;
+  window.createRestaurantServer = createRestaurantServer;
   window.seatSelectedRestaurantTable = seatSelectedRestaurantTable;
   window.closeSelectedRestaurantTable = closeSelectedRestaurantTable;
   window.editSelectedRestaurantTable = editSelectedRestaurantTable;
   window.deleteSelectedRestaurantTable = deleteSelectedRestaurantTable;
+  window.editSelectedRestaurantServer = editSelectedRestaurantServer;
+  window.toggleSelectedRestaurantServer = toggleSelectedRestaurantServer;
 })();
