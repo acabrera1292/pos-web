@@ -215,10 +215,21 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
   `);
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS restaurant_servers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company TEXT NOT NULL,
+      name TEXT NOT NULL,
+      active INTEGER DEFAULT 1,
+      createdAt TEXT NOT NULL
+    )
+  `);
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS restaurant_table_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       company TEXT NOT NULL,
       tableId INTEGER NOT NULL,
+      restaurantServerId INTEGER,
       serverUserId INTEGER NOT NULL,
       serverName TEXT NOT NULL,
       guests INTEGER NOT NULL,
@@ -245,6 +256,12 @@ if (!dataStore.postgres) db.run("ALTER TABLE users ADD COLUMN active INTEGER DEF
   }
 });
 
+if (!dataStore.postgres) db.run("ALTER TABLE restaurant_table_sessions ADD COLUMN restaurantServerId INTEGER", (err) => {
+  if (err && !String(err.message).includes("duplicate column")) {
+    console.error("Error agregando restaurantServerId:", err.message);
+  }
+});
+
 const SECRET = process.env.JWT_SECRET || "pos-secret";
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "posmaster";
 
@@ -255,7 +272,7 @@ const BUSINESS_TYPES = Object.freeze({
   }),
   RESTAURANT: Object.freeze({
     label: "Restaurante",
-    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config", "mesas", "cocina", "reloj"])
+    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "cocina", "reloj"])
   })
 });
 
@@ -767,7 +784,7 @@ app.post("/admin/tiendas/estado", requireAdmin, (req, res) => {
 // Eliminar tienda completa (usuarios, productos, ventas)
 app.delete("/admin/tiendas/:company", requireAdmin, async (req, res) => {
   const company = req.params.company;
-  const tables = ["restaurant_table_sessions", "restaurant_tables", "client_intake_submissions", "client_intake_tokens", "sri_certificates",
+  const tables = ["restaurant_table_sessions", "restaurant_servers", "restaurant_tables", "client_intake_submissions", "client_intake_tokens", "sri_certificates",
     "sri_settings", "invoices", "clients", "sales", "products", "users", "store_licenses"];
   try {
     await dataStore.transaction(async () => {
@@ -1588,6 +1605,72 @@ app.put("/admin/tiendas/:company/licencia", requireAdmin, async (req, res) => {
 
 // ---------- RESTAURANTE: MESAS ----------
 
+app.get("/restaurant/servers", requireRestaurantStore, async (req, res) => {
+  try {
+    const rows = await dataStore.all(
+      `SELECT id, name, active, createdAt FROM restaurant_servers
+       WHERE company = ? ${req.user.role === "Admin" ? "" : "AND active = 1"}
+       ORDER BY active DESC, name, id`,
+      [req.user.company]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/restaurant/servers", requireRestaurantAdmin, async (req, res) => {
+  try {
+    const name = String(req.body.name || "").trim();
+    if (!name || name.length > 80) return res.status(400).json({ error: "Escribe un nombre de hasta 80 caracteres." });
+    const existing = await dbGet("SELECT id FROM restaurant_servers WHERE company = ? AND lower(name) = lower(?)", [req.user.company, name]);
+    if (existing) return res.status(409).json({ error: "Ya existe un mesero con ese nombre." });
+    const createdAt = getETLocalISO();
+    const result = await dbRun(
+      "INSERT INTO restaurant_servers (company, name, active, createdAt) VALUES (?, ?, 1, ?)",
+      [req.user.company, name, createdAt]
+    );
+    res.json({ id: result.lastID, name, active: 1, createdAt });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/restaurant/servers/:id", requireRestaurantAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const server = await dbGet("SELECT * FROM restaurant_servers WHERE id = ? AND company = ?", [id, req.user.company]);
+    if (!server) return res.status(404).json({ error: "Mesero no encontrado." });
+    const name = String(req.body.name || server.name).trim();
+    const active = req.body.active === false || req.body.active === 0 ? 0 : 1;
+    if (!name || name.length > 80) return res.status(400).json({ error: "Escribe un nombre de hasta 80 caracteres." });
+    const duplicate = await dbGet("SELECT id FROM restaurant_servers WHERE company = ? AND lower(name) = lower(?) AND id <> ?", [req.user.company, name, id]);
+    if (duplicate) return res.status(409).json({ error: "Ya existe un mesero con ese nombre." });
+    await dbRun("UPDATE restaurant_servers SET name = ?, active = ? WHERE id = ? AND company = ?", [name, active, id, req.user.company]);
+    res.json({ updated: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/restaurant/table-sessions", requireRestaurantStore, async (req, res) => {
+  try {
+    const rows = await dataStore.all(
+      `SELECT s.id, s.tableId, t.name AS tableName, s.restaurantServerId, s.serverName,
+              s.guests, s.openedAt, s.closedAt, s.durationMinutes
+       FROM restaurant_table_sessions s
+       LEFT JOIN restaurant_tables t ON t.id = s.tableId
+       WHERE s.company = ? AND s.closedAt IS NOT NULL
+       ORDER BY s.closedAt DESC, s.id DESC
+       LIMIT 100`,
+      [req.user.company]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/restaurant/tables", requireRestaurantStore, async (req, res) => {
   try {
     const includeInactive = req.user.role === "Admin";
@@ -1668,23 +1751,30 @@ app.delete("/restaurant/tables/:id", requireRestaurantAdmin, async (req, res) =>
 app.post("/restaurant/tables/:id/seat", requireRestaurantStore, async (req, res) => {
   const id = Number(req.params.id);
   const guests = Number(req.body.guests);
+  const restaurantServerId = Number(req.body.restaurantServerId);
   if (!Number.isInteger(guests) || guests > 99) return res.status(400).json({ error: "Ingresa una cantidad válida de clientes." });
   if (guests < 1) return res.status(400).json({ error: "Debe haber al menos un cliente." });
+  if (!Number.isInteger(restaurantServerId) || restaurantServerId < 1) return res.status(400).json({ error: "Selecciona el mesero que atenderá la mesa." });
   try {
     const session = await dataStore.transaction(async () => {
       const table = await dbGet("SELECT * FROM restaurant_tables WHERE id = ? AND company = ? AND active = 1", [id, req.user.company]);
       if (!table) throw Object.assign(new Error("Mesa no encontrada o inactiva."), { status: 404 });
       const open = await dbGet("SELECT id FROM restaurant_table_sessions WHERE tableId = ? AND closedAt IS NULL", [id]);
       if (open) throw Object.assign(new Error("Esta mesa ya está ocupada."), { status: 409 });
+      const restaurantServer = await dbGet(
+        "SELECT id, name FROM restaurant_servers WHERE id = ? AND company = ? AND active = 1",
+        [restaurantServerId, req.user.company]
+      );
+      if (!restaurantServer) throw Object.assign(new Error("El mesero seleccionado no existe o está inactivo."), { status: 400 });
       const openedAt = getETLocalISO();
-      const serverName = req.user.fullName || req.user.username;
+      const serverName = restaurantServer.name;
       const result = await dbRun(
         `INSERT INTO restaurant_table_sessions
-         (company, tableId, serverUserId, serverName, guests, status, openedAt)
-         VALUES (?, ?, ?, ?, ?, 'OCCUPIED', ?)`,
-        [req.user.company, id, req.user.id, serverName, guests, openedAt]
+         (company, tableId, restaurantServerId, serverUserId, serverName, guests, status, openedAt)
+         VALUES (?, ?, ?, ?, ?, ?, 'OCCUPIED', ?)`,
+        [req.user.company, id, restaurantServerId, req.user.id, serverName, guests, openedAt]
       );
-      return { id: result.lastID, tableId: id, guests, status: "OCCUPIED", openedAt, serverName };
+      return { id: result.lastID, tableId: id, restaurantServerId, guests, status: "OCCUPIED", openedAt, serverName };
     });
     res.json(session);
   } catch (err) {
@@ -1732,7 +1822,9 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS client_intake_submissions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, clientId INTEGER NOT NULL, createdAt TEXT NOT NULL, claimedAt TEXT)`,
     `CREATE TABLE IF NOT EXISTS clients (id SERIAL PRIMARY KEY, company TEXT, idType TEXT, idNumber TEXT, razonSocial TEXT, nombreComercial TEXT, ciudad TEXT, direccion TEXT, email TEXT, telefono TEXT, celular TEXT)`,
     `CREATE TABLE IF NOT EXISTS restaurant_tables (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, capacity INTEGER DEFAULT 4, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS restaurant_table_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableId INTEGER NOT NULL, serverUserId INTEGER NOT NULL, serverName TEXT NOT NULL, guests INTEGER NOT NULL, status TEXT DEFAULT 'OCCUPIED', openedAt TEXT NOT NULL, closedAt TEXT, durationMinutes INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS restaurant_servers (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS restaurant_table_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableId INTEGER NOT NULL, restaurantServerId INTEGER, serverUserId INTEGER NOT NULL, serverName TEXT NOT NULL, guests INTEGER NOT NULL, status TEXT DEFAULT 'OCCUPIED', openedAt TEXT NOT NULL, closedAt TEXT, durationMinutes INTEGER)`,
+    `ALTER TABLE restaurant_table_sessions ADD COLUMN IF NOT EXISTS restaurantServerId INTEGER`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_open_table_session ON restaurant_table_sessions(tableId) WHERE closedAt IS NULL`,
     `CREATE INDEX IF NOT EXISTS idx_users_company ON users(company)`,
     `CREATE INDEX IF NOT EXISTS idx_products_company ON products(company)`,
@@ -1740,6 +1832,7 @@ async function initializePostgres() {
     `CREATE INDEX IF NOT EXISTS idx_clients_company ON clients(company)`,
     `CREATE INDEX IF NOT EXISTS idx_invoices_company_date ON invoices(company, date)`,
     `CREATE INDEX IF NOT EXISTS idx_restaurant_tables_company ON restaurant_tables(company)`,
+    `CREATE INDEX IF NOT EXISTS idx_restaurant_servers_company ON restaurant_servers(company)`,
     `CREATE INDEX IF NOT EXISTS idx_restaurant_sessions_company ON restaurant_table_sessions(company, openedAt)`
   ];
   for (const statement of statements) await dataStore.run(statement);
