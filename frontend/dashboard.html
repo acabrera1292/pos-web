@@ -18,9 +18,15 @@
       <button id="nav-pos" data-module="pos" onclick="showTab('pos')">
         Punto de Venta
       </button>
-      <button id="nav-mesas" data-module="mesas" class="hidden" onclick="showTab('mesas')">
-        Mesas
-      </button>
+      <div id="restaurantNavGroup" class="nav-group hidden">
+        <button id="nav-restaurante" class="nav-group-toggle" type="button" aria-expanded="false" onclick="toggleRestaurantMenu()">
+          <span>Restaurante</span><span id="restaurantNavArrow" class="nav-group-arrow">›</span>
+        </button>
+        <div id="restaurantNavItems" class="nav-submenu hidden">
+          <button id="nav-mesas" data-module="mesas" class="hidden" onclick="showTab('mesas')">Mesas</button>
+          <button id="nav-meseros" data-module="meseros" class="hidden" onclick="showTab('meseros')">Meseros</button>
+        </div>
+      </div>
       <button id="nav-ventas" data-module="ventas" onclick="showTab('ventas')">
         Ventas
       </button>
@@ -194,11 +200,66 @@
             <strong id="selectedRestaurantTableName">Mesa</strong>
             <span id="selectedRestaurantTableDetail"></span>
           </div>
+          <div id="restaurantSeatFields" class="restaurant-seat-fields">
+            <label>Clientes <input id="restaurantGuestsInput" type="number" min="1" max="99" value="2"></label>
+            <label>Mesero <select id="restaurantServerSelect"><option value="">Seleccionar mesero</option></select></label>
+          </div>
           <div class="inventory-actions">
             <button id="btnSeatRestaurantTable" type="button" onclick="seatSelectedRestaurantTable()">Sentar clientes</button>
             <button id="btnCloseRestaurantTable" type="button" onclick="closeSelectedRestaurantTable()">Liberar mesa</button>
             <button id="btnEditRestaurantTable" type="button" onclick="editSelectedRestaurantTable()">Editar mesa</button>
             <button id="btnDeleteRestaurantTable" class="danger-button" type="button" onclick="deleteSelectedRestaurantTable()">Eliminar mesa</button>
+          </div>
+        </div>
+
+        <div class="restaurant-history">
+          <div class="restaurant-section-heading">
+            <div>
+              <h3>Historial de atención</h3>
+              <p>Aquí puedes consultar cuánto tiempo estuvo ocupada cada mesa.</p>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Mesa</th><th>Mesero</th><th>Clientes</th><th>Inicio</th><th>Fin</th><th>Duración</th></tr></thead>
+              <tbody id="restaurantTableHistoryBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: MESEROS (RESTAURANTE) -->
+      <section id="meseros" class="tab-section hidden restaurant-tables-section">
+        <div class="restaurant-section-heading">
+          <div>
+            <h2>Meseros</h2>
+            <p>Administra las personas que pueden atender y recibir mesas.</p>
+          </div>
+          <button type="button" onclick="loadRestaurantServers()">Actualizar</button>
+        </div>
+
+        <div id="restaurantServerAdmin" class="restaurant-table-admin hidden">
+          <h3>Agregar mesero</h3>
+          <div class="restaurant-server-form">
+            <label>Nombre <input id="restaurantServerName" placeholder="Ej. María López"></label>
+            <button type="button" onclick="createRestaurantServer()">Agregar mesero</button>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Nombre</th><th>Estado</th></tr></thead>
+            <tbody id="restaurantServersBody"></tbody>
+          </table>
+        </div>
+        <div id="restaurantServerSelection" class="restaurant-table-selection hidden">
+          <div>
+            <strong id="selectedRestaurantServerName">Mesero</strong>
+            <span id="selectedRestaurantServerStatus"></span>
+          </div>
+          <div class="inventory-actions">
+            <button type="button" onclick="editSelectedRestaurantServer()">Editar</button>
+            <button id="btnToggleRestaurantServer" type="button" onclick="toggleSelectedRestaurantServer()">Desactivar</button>
           </div>
         </div>
       </section>
@@ -480,6 +541,20 @@ function applyModuleVisibility() {
   document.querySelectorAll("[data-module]").forEach(element => {
     element.classList.toggle("hidden", !enabledModules.includes(element.dataset.module));
   });
+  const restaurantGroup = document.getElementById("restaurantNavGroup");
+  const hasRestaurantModules = ["mesas", "meseros", "cocina", "reloj"].some(module => enabledModules.includes(module));
+  if (restaurantGroup) restaurantGroup.classList.toggle("hidden", !hasRestaurantModules);
+}
+
+function toggleRestaurantMenu(forceOpen) {
+  const items = document.getElementById("restaurantNavItems");
+  const button = document.getElementById("nav-restaurante");
+  const arrow = document.getElementById("restaurantNavArrow");
+  if (!items || !button || !arrow) return;
+  const open = typeof forceOpen === "boolean" ? forceOpen : items.classList.contains("hidden");
+  items.classList.toggle("hidden", !open);
+  button.setAttribute("aria-expanded", String(open));
+  arrow.textContent = open ? "⌄" : "›";
 }
 
 async function loadStoreContext() {
@@ -507,6 +582,7 @@ window.addEventListener("DOMContentLoaded", () => {
   applyModuleVisibility();
   loadStoreContext();
   initializeRestaurantTables();
+  initializeRestaurantServers();
   const label = document.getElementById("storeNameLabel");
   if (label) {
     label.textContent = company;
@@ -569,16 +645,21 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inventario", "pos", "mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
+  ["inventario", "pos", "mesas", "meseros", "ventas", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
+  const restaurantTabs = ["mesas", "meseros", "cocina", "reloj"];
+  const restaurantButton = document.getElementById("nav-restaurante");
+  if (restaurantButton) restaurantButton.classList.toggle("active", restaurantTabs.includes(tabId));
+  if (restaurantTabs.includes(tabId)) toggleRestaurantMenu(true);
 
   // cargar datos según pestaña
   if (tabId === "ventas")   loadSales();
   if (tabId === "clientes") loadClients();
   if (tabId === "usuarios" && userRole === "Admin") loadStoreUsers();
   if (tabId === "mesas") loadRestaurantTables();
+  if (tabId === "meseros") loadRestaurantServers();
 
   // actualizar panel derecho
   updateRightPanel(tabId);
