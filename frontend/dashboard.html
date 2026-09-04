@@ -18,6 +18,9 @@
       <button id="nav-pos" data-module="pos" onclick="showTab('pos')">
         Punto de Venta
       </button>
+      <button id="nav-mesas" data-module="mesas" class="hidden" onclick="showTab('mesas')">
+        Mesas
+      </button>
       <button id="nav-ventas" data-module="ventas" onclick="showTab('ventas')">
         Ventas
       </button>
@@ -162,6 +165,44 @@
 
       <!-- TAB: VENTAS -->
 <!-- VENTAS -->
+      <!-- TAB: MESAS (RESTAURANTE) -->
+      <section id="mesas" class="tab-section hidden restaurant-tables-section">
+        <div class="restaurant-section-heading">
+          <div>
+            <h2>Mesas</h2>
+            <p>Selecciona una mesa para sentar clientes o consultar su tiempo.</p>
+          </div>
+          <button type="button" onclick="loadRestaurantTables()">Actualizar</button>
+        </div>
+
+        <div id="restaurantTableAdmin" class="restaurant-table-admin hidden">
+          <h3>Administrar mesas</h3>
+          <div class="restaurant-table-form">
+            <label>Nombre <input id="restaurantTableName" placeholder="Ej. Mesa 1"></label>
+            <label>Capacidad <input id="restaurantTableCapacity" type="number" min="1" max="30" value="4"></label>
+            <button type="button" onclick="createRestaurantTable()">Agregar mesa</button>
+          </div>
+        </div>
+
+        <div id="restaurantTablesEmpty" class="restaurant-empty hidden">
+          No hay mesas configuradas. Un administrador puede crear la primera mesa aquí.
+        </div>
+        <div id="restaurantTablesGrid" class="restaurant-tables-grid"></div>
+
+        <div id="restaurantTableSelection" class="restaurant-table-selection hidden">
+          <div>
+            <strong id="selectedRestaurantTableName">Mesa</strong>
+            <span id="selectedRestaurantTableDetail"></span>
+          </div>
+          <div class="inventory-actions">
+            <button id="btnSeatRestaurantTable" type="button" onclick="seatSelectedRestaurantTable()">Sentar clientes</button>
+            <button id="btnCloseRestaurantTable" type="button" onclick="closeSelectedRestaurantTable()">Liberar mesa</button>
+            <button id="btnEditRestaurantTable" type="button" onclick="editSelectedRestaurantTable()">Editar mesa</button>
+            <button id="btnDeleteRestaurantTable" class="danger-button" type="button" onclick="deleteSelectedRestaurantTable()">Eliminar mesa</button>
+          </div>
+        </div>
+      </section>
+
 <section id="ventas" class="tab-section hidden">
   <div class="app-card">
     <h2>Ventas</h2>
@@ -427,6 +468,7 @@
 </aside>
 
 <script src="js/dialogs.js"></script>
+<script src="js/mesas.js"></script>
 <script>
 const API = "";
 const company = localStorage.getItem("company");
@@ -464,6 +506,7 @@ if (!company) {
 window.addEventListener("DOMContentLoaded", () => {
   applyModuleVisibility();
   loadStoreContext();
+  initializeRestaurantTables();
   const label = document.getElementById("storeNameLabel");
   if (label) {
     label.textContent = company;
@@ -526,7 +569,7 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inventario", "pos", "ventas", "clientes", "usuarios", "config"].forEach(id => {
+  ["inventario", "pos", "mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
@@ -535,6 +578,7 @@ function showTab(tabId) {
   if (tabId === "ventas")   loadSales();
   if (tabId === "clientes") loadClients();
   if (tabId === "usuarios" && userRole === "Admin") loadStoreUsers();
+  if (tabId === "mesas") loadRestaurantTables();
 
   // actualizar panel derecho
   updateRightPanel(tabId);
