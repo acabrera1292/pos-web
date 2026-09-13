@@ -25,6 +25,7 @@
         <div id="restaurantNavItems" class="nav-submenu hidden">
           <button id="nav-mesas" data-module="mesas" class="hidden" onclick="showTab('mesas')">Mesas</button>
           <button id="nav-meseros" data-module="meseros" class="hidden" onclick="showTab('meseros')">Meseros</button>
+          <button id="nav-menu" data-module="menu" class="hidden" onclick="showTab('menu')">Menú</button>
           <button id="nav-historial-mesas" data-module="historial-mesas" class="hidden" onclick="showTab('historial-mesas')">Historial de atención</button>
         </div>
       </div>
@@ -114,6 +115,12 @@
           <button onclick="addToCartByCode()">Agregar</button>
         </div>
 
+        <div id="restaurantQuickMenu" class="restaurant-quick-menu hidden">
+          <div class="restaurant-section-heading"><div><h3>Menú rápido</h3><p>Toca un producto para agregarlo al pedido.</p></div></div>
+          <div id="quickMenuCategories" class="quick-menu-categories"></div>
+          <div id="quickMenuProducts" class="quick-menu-products"></div>
+        </div>
+
         <h3>Carrito</h3>
 
         <div class="table-scroll">
@@ -187,6 +194,18 @@
 
       <!-- TAB: VENTAS -->
 <!-- VENTAS -->
+      <section id="menu" class="tab-section app-card hidden">
+        <div class="restaurant-section-heading">
+          <div><h2>Menú</h2><p>Organiza los productos del inventario en categorías para venderlos con un toque.</p></div>
+          <button type="button" onclick="loadProducts()">Actualizar</button>
+        </div>
+        <input id="menuSearch" class="menu-search" placeholder="Buscar por código, nombre o categoría" oninput="renderMenuManagement()">
+        <div class="table-scroll"><table><thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Precio</th><th>Stock</th></tr></thead><tbody id="menuBody"></tbody></table></div>
+        <div id="menuAdminActions" class="inventory-actions hidden">
+          <button type="button" onclick="changeSelectedMenuCategory()">Cambiar categoría</button>
+        </div>
+      </section>
+
       <!-- TAB: MESAS (RESTAURANTE) -->
       <section id="mesas" class="tab-section hidden restaurant-tables-section">
         <div class="restaurant-section-heading">
@@ -585,6 +604,14 @@
     <div class="filter-banner" style="margin-top:16px;">EXPORTAR</div>
     <button type="button" onclick="exportRestaurantHistory()">Exportar historial (CSV)</button>
   </div>
+
+  <div id="restaurantMenuTools" class="filter-group hidden">
+    <div class="filter-banner">IMPORTAR MENÚ</div>
+    <p class="settings-note">Hoja CSV: código, nombre, categoría, precio y cantidad.</p>
+    <input id="menuCsvFile" type="file" accept=".csv,text/csv" onchange="importRestaurantMenu(event)">
+    <button type="button" onclick="downloadMenuTemplate()">Descargar plantilla</button>
+    <button type="button" onclick="exportRestaurantMenu()">Exportar menú (CSV)</button>
+  </div>
 </aside>
 
 <script src="js/dialogs.js"></script>
@@ -601,7 +628,7 @@ function applyModuleVisibility() {
     element.classList.toggle("hidden", !enabledModules.includes(element.dataset.module));
   });
   const restaurantGroup = document.getElementById("restaurantNavGroup");
-  const hasRestaurantModules = ["mesas", "meseros", "historial-mesas", "cocina", "reloj"].some(module => enabledModules.includes(module));
+  const hasRestaurantModules = ["mesas", "meseros", "historial-mesas", "menu", "cocina", "reloj"].some(module => enabledModules.includes(module));
   if (restaurantGroup) restaurantGroup.classList.toggle("hidden", !hasRestaurantModules);
 }
 
@@ -625,6 +652,7 @@ async function loadStoreContext() {
     enabledModules = Array.isArray(context.enabledModules) ? context.enabledModules : enabledModules;
     localStorage.setItem("businessType", businessType);
     applyModuleVisibility();
+    renderRestaurantQuickMenu();
   } catch (err) {
     console.error("No se pudo cargar el tipo de negocio:", err);
   }
@@ -693,6 +721,8 @@ let currentStoreUserId = null;
 let storeUserLimit = 0;
 let activeRestaurantOrder = null;
 let restaurantOrderDirty = false;
+let selectedMenuProduct = null;
+let quickMenuCategory = "Todas";
 
 
 // --- NUEVO showTab para layout + filtros ---
@@ -706,11 +736,11 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inventario", "pos", "mesas", "meseros", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
+  ["inventario", "pos", "mesas", "meseros", "menu", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
-  const restaurantTabs = ["mesas", "meseros", "historial-mesas", "cocina", "reloj"];
+  const restaurantTabs = ["mesas", "meseros", "menu", "historial-mesas", "cocina", "reloj"];
   const restaurantButton = document.getElementById("nav-restaurante");
   if (restaurantButton) restaurantButton.classList.toggle("active", restaurantTabs.includes(tabId));
   if (restaurantTabs.includes(tabId)) toggleRestaurantMenu(true);
@@ -722,6 +752,7 @@ function showTab(tabId) {
   if (tabId === "mesas") loadRestaurantTables();
   if (tabId === "meseros") loadRestaurantServers();
   if (tabId === "historial-mesas") loadRestaurantTableHistory();
+  if (tabId === "menu") loadProducts();
 
   // actualizar panel derecho
   updateRightPanel(tabId);
@@ -734,11 +765,13 @@ function updateRightPanel(tabId) {
   const clientFilters = document.getElementById("filters-clients");   // clientes filtros
   const clientImport  = document.getElementById("clients-import");    // clientes importar/exportar
   const historyFilters = document.getElementById("restaurantHistoryFilters");
+  const menuTools = document.getElementById("restaurantMenuTools");
 
   const showInv     = (tabId === "inventario");
   const showSales   = (tabId === "ventas");
   const showClients = (tabId === "clientes");
   const showHistory = (tabId === "historial-mesas");
+  const showMenu = (tabId === "menu" && userRole === "Admin");
 
   if (invFilters) {
     invFilters.classList.toggle("hidden", !showInv);
@@ -759,6 +792,7 @@ function updateRightPanel(tabId) {
   if (historyFilters) {
     historyFilters.classList.toggle("hidden", !showHistory);
   }
+  if (menuTools) menuTools.classList.toggle("hidden", !showMenu);
 }
 
 
@@ -803,6 +837,8 @@ function showAllInventory() {
   filteredProducts = [];   // sin filtro => usa allProducts
   currentPage = 1;
   renderInventoryTable();
+  renderRestaurantQuickMenu();
+  renderMenuManagement();
 }
 
 
@@ -1608,6 +1644,139 @@ function importCSV(event) {
     loadProducts();
   };
   reader.readAsText(file);
+}
+
+function menuCategoryOf(product) {
+  return String(product?.menuCategory || "General").trim() || "General";
+}
+
+function renderRestaurantQuickMenu() {
+  const panel = document.getElementById("restaurantQuickMenu");
+  const categoriesBody = document.getElementById("quickMenuCategories");
+  const productsBody = document.getElementById("quickMenuProducts");
+  if (!panel || !categoriesBody || !productsBody) return;
+  const restaurantMode = businessType === "RESTAURANT" && enabledModules.includes("menu");
+  panel.classList.toggle("hidden", !restaurantMode);
+  if (!restaurantMode) return;
+
+  const categories = ["Todas", ...new Set(allProducts.map(menuCategoryOf).sort((a, b) => a.localeCompare(b)))]
+  if (!categories.includes(quickMenuCategory)) quickMenuCategory = "Todas";
+  categoriesBody.innerHTML = "";
+  categories.forEach(category => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = category;
+    button.classList.toggle("active", category === quickMenuCategory);
+    button.onclick = () => { quickMenuCategory = category; renderRestaurantQuickMenu(); };
+    categoriesBody.appendChild(button);
+  });
+
+  productsBody.innerHTML = "";
+  allProducts
+    .filter(product => Number(product.quantity || 0) > 0 && (quickMenuCategory === "Todas" || menuCategoryOf(product) === quickMenuCategory))
+    .sort((a, b) => menuCategoryOf(a).localeCompare(menuCategoryOf(b)) || String(a.name).localeCompare(String(b.name)))
+    .forEach(product => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "quick-menu-product";
+      const name = document.createElement("strong");
+      const detail = document.createElement("span");
+      name.textContent = product.name;
+      detail.textContent = `$${Number(product.price).toFixed(2)} · ${Number(product.quantity)} disponibles`;
+      button.append(name, detail);
+      button.onclick = () => addToCart(product);
+      productsBody.appendChild(button);
+    });
+  if (!productsBody.children.length) productsBody.innerHTML = '<p class="restaurant-empty">No hay productos disponibles en esta categoría.</p>';
+}
+
+function renderMenuManagement() {
+  const tbody = document.getElementById("menuBody");
+  if (!tbody) return;
+  const search = String(document.getElementById("menuSearch")?.value || "").trim().toLowerCase();
+  selectedMenuProduct = null;
+  tbody.innerHTML = "";
+  allProducts
+    .filter(product => !search || `${product.code || ""} ${product.name || ""} ${menuCategoryOf(product)}`.toLowerCase().includes(search))
+    .sort((a, b) => menuCategoryOf(a).localeCompare(menuCategoryOf(b)) || String(a.name).localeCompare(String(b.name)))
+    .forEach(product => {
+      const row = document.createElement("tr");
+      row.innerHTML = "<td></td><td></td><td></td><td></td><td></td>";
+      row.children[0].textContent = product.code;
+      row.children[1].textContent = product.name;
+      row.children[2].textContent = menuCategoryOf(product);
+      row.children[3].textContent = `$${Number(product.price).toFixed(2)}`;
+      row.children[4].textContent = Number(product.quantity || 0);
+      row.onclick = () => {
+        selectedMenuProduct = product;
+        tbody.querySelectorAll("tr").forEach(item => item.classList.remove("selected-row"));
+        row.classList.add("selected-row");
+      };
+      tbody.appendChild(row);
+    });
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="5" class="empty-table">No hay productos con esa búsqueda.</td></tr>';
+  document.getElementById("menuAdminActions")?.classList.toggle("hidden", userRole !== "Admin");
+}
+
+async function changeSelectedMenuCategory() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede organizar el menú.");
+  if (!selectedMenuProduct) return alert("Selecciona un producto primero.");
+  const category = await appPrompt(`Categoría para ${selectedMenuProduct.name}:`, menuCategoryOf(selectedMenuProduct));
+  if (category === null || !category.trim()) return;
+  const res = await fetch(`${API}/restaurant/menu/${selectedMenuProduct.id}`, {
+    method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ menuCategory: category.trim() })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cambiar la categoría.");
+  await loadProducts();
+}
+
+function downloadCsvFile(filename, rows) {
+  const csv = "\uFEFF" + rows.map(row => row.map(csvCell).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url);
+}
+
+function downloadMenuTemplate() {
+  downloadCsvFile("plantilla_menu.csv", [["codigo", "nombre", "categoria", "precio", "cantidad"], ["HAMB01", "Hamburguesa clásica", "Platos fuertes", "8.50", "50"]]);
+}
+
+function exportRestaurantMenu() {
+  if (!allProducts.length) return alert("No hay productos para exportar.");
+  downloadCsvFile(`menu_${company}.csv`, [["codigo", "nombre", "categoria", "precio", "cantidad"], ...allProducts.map(product => [product.code, product.name, menuCategoryOf(product), Number(product.price).toFixed(2), product.quantity])]);
+}
+
+async function importRestaurantMenu(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (userRole !== "Admin") { event.target.value = ""; return alert("Solo un administrador puede importar el menú."); }
+  const rows = parseCsvRows(await file.text());
+  const headers = (rows.shift() || []).map(normalizeCsvHeader);
+  const column = aliases => aliases.map(alias => headers.indexOf(alias)).find(index => index >= 0) ?? -1;
+  const columns = {
+    code: column(["codigo", "code"]), name: column(["nombre", "producto", "name"]),
+    menuCategory: column(["categoria", "category"]), price: column(["precio", "price"]),
+    quantity: column(["cantidad", "stock", "quantity"])
+  };
+  if (columns.code < 0 || columns.name < 0 || columns.price < 0) {
+    event.target.value = "";
+    return alert("El archivo necesita las columnas código, nombre y precio.");
+  }
+  const items = rows.map(values => ({
+    code: values[columns.code]?.trim(), name: values[columns.name]?.trim(),
+    menuCategory: columns.menuCategory >= 0 ? values[columns.menuCategory]?.trim() : "General",
+    price: Number(values[columns.price]), quantity: columns.quantity >= 0 ? Number(values[columns.quantity]) : 0
+  })).filter(item => item.code || item.name);
+  const res = await fetch(`${API}/restaurant/menu/import`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ items })
+  });
+  const data = await res.json();
+  event.target.value = "";
+  if (!res.ok) return alert(data.error || "No se pudo importar el menú.");
+  await loadProducts();
+  alert(`Menú importado.\nNuevos: ${data.inserted}\nActualizados: ${data.updated}`);
 }
 
 // ------- POS / CARRITO -------
