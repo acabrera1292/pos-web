@@ -124,7 +124,8 @@
               <th>Nombre</th>
               <th>Cant.</th>
               <th>Precio</th>
-              <th>Subtotal</th>
+              <th>Desc. %</th>
+              <th>Total</th>
               <th id="restaurantNoteHeader" class="hidden">Nota</th>
               <th>Acciones</th>
             </tr>
@@ -135,6 +136,8 @@
 
         <h3>Totales</h3>
         <div class="invoice-totals">
+          <p>Precio antes de descuento: $<span id="cartGrossTotal">0.00</span></p>
+          <p>Valor descontado: -$<span id="cartDiscount">0.00</span></p>
           <p>Subtotal sin IVA: $<span id="cartSubtotal">0.00</span></p>
           <p>IVA 15%: $<span id="cartTax">0.00</span></p>
           <p class="invoice-grand-total">Total: $<span id="cartTotal">0.00</span></p>
@@ -299,7 +302,9 @@
       <div><h3>Resumen</h3><p>Rango: <span id="summaryLabel">Sin datos</span></p></div>
     </div>
     <div class="sales-kpis">
-      <article><span>Total vendido</span><strong>$<span id="summaryTotal">0.00</span></strong></article>
+      <article><span>Ventas netas</span><strong>$<span id="summaryTotal">0.00</span></strong></article>
+      <article><span>Valor descontado</span><strong>$<span id="summaryDiscount">0.00</span></strong></article>
+      <article><span>Productos de cortesía</span><strong id="summaryComplimentary">0</strong></article>
       <article><span>Número de ventas</span><strong id="summaryTransactions">0</strong></article>
       <article><span>Productos vendidos</span><strong id="summaryUnits">0</strong></article>
       <article><span>Venta promedio</span><strong>$<span id="summaryAverage">0.00</span></strong></article>
@@ -318,7 +323,7 @@
     <h3 class="sales-detail-title">Detalle de ventas</h3>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>Fecha</th><th>Código</th><th>Nombre</th><th>Cant.</th><th>Precio</th><th>Total</th><th>Tipo</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Código</th><th>Nombre</th><th>Cant.</th><th>Precio</th><th>Descuento</th><th>Total neto</th><th>Motivo / Usuario</th><th>Tipo</th></tr></thead>
         <tbody id="salesBody"></tbody>
       </table>
     </div>
@@ -1747,7 +1752,9 @@ function addToCart(product) {
       code: product.code,
       name: product.name,
       price: Number(product.price),
-      quantity: 1
+      quantity: 1,
+      discountPercent: 0,
+      discountReason: ""
     });
   }
   if (activeRestaurantOrder) restaurantOrderDirty = true;
@@ -1786,6 +1793,8 @@ async function activateRestaurantOrder(order) {
     name: item.name,
     price: Number(item.price),
     quantity: Number(item.quantity),
+    discountPercent: Number(item.discountPercent || 0),
+    discountReason: item.discountReason || "",
     note: item.note || ""
   }));
   renderRestaurantOrderContext();
@@ -1796,6 +1805,7 @@ async function activateRestaurantOrder(order) {
 
 async function saveRestaurantOrder(silent = false) {
   if (!activeRestaurantOrder) return true;
+  if (!validateCartDiscounts()) return false;
   const button = document.getElementById("btnSaveRestaurantOrder");
   if (button) button.disabled = true;
   try {
@@ -1833,7 +1843,18 @@ function renderCart() {
   const tbody = document.getElementById("cartBody");
   tbody.innerHTML = "";
   cart.forEach((item, index) => {
-    const subtotal = item.price * item.quantity;
+    const gross = item.price * item.quantity;
+    const discountPercent = Number(item.discountPercent || 0);
+    const lineTotal = gross * (1 - discountPercent / 100);
+    const discountReason = item.discountReason || "";
+    const reasonControl = discountPercent > 0
+      ? `<select class="cart-discount-reason" onchange="updateCartDiscountReason(${index}, this.value)">
+          <option value=""${discountReason ? "" : " selected"}>Motivo...</option>
+          <option value="Promoción"${discountReason === "Promoción" ? " selected" : ""}>Promoción</option>
+          <option value="Cortesía"${discountReason === "Cortesía" ? " selected" : ""}>Cortesía</option>
+          <option value="Error de cocina"${discountReason === "Error de cocina" ? " selected" : ""}>Error de cocina</option>
+        </select>`
+      : "";
     const noteCell = activeRestaurantOrder
       ? `<td><input class="restaurant-item-note" maxlength="200" value="${escapeCartValue(item.note)}" placeholder="Ej. sin azúcar" oninput="updateCartNote(${index}, this.value)"></td>`
       : "";
@@ -1846,13 +1867,41 @@ function renderCart() {
                  onchange="updateCartQuantity(${index}, this.value)">
         </td>
         <td>$${item.price.toFixed(2)}</td>
-        <td>$${subtotal.toFixed(2)}</td>
+        <td><div class="cart-discount-control"><input type="number" min="0" max="100" step="1" value="${discountPercent}" onchange="updateCartDiscount(${index}, this.value)"><span>%</span>${reasonControl}</div></td>
+        <td>${discountPercent > 0 ? `<small class="cart-original-total">Antes $${gross.toFixed(2)}</small>` : ""}$${lineTotal.toFixed(2)}</td>
         ${noteCell}
         <td><button onclick="removeFromCart(${index})">Quitar</button></td>
       </tr>
     `;
   });
   updateTotal();
+}
+
+function updateCartDiscount(index, value) {
+  if (!cart[index]) return;
+  const discount = Number(value);
+  if (!Number.isFinite(discount) || discount < 0 || discount > 100) {
+    alert("El descuento debe estar entre 0% y 100%.");
+    renderCart();
+    return;
+  }
+  cart[index].discountPercent = discount;
+  if (discount === 0) cart[index].discountReason = "";
+  if (activeRestaurantOrder) restaurantOrderDirty = true;
+  renderCart();
+}
+
+function updateCartDiscountReason(index, value) {
+  if (!cart[index]) return;
+  cart[index].discountReason = String(value || "");
+  if (activeRestaurantOrder) restaurantOrderDirty = true;
+}
+
+function validateCartDiscounts() {
+  const missingReason = cart.find(item => Number(item.discountPercent || 0) === 100 && !String(item.discountReason || "").trim());
+  if (!missingReason) return true;
+  alert(`Selecciona el motivo para entregar ${missingReason.name} gratis.`);
+  return false;
 }
 
 function updateCartQuantity(index, newQty) {
@@ -1876,9 +1925,13 @@ function removeFromCart(index) {
 }
 
 function updateTotal() {
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const grossTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const discount = cart.reduce((sum, item) => sum + item.price * item.quantity * Number(item.discountPercent || 0) / 100, 0);
+  const total = Math.max(0, grossTotal - discount);
   const subtotal = total / 1.15;
   const tax = total - subtotal;
+  document.getElementById("cartGrossTotal").innerText = grossTotal.toFixed(2);
+  document.getElementById("cartDiscount").innerText = discount.toFixed(2);
   document.getElementById("cartSubtotal").innerText = subtotal.toFixed(2);
   document.getElementById("cartTax").innerText = tax.toFixed(2);
   document.getElementById("cartTotal").innerText = total.toFixed(2);
@@ -1898,6 +1951,7 @@ async function finishSale() {
     alert("No hay productos en el carrito.");
     return;
   }
+  if (!validateCartDiscounts()) return;
 
   const total = Number(document.getElementById("cartTotal").innerText || 0);
   const cash = Number(document.getElementById("cashReceived").value || 0);
@@ -1915,6 +1969,8 @@ async function finishSale() {
 
   const confirmed = await appConfirm(
     `${invoiceType === "FACTURA" ? selectedInvoiceClient.razonSocial : "CONSUMIDOR FINAL"}\n` +
+    `Precio antes de descuento: $${document.getElementById("cartGrossTotal").innerText}\n` +
+    `Valor descontado: $${document.getElementById("cartDiscount").innerText}\n` +
     `Subtotal: $${document.getElementById("cartSubtotal").innerText}\n` +
     `IVA 15%: $${document.getElementById("cartTax").innerText}\n` +
     `Total: $${total.toFixed(2)}\n\n¿Emitir comprobante?`
@@ -1986,6 +2042,11 @@ function renderSalesTable(list) {
   list.forEach(s => {
     const fecha = s.date ? new Date(s.date).toLocaleString() : "";
     const tipo = s.paymentType || "Efectivo";
+    const discountPercent = Number(s.discountPercent || 0);
+    const discountAmount = Number(s.discountAmount || 0);
+    const discountDetail = discountPercent > 0
+      ? `${escapeCartValue(s.discountReason || "Descuento")}${s.grantedByName ? `<br><small>${escapeCartValue(s.grantedByName)}</small>` : ""}`
+      : "—";
     tbody.innerHTML += `
       <tr onclick="selectSaleRow(this, ${s.id})">
         <td>${fecha}</td>
@@ -1993,7 +2054,9 @@ function renderSalesTable(list) {
         <td>${s.name}</td>
         <td>${s.quantity}</td>
         <td>$${Number(s.price).toFixed(2)}</td>
+        <td>${discountPercent > 0 ? `${discountPercent}% · $${discountAmount.toFixed(2)}` : "—"}</td>
         <td>$${Number(s.total).toFixed(2)}</td>
+        <td>${discountDetail}</td>
         <td>${tipo}</td>
       </tr>
     `;
@@ -2260,11 +2323,15 @@ function applyCustomSalesFilter() {
 
 function renderSalesReport(list, label) {
   const total = list.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+  const discount = list.reduce((sum, sale) => sum + Number(sale.discountAmount || 0), 0);
+  const complimentary = list.reduce((sum, sale) => sum + (Number(sale.discountPercent || 0) === 100 ? Number(sale.quantity || 0) : 0), 0);
   const units = list.reduce((sum, sale) => sum + Number(sale.quantity || 0), 0);
   const transactionIds = new Set(list.map(sale => sale.invoiceId ? `invoice-${sale.invoiceId}` : `line-${sale.id}`));
   const transactionCount = transactionIds.size;
   document.getElementById("summaryLabel").textContent = label;
   document.getElementById("summaryTotal").textContent = total.toFixed(2);
+  document.getElementById("summaryDiscount").textContent = discount.toFixed(2);
+  document.getElementById("summaryComplimentary").textContent = complimentary;
   document.getElementById("summaryTransactions").textContent = transactionCount;
   document.getElementById("summaryUnits").textContent = units;
   document.getElementById("summaryAverage").textContent = (transactionCount ? total / transactionCount : 0).toFixed(2);
@@ -2328,7 +2395,7 @@ function exportSales() {
     return;
   }
 
-  const rows = [["fecha","hora","codigo","nombre","cantidad","precio","total","tipo_pago"]];
+  const rows = [["fecha","hora","codigo","nombre","cantidad","precio_unitario","total_antes_descuento","descuento_porcentaje","valor_descontado","total_neto","motivo_descuento","autorizado_por","tipo_pago"]];
 
   list.forEach(s => {
     let fecha = "";
@@ -2349,12 +2416,18 @@ function exportSales() {
       s.name,
       s.quantity,
       Number(s.price).toFixed(2),
+      Number(s.grossTotal || (Number(s.price) * Number(s.quantity))).toFixed(2),
+      Number(s.discountPercent || 0).toFixed(2),
+      Number(s.discountAmount || 0).toFixed(2),
       Number(s.total).toFixed(2),
+      s.discountReason || "",
+      s.grantedByName || "",
       tipo
     ]);
   });
 
-  const csv = rows.map(r => r.join(",")).join("\n");
+  const salesCsvCell = value => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const csv = rows.map(r => r.map(salesCsvCell).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
