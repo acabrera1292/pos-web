@@ -2,6 +2,7 @@
   let restaurantTables = [];
   let restaurantServers = [];
   let restaurantTableHistory = [];
+  let selectedRestaurantHistory = null;
   let selectedRestaurantServer = null;
   let selectedRestaurantTable = null;
   let restaurantTableRefresh = null;
@@ -215,9 +216,14 @@
       const query = params.toString();
       const res = await fetch(`${API}/restaurant/table-sessions${query ? `?${query}` : ""}`, { headers: headers(), cache: "no-store" });
       restaurantTableHistory = await readResponse(res);
+      selectedRestaurantHistory = selectedRestaurantHistory
+        ? restaurantTableHistory.find(session => String(session.id) === String(selectedRestaurantHistory.id)) || null
+        : null;
       tbody.innerHTML = "";
       restaurantTableHistory.forEach(session => {
         const row = document.createElement("tr");
+        row.dataset.sessionId = session.id;
+        if (String(selectedRestaurantHistory?.id) === String(session.id)) row.classList.add("selected-row");
         [
           session.tableName || `Mesa ${session.tableId}`,
           session.serverName,
@@ -230,13 +236,34 @@
           cell.textContent = value;
           row.appendChild(cell);
         });
+        row.addEventListener("click", () => {
+          selectedRestaurantHistory = session;
+          renderRestaurantTableHistory();
+        });
         tbody.appendChild(row);
       });
       if (!restaurantTableHistory.length) tbody.innerHTML = '<tr><td colspan="6" class="empty-table">No hay atenciones con estos filtros.</td></tr>';
       renderRestaurantHistorySummary();
+      updateRestaurantHistoryActions();
     } catch (err) {
       if (!silent) alert(err.message);
     }
+  }
+
+  function renderRestaurantTableHistory() {
+    const tbody = document.getElementById("restaurantTableHistoryBody");
+    if (!tbody) return;
+    tbody.querySelectorAll("tr[data-session-id]").forEach(row => {
+      row.classList.toggle("selected-row", String(row.dataset.sessionId) === String(selectedRestaurantHistory?.id));
+    });
+    updateRestaurantHistoryActions();
+  }
+
+  function updateRestaurantHistoryActions() {
+    const actions = document.getElementById("restaurantHistoryAdminActions");
+    const button = document.getElementById("btnDeleteRestaurantHistory");
+    actions?.classList.toggle("hidden", userRole !== "Admin");
+    if (button) button.disabled = userRole !== "Admin" || !selectedRestaurantHistory;
   }
 
   function renderRestaurantHistorySummary() {
@@ -261,6 +288,24 @@
     document.getElementById("restaurantHistoryTo").value = "";
     document.getElementById("restaurantHistoryServer").value = "";
     loadRestaurantTableHistory();
+  }
+
+  async function deleteSelectedRestaurantHistory() {
+    if (userRole !== "Admin") return;
+    if (!selectedRestaurantHistory) return alert("Selecciona una atención para eliminar.");
+    const tableName = selectedRestaurantHistory.tableName || `Mesa ${selectedRestaurantHistory.tableId}`;
+    if (!await appConfirm(`¿Eliminar la atención de ${tableName}? Esta acción no modifica las ventas.`)) return;
+    try {
+      const res = await fetch(`${API}/restaurant/table-sessions/${selectedRestaurantHistory.id}`, {
+        method: "DELETE",
+        headers: headers()
+      });
+      await readResponse(res);
+      selectedRestaurantHistory = null;
+      await loadRestaurantTableHistory();
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   function csvCell(value) {
@@ -469,6 +514,7 @@
   window.applyRestaurantHistoryFilters = applyRestaurantHistoryFilters;
   window.clearRestaurantHistoryFilters = clearRestaurantHistoryFilters;
   window.exportRestaurantHistory = exportRestaurantHistory;
+  window.deleteSelectedRestaurantHistory = deleteSelectedRestaurantHistory;
   window.loadRestaurantServers = loadRestaurantServers;
   window.createRestaurantTable = createRestaurantTable;
   window.createRestaurantServer = createRestaurantServer;
