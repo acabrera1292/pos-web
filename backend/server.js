@@ -1247,16 +1247,77 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
   }
 });
 
-app.put("/restaurant/menu/:id", requireRestaurantAdmin, async (req, res) => {
-  const id = Number(req.params.id);
-  const category = String(req.body.menuCategory || "General").trim().slice(0, 60) || "General";
+app.post("/restaurant/menu", requireRestaurantStore, async (req, res) => {
+  const code = String(req.body.code || "").trim().slice(0, 80);
+  const name = String(req.body.name || "").trim().slice(0, 150);
+  const menuCategory = String(req.body.menuCategory || "General").trim().slice(0, 60) || "General";
+  const price = Number(req.body.price);
+  const quantity = Number(req.body.quantity);
+  if (!code || !name) return res.status(400).json({ error: "Completa el código y el nombre del producto." });
+  if (req.body.price === "" || req.body.quantity === "" || !Number.isFinite(price) || price < 0 || !Number.isInteger(quantity) || quantity < 0) {
+    return res.status(400).json({ error: "Ingresa un precio y una cantidad válidos." });
+  }
   try {
+    const duplicate = await dbGet("SELECT id FROM products WHERE company = ? AND code = ?", [req.user.company, code]);
+    if (duplicate) return res.status(409).json({ error: "Ya existe un producto con este código." });
     const result = await dbRun(
-      "UPDATE products SET menuCategory = ? WHERE id = ? AND company = ?",
-      [category, id, req.user.company]
+      "INSERT INTO products (code, name, quantity, price, menuCategory, company) VALUES (?, ?, ?, ?, ?, ?)",
+      [code, name, quantity, price, menuCategory, req.user.company]
     );
+    res.json({ id: result.lastID, created: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/restaurant/menu/:id", requireRestaurantStore, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Producto inválido." });
+  const categoryOnly = req.user.role === "Admin" && req.body.code === undefined && req.body.name === undefined;
+  try {
+    const existing = await dbGet("SELECT id FROM products WHERE id = ? AND company = ?", [id, req.user.company]);
+    if (!existing) return res.status(404).json({ error: "Producto no encontrado." });
+
+    if (categoryOnly) {
+      const category = String(req.body.menuCategory || "General").trim().slice(0, 60) || "General";
+      await dbRun("UPDATE products SET menuCategory = ? WHERE id = ? AND company = ?", [category, id, req.user.company]);
+      return res.json({ updated: true, menuCategory: category });
+    }
+
+    const code = String(req.body.code || "").trim().slice(0, 80);
+    const name = String(req.body.name || "").trim().slice(0, 150);
+    if (!code || !name) return res.status(400).json({ error: "Completa el código y el nombre del producto." });
+    const duplicate = await dbGet("SELECT id FROM products WHERE company = ? AND code = ? AND id <> ?", [req.user.company, code, id]);
+    if (duplicate) return res.status(409).json({ error: "Ya existe otro producto con este código." });
+
+    if (req.user.role !== "Admin") {
+      await dbRun("UPDATE products SET code = ?, name = ? WHERE id = ? AND company = ?", [code, name, id, req.user.company]);
+      return res.json({ updated: true });
+    }
+
+    const menuCategory = String(req.body.menuCategory || "General").trim().slice(0, 60) || "General";
+    const price = Number(req.body.price);
+    const quantity = Number(req.body.quantity);
+    if (req.body.price === "" || req.body.quantity === "" || !Number.isFinite(price) || price < 0 || !Number.isInteger(quantity) || quantity < 0) {
+      return res.status(400).json({ error: "Ingresa un precio y una cantidad válidos." });
+    }
+    await dbRun(
+      "UPDATE products SET code = ?, name = ?, quantity = ?, price = ?, menuCategory = ? WHERE id = ? AND company = ?",
+      [code, name, quantity, price, menuCategory, id, req.user.company]
+    );
+    res.json({ updated: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/restaurant/menu/:id", requireRestaurantAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Producto inválido." });
+  try {
+    const result = await dbRun("DELETE FROM products WHERE id = ? AND company = ?", [id, req.user.company]);
     if (!result.changes) return res.status(404).json({ error: "Producto no encontrado." });
-    res.json({ updated: true, menuCategory: category });
+    res.json({ deleted: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
