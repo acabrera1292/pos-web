@@ -911,15 +911,24 @@ tbody tr[style*="background-color"] {
 .restaurant-table-card small { color: #667085; }
 
 .restaurant-table-selection {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(160px, 0.6fr) minmax(260px, 1fr);
+  align-items: end;
   gap: 14px;
 }
 
 .restaurant-table-selection > div:first-child {
   display: grid;
   gap: 4px;
+}
+
+.restaurant-table-selection > .inventory-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 0;
 }
 
 .restaurant-seat-fields {
@@ -937,6 +946,28 @@ tbody tr[style*="background-color"] {
   margin: 0;
 }
 
+.restaurant-history-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(145px, 1fr)) repeat(3, auto);
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.restaurant-history-filters label {
+  display: grid;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.restaurant-history-kpis {
+  margin-bottom: 16px;
+}
+
 #restaurantServersBody tr {
   cursor: pointer;
 }
@@ -950,7 +981,8 @@ tbody tr[style*="background-color"] {
   .restaurant-table-form,
   .restaurant-server-form,
   .restaurant-seat-fields { grid-template-columns: 1fr; }
-  .restaurant-table-selection { align-items: stretch; flex-direction: column; }
+  .restaurant-table-selection,
+  .restaurant-history-filters { grid-template-columns: 1fr; align-items: stretch; }
   .restaurant-tables-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
