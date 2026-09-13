@@ -261,15 +261,6 @@
           <button type="button" onclick="loadRestaurantTableHistory()">Actualizar</button>
         </div>
 
-        <div class="restaurant-history-filters">
-          <label>Desde <input id="restaurantHistoryFrom" type="date"></label>
-          <label>Hasta <input id="restaurantHistoryTo" type="date"></label>
-          <label>Mesero <select id="restaurantHistoryServer"><option value="">Todos</option></select></label>
-          <button type="button" onclick="applyRestaurantHistoryFilters()">Seleccionar fechas</button>
-          <button type="button" onclick="clearRestaurantHistoryFilters()">Todas</button>
-          <button type="button" onclick="exportRestaurantHistory()">Exportar CSV</button>
-        </div>
-
         <div class="sales-kpis restaurant-history-kpis">
           <article><span>Mesas atendidas</span><strong id="restaurantHistorySessions">0</strong></article>
           <article><span>Clientes atendidos</span><strong id="restaurantHistoryGuests">0</strong></article>
@@ -282,6 +273,9 @@
             <thead><tr><th>Mesa</th><th>Mesero</th><th>Clientes</th><th>Inicio</th><th>Fin</th><th>Duración</th></tr></thead>
             <tbody id="restaurantTableHistoryBody"></tbody>
           </table>
+        </div>
+        <div id="restaurantHistoryAdminActions" class="inventory-actions hidden">
+          <button id="btnDeleteRestaurantHistory" type="button" onclick="deleteSelectedRestaurantHistory()" disabled>Eliminar</button>
         </div>
       </section>
 
@@ -547,6 +541,32 @@
     <button onclick="clearSalesFilter()">Todas las ventas</button>
     <button onclick="exportSales()">Exportar ventas (CSV)</button>
   </div>
+
+  <!-- HISTORIAL DE ATENCIÓN: filtros y exportación -->
+  <div id="restaurantHistoryFilters" class="filter-group hidden">
+    <div class="filter-banner">FILTROS HISTORIAL</div>
+
+    <div class="restaurant-history-side-filters">
+      <label>
+        Desde:
+        <input id="restaurantHistoryFrom" type="date" />
+      </label>
+      <label>
+        Hasta:
+        <input id="restaurantHistoryTo" type="date" />
+      </label>
+      <label>
+        Mesero:
+        <select id="restaurantHistoryServer"><option value="">Todos</option></select>
+      </label>
+    </div>
+
+    <button type="button" onclick="applyRestaurantHistoryFilters()">Seleccionar fechas</button>
+    <button type="button" onclick="clearRestaurantHistoryFilters()">Todas las atenciones</button>
+
+    <div class="filter-banner" style="margin-top:16px;">EXPORTAR</div>
+    <button type="button" onclick="exportRestaurantHistory()">Exportar historial (CSV)</button>
+  </div>
 </aside>
 
 <script src="js/dialogs.js"></script>
@@ -693,10 +713,12 @@ function updateRightPanel(tabId) {
   const salesFilters  = document.getElementById("salesFilters");      // ventas
   const clientFilters = document.getElementById("filters-clients");   // clientes filtros
   const clientImport  = document.getElementById("clients-import");    // clientes importar/exportar
+  const historyFilters = document.getElementById("restaurantHistoryFilters");
 
   const showInv     = (tabId === "inventario");
   const showSales   = (tabId === "ventas");
   const showClients = (tabId === "clientes");
+  const showHistory = (tabId === "historial-mesas");
 
   if (invFilters) {
     invFilters.classList.toggle("hidden", !showInv);
@@ -712,6 +734,10 @@ function updateRightPanel(tabId) {
 
   if (clientImport) {
     clientImport.classList.toggle("hidden", !showClients);
+  }
+
+  if (historyFilters) {
+    historyFilters.classList.toggle("hidden", !showHistory);
   }
 }
 
