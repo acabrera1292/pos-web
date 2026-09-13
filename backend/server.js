@@ -1686,6 +1686,21 @@ app.get("/restaurant/table-sessions", requireRestaurantStore, async (req, res) =
   }
 });
 
+app.delete("/restaurant/table-sessions/:id", requireRestaurantAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Atención inválida." });
+    const result = await dbRun(
+      "DELETE FROM restaurant_table_sessions WHERE id = ? AND company = ? AND closedAt IS NOT NULL",
+      [id, req.user.company]
+    );
+    if (!result.changes) return res.status(404).json({ error: "Atención no encontrada." });
+    res.json({ deleted: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/restaurant/tables", requireRestaurantStore, async (req, res) => {
   try {
     const includeInactive = req.user.role === "Admin";
