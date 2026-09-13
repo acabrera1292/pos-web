@@ -48,7 +48,7 @@ function createDatabase() {
   const camelKeys = {
     fullname: "fullName", mustchangepassword: "mustChangePassword", expiresat: "expiresAt", userlimit: "userLimit", usercount: "userCount",
     createdat: "createdAt", updatedat: "updatedAt", userid: "userId", codehash: "codeHash", usedat: "usedAt",
-    taxrate: "taxRate", productid: "productId", paymenttype: "paymentType", invoiceid: "invoiceId",
+    taxrate: "taxRate", menucategory: "menuCategory", productid: "productId", paymenttype: "paymentType", invoiceid: "invoiceId",
     grosstotal: "grossTotal", discountpercent: "discountPercent", discountamount: "discountAmount",
     discountreason: "discountReason", grantedbyuserid: "grantedByUserId", grantedbyname: "grantedByName",
     invoicetype: "invoiceType", clientid: "clientId", buyeridtype: "buyerIdType", buyeridnumber: "buyerIdNumber",

@@ -94,6 +94,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       quantity INTEGER,
       price REAL,
       taxRate REAL DEFAULT 15,
+      menuCategory TEXT DEFAULT 'General',
       company TEXT
     )
   `);
@@ -311,7 +312,7 @@ const BUSINESS_TYPES = Object.freeze({
   }),
   RESTAURANT: Object.freeze({
     label: "Restaurante",
-    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "cocina", "reloj"])
+    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "reloj"])
   })
 });
 
@@ -1246,6 +1247,55 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
   }
 });
 
+app.put("/restaurant/menu/:id", requireRestaurantAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const category = String(req.body.menuCategory || "General").trim().slice(0, 60) || "General";
+  try {
+    const result = await dbRun(
+      "UPDATE products SET menuCategory = ? WHERE id = ? AND company = ?",
+      [category, id, req.user.company]
+    );
+    if (!result.changes) return res.status(404).json({ error: "Producto no encontrado." });
+    res.json({ updated: true, menuCategory: category });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/restaurant/menu/import", requireRestaurantAdmin, async (req, res) => {
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ error: "El archivo no contiene productos." });
+  if (items.length > 2000) return res.status(400).json({ error: "Puedes importar hasta 2.000 productos a la vez." });
+  try {
+    const summary = await dataStore.transaction(async () => {
+      let inserted = 0;
+      let updated = 0;
+      for (const raw of items) {
+        const code = String(raw.code || "").trim().slice(0, 80);
+        const name = String(raw.name || "").trim().slice(0, 150);
+        const menuCategory = String(raw.menuCategory || "General").trim().slice(0, 60) || "General";
+        const price = Number(raw.price);
+        const quantity = Number(raw.quantity ?? 0);
+        if (!code || !name || !Number.isFinite(price) || price < 0 || !Number.isInteger(quantity) || quantity < 0) {
+          throw Object.assign(new Error(`Revisa código, nombre, cantidad y precio de ${code || "una fila"}.`), { status: 400 });
+        }
+        const existing = await dbGet("SELECT id FROM products WHERE company = ? AND code = ?", [req.user.company, code]);
+        if (existing) {
+          await dbRun("UPDATE products SET name = ?, quantity = ?, price = ?, menuCategory = ? WHERE id = ? AND company = ?", [name, quantity, price, menuCategory, existing.id, req.user.company]);
+          updated += 1;
+        } else {
+          await dbRun("INSERT INTO products (code, name, quantity, price, menuCategory, company) VALUES (?, ?, ?, ?, ?, ?)", [code, name, quantity, price, menuCategory, req.user.company]);
+          inserted += 1;
+        }
+      }
+      return { inserted, updated };
+    });
+    res.json(summary);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 app.put("/admin/usuarios/:id/password", requireAdmin, async (req, res) => {
   const password = String(req.body.password || "");
   if (password.length < 8) return res.status(400).json({ error: "La contraseña temporal debe tener al menos 8 caracteres." });
@@ -1592,6 +1642,7 @@ function addColumnIfMissing(table, definition) {
 
 if (!dataStore.postgres) {
   addColumnIfMissing("products", "taxRate REAL DEFAULT 15");
+  addColumnIfMissing("products", "menuCategory TEXT DEFAULT 'General'");
   addColumnIfMissing("sales", "invoiceId INTEGER");
   addColumnIfMissing("sales", "grossTotal REAL DEFAULT 0");
   addColumnIfMissing("sales", "discountPercent REAL DEFAULT 0");
@@ -2073,7 +2124,8 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS store_licenses (company TEXT PRIMARY KEY, active INTEGER DEFAULT 1, expiresAt TEXT, userLimit INTEGER DEFAULT 3, businessType TEXT DEFAULT 'SHOP', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
     `ALTER TABLE store_licenses ADD COLUMN IF NOT EXISTS businessType TEXT DEFAULT 'SHOP'`,
     `CREATE TABLE IF NOT EXISTS password_reset_codes (id SERIAL PRIMARY KEY, userId INTEGER NOT NULL, codeHash TEXT NOT NULL, expiresAt TEXT NOT NULL, usedAt TEXT, createdAt TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, taxRate DOUBLE PRECISION DEFAULT 15, company TEXT)`,
+    `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, taxRate DOUBLE PRECISION DEFAULT 15, menuCategory TEXT DEFAULT 'General', company TEXT)`,
+    `ALTER TABLE products ADD COLUMN IF NOT EXISTS menuCategory TEXT DEFAULT 'General'`,
     `CREATE TABLE IF NOT EXISTS sales (id SERIAL PRIMARY KEY, productId INTEGER, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, grossTotal DOUBLE PRECISION DEFAULT 0, discountPercent DOUBLE PRECISION DEFAULT 0, discountAmount DOUBLE PRECISION DEFAULT 0, discountReason TEXT DEFAULT '', grantedByUserId INTEGER, grantedByName TEXT DEFAULT '', total DOUBLE PRECISION, date TEXT, paymentType TEXT, invoiceId INTEGER, company TEXT)`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grossTotal DOUBLE PRECISION DEFAULT 0`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS discountPercent DOUBLE PRECISION DEFAULT 0`,
