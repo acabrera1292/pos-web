@@ -272,7 +272,7 @@ const BUSINESS_TYPES = Object.freeze({
   }),
   RESTAURANT: Object.freeze({
     label: "Restaurante",
-    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "cocina", "reloj"])
+    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "cocina", "reloj"])
   })
 });
 
@@ -1655,15 +1655,30 @@ app.put("/restaurant/servers/:id", requireRestaurantAdmin, async (req, res) => {
 
 app.get("/restaurant/table-sessions", requireRestaurantStore, async (req, res) => {
   try {
+    const conditions = ["s.company = ?", "s.closedAt IS NOT NULL"];
+    const params = [req.user.company];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || ""))) {
+      conditions.push("s.closedAt >= ?");
+      params.push(`${req.query.from}T00:00:00`);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ""))) {
+      conditions.push("s.closedAt <= ?");
+      params.push(`${req.query.to}T23:59:59`);
+    }
+    const restaurantServerId = Number(req.query.restaurantServerId);
+    if (Number.isInteger(restaurantServerId) && restaurantServerId > 0) {
+      conditions.push("s.restaurantServerId = ?");
+      params.push(restaurantServerId);
+    }
     const rows = await dataStore.all(
       `SELECT s.id, s.tableId, t.name AS tableName, s.restaurantServerId, s.serverName,
               s.guests, s.openedAt, s.closedAt, s.durationMinutes
        FROM restaurant_table_sessions s
        LEFT JOIN restaurant_tables t ON t.id = s.tableId
-       WHERE s.company = ? AND s.closedAt IS NOT NULL
+       WHERE ${conditions.join(" AND ")}
        ORDER BY s.closedAt DESC, s.id DESC
-       LIMIT 100`,
-      [req.user.company]
+       LIMIT 5000`,
+      params
     );
     res.json(rows);
   } catch (err) {
@@ -1751,23 +1766,22 @@ app.delete("/restaurant/tables/:id", requireRestaurantAdmin, async (req, res) =>
 app.post("/restaurant/tables/:id/seat", requireRestaurantStore, async (req, res) => {
   const id = Number(req.params.id);
   const guests = Number(req.body.guests);
-  const restaurantServerId = Number(req.body.restaurantServerId);
+  const restaurantServerId = Number(req.body.restaurantServerId) || null;
   if (!Number.isInteger(guests) || guests > 99) return res.status(400).json({ error: "Ingresa una cantidad válida de clientes." });
   if (guests < 1) return res.status(400).json({ error: "Debe haber al menos un cliente." });
-  if (!Number.isInteger(restaurantServerId) || restaurantServerId < 1) return res.status(400).json({ error: "Selecciona el mesero que atenderá la mesa." });
   try {
     const session = await dataStore.transaction(async () => {
       const table = await dbGet("SELECT * FROM restaurant_tables WHERE id = ? AND company = ? AND active = 1", [id, req.user.company]);
       if (!table) throw Object.assign(new Error("Mesa no encontrada o inactiva."), { status: 404 });
       const open = await dbGet("SELECT id FROM restaurant_table_sessions WHERE tableId = ? AND closedAt IS NULL", [id]);
       if (open) throw Object.assign(new Error("Esta mesa ya está ocupada."), { status: 409 });
-      const restaurantServer = await dbGet(
+      const restaurantServer = restaurantServerId ? await dbGet(
         "SELECT id, name FROM restaurant_servers WHERE id = ? AND company = ? AND active = 1",
         [restaurantServerId, req.user.company]
-      );
-      if (!restaurantServer) throw Object.assign(new Error("El mesero seleccionado no existe o está inactivo."), { status: 400 });
+      ) : null;
+      if (restaurantServerId && !restaurantServer) throw Object.assign(new Error("El mesero seleccionado no existe o está inactivo."), { status: 400 });
       const openedAt = getETLocalISO();
-      const serverName = restaurantServer.name;
+      const serverName = restaurantServer?.name || "Sin asignar";
       const result = await dbRun(
         `INSERT INTO restaurant_table_sessions
          (company, tableId, restaurantServerId, serverUserId, serverName, guests, status, openedAt)
