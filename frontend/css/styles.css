@@ -1063,6 +1063,29 @@ td button {
   box-sizing: border-box;
 }
 
+.cart-discount-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 150px;
+}
+
+.cart-discount-control input {
+  width: 58px;
+}
+
+.cart-discount-reason {
+  width: 100%;
+  margin-top: 3px;
+}
+
+.cart-original-total {
+  display: block;
+  color: #667085;
+  text-decoration: line-through;
+}
+
 #cartTotal,
 #changeDue {
   font-weight: 700;
@@ -1106,7 +1129,7 @@ td button {
 .sales-quick-filters button.active { border-color: #9ca3af; background: #d1d5db; }
 .sales-report-heading { display: flex; justify-content: space-between; margin-top: 14px; }
 .sales-report-heading h3 { margin-top: 0 !important; }
-.sales-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 12px 0 18px; }
+.sales-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0 18px; }
 .sales-kpis article { padding: 13px; border: 1px solid #d1d5db; border-radius: 5px; background: #f9fafb; }
 .sales-kpis span { display: block; color: #6b7280; font-size: 12px; }
 .sales-kpis strong { display: block; margin-top: 5px; color: #111827; font-size: 21px; }
