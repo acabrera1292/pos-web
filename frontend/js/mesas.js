@@ -1,6 +1,7 @@
 (function () {
   let restaurantTables = [];
   let restaurantServers = [];
+  let restaurantTableHistory = [];
   let selectedRestaurantServer = null;
   let selectedRestaurantTable = null;
   let restaurantTableRefresh = null;
@@ -27,7 +28,7 @@
     if (!select) return;
     const previous = select.value;
     const activeServers = restaurantServers.filter(server => Boolean(server.active));
-    select.innerHTML = '<option value="">Seleccionar mesero</option>';
+    select.innerHTML = '<option value="">Sin mesero</option>';
     activeServers.forEach(server => {
       const option = document.createElement("option");
       option.value = server.id;
@@ -35,6 +36,19 @@
       select.appendChild(option);
     });
     if (activeServers.some(server => String(server.id) === previous)) select.value = previous;
+
+    const historySelect = document.getElementById("restaurantHistoryServer");
+    if (historySelect) {
+      const historyPrevious = historySelect.value;
+      historySelect.innerHTML = '<option value="">Todos</option>';
+      restaurantServers.forEach(server => {
+        const option = document.createElement("option");
+        option.value = server.id;
+        option.textContent = `${server.name}${server.active ? "" : " (inactivo)"}`;
+        historySelect.appendChild(option);
+      });
+      if (restaurantServers.some(server => String(server.id) === historyPrevious)) historySelect.value = historyPrevious;
+    }
   }
 
   function tableState(table) {
@@ -124,7 +138,6 @@
       renderRestaurantTables();
       if (!silent) {
         await loadRestaurantServers(true);
-        await loadRestaurantTableHistory(true);
       }
     } catch (err) {
       if (!silent) alert(err.message);
@@ -155,9 +168,8 @@
   async function seatSelectedRestaurantTable() {
     if (!selectedRestaurantTable || selectedRestaurantTable.sessionId) return;
     const guests = Number(document.getElementById("restaurantGuestsInput")?.value);
-    const restaurantServerId = Number(document.getElementById("restaurantServerSelect")?.value);
+    const restaurantServerId = Number(document.getElementById("restaurantServerSelect")?.value) || null;
     if (!Number.isInteger(guests) || guests < 1 || guests > 99) return alert("Ingresa una cantidad válida de clientes.");
-    if (!Number.isInteger(restaurantServerId) || restaurantServerId < 1) return alert("Selecciona el mesero que atenderá la mesa.");
     try {
       const res = await fetch(`${API}/restaurant/tables/${selectedRestaurantTable.id}/seat`, {
         method: "POST",
@@ -192,10 +204,19 @@
     const tbody = document.getElementById("restaurantTableHistoryBody");
     if (!tbody) return;
     try {
-      const res = await fetch(`${API}/restaurant/table-sessions`, { headers: headers(), cache: "no-store" });
-      const history = await readResponse(res);
+      await loadRestaurantServers(true);
+      const params = new URLSearchParams();
+      const from = document.getElementById("restaurantHistoryFrom")?.value;
+      const to = document.getElementById("restaurantHistoryTo")?.value;
+      const serverId = document.getElementById("restaurantHistoryServer")?.value;
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      if (serverId) params.set("restaurantServerId", serverId);
+      const query = params.toString();
+      const res = await fetch(`${API}/restaurant/table-sessions${query ? `?${query}` : ""}`, { headers: headers(), cache: "no-store" });
+      restaurantTableHistory = await readResponse(res);
       tbody.innerHTML = "";
-      history.forEach(session => {
+      restaurantTableHistory.forEach(session => {
         const row = document.createElement("tr");
         [
           session.tableName || `Mesa ${session.tableId}`,
@@ -211,10 +232,62 @@
         });
         tbody.appendChild(row);
       });
-      if (!history.length) tbody.innerHTML = '<tr><td colspan="6" class="empty-table">Todavía no hay mesas liberadas.</td></tr>';
+      if (!restaurantTableHistory.length) tbody.innerHTML = '<tr><td colspan="6" class="empty-table">No hay atenciones con estos filtros.</td></tr>';
+      renderRestaurantHistorySummary();
     } catch (err) {
       if (!silent) alert(err.message);
     }
+  }
+
+  function renderRestaurantHistorySummary() {
+    const durations = restaurantTableHistory.map(row => Number(row.durationMinutes) || 0);
+    const totalGuests = restaurantTableHistory.reduce((sum, row) => sum + (Number(row.guests) || 0), 0);
+    const average = durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : 0;
+    document.getElementById("restaurantHistorySessions").textContent = restaurantTableHistory.length;
+    document.getElementById("restaurantHistoryGuests").textContent = totalGuests;
+    document.getElementById("restaurantHistoryAverage").textContent = average;
+    document.getElementById("restaurantHistoryLongest").textContent = durations.length ? Math.max(...durations) : 0;
+  }
+
+  function applyRestaurantHistoryFilters() {
+    const from = document.getElementById("restaurantHistoryFrom")?.value;
+    const to = document.getElementById("restaurantHistoryTo")?.value;
+    if (from && to && from > to) return alert("La fecha Desde no puede ser posterior a la fecha Hasta.");
+    loadRestaurantTableHistory();
+  }
+
+  function clearRestaurantHistoryFilters() {
+    document.getElementById("restaurantHistoryFrom").value = "";
+    document.getElementById("restaurantHistoryTo").value = "";
+    document.getElementById("restaurantHistoryServer").value = "";
+    loadRestaurantTableHistory();
+  }
+
+  function csvCell(value) {
+    return `"${String(value ?? "").replace(/"/g, '""')}"`;
+  }
+
+  function exportRestaurantHistory() {
+    if (!restaurantTableHistory.length) return alert("No hay datos para exportar.");
+    const rows = [["Mesa", "Mesero", "Clientes", "Inicio", "Fin", "Duración (minutos)"]];
+    restaurantTableHistory.forEach(session => rows.push([
+      session.tableName || `Mesa ${session.tableId}`,
+      session.serverName,
+      session.guests,
+      formatDateTime(session.openedAt),
+      formatDateTime(session.closedAt),
+      session.durationMinutes ?? 0
+    ]));
+    const csv = rows.map(row => row.map(csvCell).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "historial-atencion.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   function renderRestaurantServers() {
@@ -393,6 +466,9 @@
   window.initializeRestaurantServers = initializeRestaurantServers;
   window.loadRestaurantTables = loadRestaurantTables;
   window.loadRestaurantTableHistory = loadRestaurantTableHistory;
+  window.applyRestaurantHistoryFilters = applyRestaurantHistoryFilters;
+  window.clearRestaurantHistoryFilters = clearRestaurantHistoryFilters;
+  window.exportRestaurantHistory = exportRestaurantHistory;
   window.loadRestaurantServers = loadRestaurantServers;
   window.createRestaurantTable = createRestaurantTable;
   window.createRestaurantServer = createRestaurantServer;
