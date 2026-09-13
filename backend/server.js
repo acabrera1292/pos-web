@@ -240,8 +240,38 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
     )
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS restaurant_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company TEXT NOT NULL,
+      tableSessionId INTEGER NOT NULL,
+      tableId INTEGER NOT NULL,
+      status TEXT DEFAULT 'OPEN',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      paidAt TEXT,
+      invoiceId INTEGER
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS restaurant_order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company TEXT NOT NULL,
+      orderId INTEGER NOT NULL,
+      productId INTEGER NOT NULL,
+      code TEXT,
+      name TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      price REAL NOT NULL,
+      note TEXT DEFAULT ''
+    )
+  `);
+
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_open_table_session
           ON restaurant_table_sessions(tableId) WHERE closedAt IS NULL`);
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_order_session
+          ON restaurant_orders(tableSessionId)`);
 
 });
 
@@ -784,7 +814,7 @@ app.post("/admin/tiendas/estado", requireAdmin, (req, res) => {
 // Eliminar tienda completa (usuarios, productos, ventas)
 app.delete("/admin/tiendas/:company", requireAdmin, async (req, res) => {
   const company = req.params.company;
-  const tables = ["restaurant_table_sessions", "restaurant_servers", "restaurant_tables", "client_intake_submissions", "client_intake_tokens", "sri_certificates",
+  const tables = ["restaurant_order_items", "restaurant_orders", "restaurant_table_sessions", "restaurant_servers", "restaurant_tables", "client_intake_submissions", "client_intake_tokens", "sri_certificates",
     "sri_settings", "invoices", "clients", "sales", "products", "users", "store_licenses"];
   try {
     await dataStore.transaction(async () => {
@@ -1047,6 +1077,7 @@ app.delete("/products/:company/:id", requireUserAdmin, (req, res) => {
 app.post("/sales/:company", requireCompanyUser, async (req, res) => {
   const { company } = req.params;
   const { items, cash, paymentType, invoiceType, clientId } = req.body;
+  const restaurantOrderId = Number(req.body.restaurantOrderId) || null;
   const date = getETLocalISO();
   const payType = paymentType || "Efectivo";
 
@@ -1057,6 +1088,19 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
   const type = invoiceType === "FACTURA" ? "FACTURA" : "CONSUMIDOR_FINAL";
 
   try {
+    const restaurantOrder = restaurantOrderId
+      ? await dbGet(
+        `SELECT o.*, s.openedAt
+         FROM restaurant_orders o
+         JOIN restaurant_table_sessions s ON s.id = o.tableSessionId
+         WHERE o.id = ? AND o.company = ? AND o.status = 'OPEN' AND s.closedAt IS NULL`,
+        [restaurantOrderId, company]
+      )
+      : null;
+    if (restaurantOrderId && !restaurantOrder) {
+      return res.status(400).json({ error: "El pedido de la mesa ya no está disponible." });
+    }
+
     const client = type === "FACTURA"
       ? await dbGet("SELECT * FROM clients WHERE id = ? AND company = ?", [clientId, company])
       : null;
@@ -1100,6 +1144,13 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       : settings?.certificateConfigured ? "CERTIFICATE_PENDING_VALIDATION" : "CONFIGURATION_REQUIRED";
 
     const invoice = await dataStore.transaction(async () => {
+      if (restaurantOrder) {
+        const claimed = await dbRun(
+          "UPDATE restaurant_orders SET status = 'PROCESSING', updatedAt = ? WHERE id = ? AND company = ? AND status = 'OPEN'",
+          [date, restaurantOrder.id, company]
+        );
+        if (!claimed.changes) throw Object.assign(new Error("Este pedido ya está siendo procesado."), { status: 409 });
+      }
       const createdInvoice = await dbRun(
       `INSERT INTO invoices
        (company, invoiceType, clientId, buyerIdType, buyerIdNumber, buyerName,
@@ -1137,6 +1188,17 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
          ON CONFLICT(company) DO UPDATE SET nextSequence = ?`,
         [company, sequence + 1, sequence + 1]
       );
+      if (restaurantOrder) {
+        const durationMinutes = Math.max(0, Math.round((new Date(date) - new Date(restaurantOrder.openedAt)) / 60000));
+        await dbRun(
+          "UPDATE restaurant_orders SET status = 'PAID', paidAt = ?, invoiceId = ?, updatedAt = ? WHERE id = ? AND company = ?",
+          [date, createdInvoice.lastID, date, restaurantOrder.id, company]
+        );
+        await dbRun(
+          "UPDATE restaurant_table_sessions SET closedAt = ?, durationMinutes = ?, status = 'CLOSED' WHERE id = ? AND company = ? AND closedAt IS NULL",
+          [date, durationMinutes, restaurantOrder.tableSessionId, company]
+        );
+      }
       return createdInvoice;
     });
 
@@ -1149,10 +1211,11 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       taxAmount,
       total,
       cash,
-      paymentType: payType
+      paymentType: payType,
+      tableClosed: Boolean(restaurantOrder)
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -1605,6 +1668,101 @@ app.put("/admin/tiendas/:company/licencia", requireAdmin, async (req, res) => {
 
 // ---------- RESTAURANTE: MESAS ----------
 
+async function ensureRestaurantOrder(session) {
+  let order = await dbGet(
+    "SELECT * FROM restaurant_orders WHERE tableSessionId = ? AND company = ?",
+    [session.id, session.company]
+  );
+  if (order) return order;
+  const now = getETLocalISO();
+  await dbRun(
+    `INSERT INTO restaurant_orders
+     (company, tableSessionId, tableId, status, createdAt, updatedAt)
+     VALUES (?, ?, ?, 'OPEN', ?, ?)
+     ON CONFLICT(tableSessionId) DO NOTHING`,
+    [session.company, session.id, session.tableId, now, now]
+  );
+  order = await dbGet(
+    "SELECT * FROM restaurant_orders WHERE tableSessionId = ? AND company = ?",
+    [session.id, session.company]
+  );
+  return order;
+}
+
+async function restaurantOrderResponse(order) {
+  const items = await dataStore.all(
+    `SELECT id, productId, code, name, quantity, price, note
+     FROM restaurant_order_items WHERE orderId = ? AND company = ? ORDER BY id`,
+    [order.id, order.company]
+  );
+  return { ...order, items };
+}
+
+app.get("/restaurant/table-sessions/:sessionId/order", requireRestaurantStore, async (req, res) => {
+  try {
+    const sessionId = Number(req.params.sessionId);
+    if (!Number.isInteger(sessionId) || sessionId < 1) return res.status(400).json({ error: "Atención inválida." });
+    const session = await dbGet(
+      `SELECT s.*, t.name AS tableName
+       FROM restaurant_table_sessions s
+       JOIN restaurant_tables t ON t.id = s.tableId
+       WHERE s.id = ? AND s.company = ? AND s.closedAt IS NULL`,
+      [sessionId, req.user.company]
+    );
+    if (!session) return res.status(404).json({ error: "La mesa ya no está ocupada." });
+    const order = await ensureRestaurantOrder(session);
+    res.json({ ...(await restaurantOrderResponse(order)), tableName: session.tableName, guests: session.guests, serverName: session.serverName });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.put("/restaurant/table-sessions/:sessionId/order", requireRestaurantStore, async (req, res) => {
+  const sessionId = Number(req.params.sessionId);
+  const requestedItems = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!Number.isInteger(sessionId) || sessionId < 1) return res.status(400).json({ error: "Atención inválida." });
+  if (requestedItems.length > 200) return res.status(400).json({ error: "El pedido tiene demasiados productos." });
+  try {
+    const session = await dbGet(
+      "SELECT * FROM restaurant_table_sessions WHERE id = ? AND company = ? AND closedAt IS NULL",
+      [sessionId, req.user.company]
+    );
+    if (!session) return res.status(404).json({ error: "La mesa ya no está ocupada." });
+
+    const cleanItems = [];
+    for (const item of requestedItems) {
+      const productId = Number(item.id || item.productId);
+      const quantity = Number(item.quantity);
+      if (!Number.isInteger(productId) || !Number.isInteger(quantity) || quantity < 1 || quantity > 999) {
+        return res.status(400).json({ error: "Revisa las cantidades del pedido." });
+      }
+      const product = await dbGet("SELECT * FROM products WHERE id = ? AND company = ?", [productId, req.user.company]);
+      if (!product) return res.status(400).json({ error: "Uno de los productos ya no existe." });
+      if (quantity > Number(product.quantity || 0)) return res.status(400).json({ error: `Inventario insuficiente para ${product.name}.` });
+      cleanItems.push({ product, quantity, note: String(item.note || "").trim().slice(0, 200) });
+    }
+
+    const order = await dataStore.transaction(async () => {
+      const currentOrder = await ensureRestaurantOrder(session);
+      if (currentOrder.status !== "OPEN") throw Object.assign(new Error("Este pedido ya fue cerrado."), { status: 409 });
+      await dbRun("DELETE FROM restaurant_order_items WHERE orderId = ? AND company = ?", [currentOrder.id, req.user.company]);
+      for (const item of cleanItems) {
+        await dbRun(
+          `INSERT INTO restaurant_order_items
+           (company, orderId, productId, code, name, quantity, price, note)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [req.user.company, currentOrder.id, item.product.id, item.product.code, item.product.name, item.quantity, item.product.price, item.note]
+        );
+      }
+      await dbRun("UPDATE restaurant_orders SET updatedAt = ? WHERE id = ? AND company = ?", [getETLocalISO(), currentOrder.id, req.user.company]);
+      return dbGet("SELECT * FROM restaurant_orders WHERE id = ?", [currentOrder.id]);
+    });
+    res.json(await restaurantOrderResponse(order));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 app.get("/restaurant/servers", requireRestaurantStore, async (req, res) => {
   try {
     const rows = await dataStore.all(
@@ -1707,10 +1865,13 @@ app.get("/restaurant/tables", requireRestaurantStore, async (req, res) => {
     const rows = await dataStore.all(
       `SELECT t.id, t.name, t.capacity, t.active,
               s.id AS sessionId, s.guests, s.status, s.openedAt,
-              s.serverUserId, s.serverName
+              s.serverUserId, s.serverName, o.id AS orderId,
+              COALESCE((SELECT SUM(oi.quantity) FROM restaurant_order_items oi WHERE oi.orderId = o.id), 0) AS orderItemCount
        FROM restaurant_tables t
        LEFT JOIN restaurant_table_sessions s
          ON s.tableId = t.id AND s.closedAt IS NULL
+       LEFT JOIN restaurant_orders o
+         ON o.tableSessionId = s.id AND o.status = 'OPEN'
        WHERE t.company = ? ${includeInactive ? "" : "AND t.active = 1"}
        ORDER BY t.name, t.id`,
       [req.user.company]
@@ -1803,7 +1964,9 @@ app.post("/restaurant/tables/:id/seat", requireRestaurantStore, async (req, res)
          VALUES (?, ?, ?, ?, ?, ?, 'OCCUPIED', ?)`,
         [req.user.company, id, restaurantServerId, req.user.id, serverName, guests, openedAt]
       );
-      return { id: result.lastID, tableId: id, restaurantServerId, guests, status: "OCCUPIED", openedAt, serverName };
+      const session = { id: result.lastID, company: req.user.company, tableId: id, restaurantServerId, guests, status: "OCCUPIED", openedAt, serverName };
+      const order = await ensureRestaurantOrder(session);
+      return { ...session, orderId: order.id };
     });
     res.json(session);
   } catch (err) {
@@ -1819,12 +1982,29 @@ app.post("/restaurant/tables/:id/close", requireRestaurantStore, async (req, res
       [id, req.user.company]
     );
     if (!session) return res.status(404).json({ error: "Esta mesa ya está disponible." });
+    const pendingOrder = await dbGet(
+      `SELECT o.id, COUNT(oi.id) AS itemCount
+       FROM restaurant_orders o
+       LEFT JOIN restaurant_order_items oi ON oi.orderId = o.id
+       WHERE o.tableSessionId = ? AND o.company = ? AND o.status = 'OPEN'
+       GROUP BY o.id`,
+      [session.id, req.user.company]
+    );
+    if (Number(pendingOrder?.itemCount || 0) > 0) {
+      return res.status(409).json({ error: "Esta mesa tiene un pedido pendiente. Ábrelo y finaliza la venta antes de liberar la mesa." });
+    }
     const closedAt = getETLocalISO();
     const durationMinutes = Math.max(0, Math.round((new Date(closedAt) - new Date(session.openedAt)) / 60000));
     await dbRun(
       "UPDATE restaurant_table_sessions SET closedAt = ?, durationMinutes = ?, status = 'CLOSED' WHERE id = ?",
       [closedAt, durationMinutes, session.id]
     );
+    if (pendingOrder?.id) {
+      await dbRun(
+        "UPDATE restaurant_orders SET status = 'CANCELED', updatedAt = ? WHERE id = ? AND company = ?",
+        [closedAt, pendingOrder.id, req.user.company]
+      );
+    }
     res.json({ closed: true, durationMinutes });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1853,8 +2033,11 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS restaurant_tables (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, capacity INTEGER DEFAULT 4, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS restaurant_servers (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS restaurant_table_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableId INTEGER NOT NULL, restaurantServerId INTEGER, serverUserId INTEGER NOT NULL, serverName TEXT NOT NULL, guests INTEGER NOT NULL, status TEXT DEFAULT 'OCCUPIED', openedAt TEXT NOT NULL, closedAt TEXT, durationMinutes INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS restaurant_orders (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableSessionId INTEGER NOT NULL, tableId INTEGER NOT NULL, status TEXT DEFAULT 'OPEN', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, paidAt TEXT, invoiceId INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS restaurant_order_items (id SERIAL PRIMARY KEY, company TEXT NOT NULL, orderId INTEGER NOT NULL, productId INTEGER NOT NULL, code TEXT, name TEXT NOT NULL, quantity INTEGER NOT NULL, price DOUBLE PRECISION NOT NULL, note TEXT DEFAULT '')`,
     `ALTER TABLE restaurant_table_sessions ADD COLUMN IF NOT EXISTS restaurantServerId INTEGER`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_open_table_session ON restaurant_table_sessions(tableId) WHERE closedAt IS NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_order_session ON restaurant_orders(tableSessionId)`,
     `CREATE INDEX IF NOT EXISTS idx_users_company ON users(company)`,
     `CREATE INDEX IF NOT EXISTS idx_products_company ON products(company)`,
     `CREATE INDEX IF NOT EXISTS idx_sales_company_date ON sales(company, date)`,
@@ -1862,7 +2045,9 @@ async function initializePostgres() {
     `CREATE INDEX IF NOT EXISTS idx_invoices_company_date ON invoices(company, date)`,
     `CREATE INDEX IF NOT EXISTS idx_restaurant_tables_company ON restaurant_tables(company)`,
     `CREATE INDEX IF NOT EXISTS idx_restaurant_servers_company ON restaurant_servers(company)`,
-    `CREATE INDEX IF NOT EXISTS idx_restaurant_sessions_company ON restaurant_table_sessions(company, openedAt)`
+    `CREATE INDEX IF NOT EXISTS idx_restaurant_sessions_company ON restaurant_table_sessions(company, openedAt)`,
+    `CREATE INDEX IF NOT EXISTS idx_restaurant_orders_company ON restaurant_orders(company, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_restaurant_order_items_order ON restaurant_order_items(orderId)`
   ];
   for (const statement of statements) await dataStore.run(statement);
   console.log("PostgreSQL conectado y tablas verificadas.");
