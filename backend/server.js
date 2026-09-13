@@ -106,6 +106,12 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       name TEXT,
       quantity INTEGER,
       price REAL,
+      grossTotal REAL DEFAULT 0,
+      discountPercent REAL DEFAULT 0,
+      discountAmount REAL DEFAULT 0,
+      discountReason TEXT DEFAULT '',
+      grantedByUserId INTEGER,
+      grantedByName TEXT DEFAULT '',
       total REAL,
       date TEXT,
       paymentType TEXT,
@@ -127,6 +133,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       buyerEmail TEXT,
       subtotal REAL NOT NULL,
       taxAmount REAL NOT NULL,
+      discountAmount REAL DEFAULT 0,
       total REAL NOT NULL,
       paymentType TEXT NOT NULL,
       invoiceNumber TEXT,
@@ -264,6 +271,8 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       name TEXT NOT NULL,
       quantity INTEGER NOT NULL,
       price REAL NOT NULL,
+      discountPercent REAL DEFAULT 0,
+      discountReason TEXT DEFAULT '',
       note TEXT DEFAULT ''
     )
   `);
@@ -1112,6 +1121,7 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
     let subtotal = 0;
     let taxAmount = 0;
     let total = 0;
+    let discountAmount = 0;
     for (const item of items) {
       const product = await dbGet(
         "SELECT * FROM products WHERE id = ? AND company = ?",
@@ -1122,14 +1132,25 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       if (quantity > product.quantity) {
         return res.status(400).json({ error: `Inventario insuficiente para ${product.name}.` });
       }
+      const discountPercent = Number(item.discountPercent || 0);
+      if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+        return res.status(400).json({ error: `El descuento de ${product.name} debe estar entre 0% y 100%.` });
+      }
+      const discountReason = String(item.discountReason || "").trim().slice(0, 80);
+      if (discountPercent === 100 && !discountReason) {
+        return res.status(400).json({ error: `Selecciona el motivo para entregar ${product.name} gratis.` });
+      }
       const rate = Number(product.taxRate ?? 15);
       const gross = money(Number(product.price) * quantity);
-      const base = rate > 0 ? money(gross / (1 + rate / 100)) : gross;
-      const tax = money(gross - base);
+      const lineDiscount = money(gross * discountPercent / 100);
+      const net = money(gross - lineDiscount);
+      const base = rate > 0 ? money(net / (1 + rate / 100)) : net;
+      const tax = money(net - base);
       subtotal = money(subtotal + base);
       taxAmount = money(taxAmount + tax);
-      total = money(total + gross);
-      lines.push({ product, quantity, gross });
+      discountAmount = money(discountAmount + lineDiscount);
+      total = money(total + net);
+      lines.push({ product, quantity, gross, discountPercent, discountAmount: lineDiscount, discountReason, net });
     }
 
     const settings = await dbGet("SELECT * FROM sri_settings WHERE company = ?", [company]);
@@ -1154,14 +1175,14 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       const createdInvoice = await dbRun(
       `INSERT INTO invoices
        (company, invoiceType, clientId, buyerIdType, buyerIdNumber, buyerName,
-        buyerAddress, buyerEmail, subtotal, taxAmount, total, paymentType,
+        buyerAddress, buyerEmail, subtotal, taxAmount, discountAmount, total, paymentType,
         invoiceNumber, status, sriMessage, date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         company, type, client?.id || null, client?.idType || "07",
         client?.idNumber || "9999999999999",
         client?.razonSocial || "CONSUMIDOR FINAL", client?.direccion || "",
-        client?.email || "", subtotal, taxAmount, total, payType,
+        client?.email || "", subtotal, taxAmount, discountAmount, total, payType,
         invoiceNumber, status,
         configured ? "Pendiente de firma y envío al SRI." : "Complete la configuración SRI.",
         date
@@ -1171,10 +1192,15 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       for (const line of lines) {
         await dbRun(
         `INSERT INTO sales
-         (productId, code, name, quantity, price, total, date, paymentType, invoiceId, company)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (productId, code, name, quantity, price, grossTotal, discountPercent,
+          discountAmount, discountReason, grantedByUserId, grantedByName, total,
+          date, paymentType, invoiceId, company)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [line.product.id, line.product.code, line.product.name, line.quantity,
-            line.product.price, line.gross, date, payType, createdInvoice.lastID, company]
+          line.product.price, line.gross, line.discountPercent, line.discountAmount,
+          line.discountReason, line.discountPercent > 0 ? req.user.id : null,
+          line.discountPercent > 0 ? (req.user.fullName || req.user.username) : "",
+          line.net, date, payType, createdInvoice.lastID, company]
         );
         await dbRun(
           "UPDATE products SET quantity = quantity - ? WHERE id = ? AND company = ?",
@@ -1209,6 +1235,7 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       status,
       subtotal,
       taxAmount,
+      discountAmount,
       total,
       cash,
       paymentType: payType,
@@ -1566,6 +1593,15 @@ function addColumnIfMissing(table, definition) {
 if (!dataStore.postgres) {
   addColumnIfMissing("products", "taxRate REAL DEFAULT 15");
   addColumnIfMissing("sales", "invoiceId INTEGER");
+  addColumnIfMissing("sales", "grossTotal REAL DEFAULT 0");
+  addColumnIfMissing("sales", "discountPercent REAL DEFAULT 0");
+  addColumnIfMissing("sales", "discountAmount REAL DEFAULT 0");
+  addColumnIfMissing("sales", "discountReason TEXT DEFAULT ''");
+  addColumnIfMissing("sales", "grantedByUserId INTEGER");
+  addColumnIfMissing("sales", "grantedByName TEXT DEFAULT ''");
+  addColumnIfMissing("invoices", "discountAmount REAL DEFAULT 0");
+  addColumnIfMissing("restaurant_order_items", "discountPercent REAL DEFAULT 0");
+  addColumnIfMissing("restaurant_order_items", "discountReason TEXT DEFAULT ''");
   addColumnIfMissing("sri_settings", "certificateValidated INTEGER DEFAULT 0");
   addColumnIfMissing("store_licenses", "businessType TEXT DEFAULT 'SHOP'");
 }
@@ -1691,7 +1727,7 @@ async function ensureRestaurantOrder(session) {
 
 async function restaurantOrderResponse(order) {
   const items = await dataStore.all(
-    `SELECT id, productId, code, name, quantity, price, note
+    `SELECT id, productId, code, name, quantity, price, discountPercent, discountReason, note
      FROM restaurant_order_items WHERE orderId = ? AND company = ? ORDER BY id`,
     [order.id, order.company]
   );
@@ -1739,7 +1775,21 @@ app.put("/restaurant/table-sessions/:sessionId/order", requireRestaurantStore, a
       const product = await dbGet("SELECT * FROM products WHERE id = ? AND company = ?", [productId, req.user.company]);
       if (!product) return res.status(400).json({ error: "Uno de los productos ya no existe." });
       if (quantity > Number(product.quantity || 0)) return res.status(400).json({ error: `Inventario insuficiente para ${product.name}.` });
-      cleanItems.push({ product, quantity, note: String(item.note || "").trim().slice(0, 200) });
+      const discountPercent = Number(item.discountPercent || 0);
+      if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+        return res.status(400).json({ error: `El descuento de ${product.name} debe estar entre 0% y 100%.` });
+      }
+      const discountReason = String(item.discountReason || "").trim().slice(0, 80);
+      if (discountPercent === 100 && !discountReason) {
+        return res.status(400).json({ error: `Selecciona el motivo para entregar ${product.name} gratis.` });
+      }
+      cleanItems.push({
+        product,
+        quantity,
+        discountPercent,
+        discountReason,
+        note: String(item.note || "").trim().slice(0, 200)
+      });
     }
 
     const order = await dataStore.transaction(async () => {
@@ -1749,9 +1799,10 @@ app.put("/restaurant/table-sessions/:sessionId/order", requireRestaurantStore, a
       for (const item of cleanItems) {
         await dbRun(
           `INSERT INTO restaurant_order_items
-           (company, orderId, productId, code, name, quantity, price, note)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [req.user.company, currentOrder.id, item.product.id, item.product.code, item.product.name, item.quantity, item.product.price, item.note]
+           (company, orderId, productId, code, name, quantity, price, discountPercent, discountReason, note)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [req.user.company, currentOrder.id, item.product.id, item.product.code, item.product.name,
+            item.quantity, item.product.price, item.discountPercent, item.discountReason, item.note]
         );
       }
       await dbRun("UPDATE restaurant_orders SET updatedAt = ? WHERE id = ? AND company = ?", [getETLocalISO(), currentOrder.id, req.user.company]);
@@ -2023,8 +2074,15 @@ async function initializePostgres() {
     `ALTER TABLE store_licenses ADD COLUMN IF NOT EXISTS businessType TEXT DEFAULT 'SHOP'`,
     `CREATE TABLE IF NOT EXISTS password_reset_codes (id SERIAL PRIMARY KEY, userId INTEGER NOT NULL, codeHash TEXT NOT NULL, expiresAt TEXT NOT NULL, usedAt TEXT, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, taxRate DOUBLE PRECISION DEFAULT 15, company TEXT)`,
-    `CREATE TABLE IF NOT EXISTS sales (id SERIAL PRIMARY KEY, productId INTEGER, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, total DOUBLE PRECISION, date TEXT, paymentType TEXT, invoiceId INTEGER, company TEXT)`,
-    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceType TEXT NOT NULL, clientId INTEGER, buyerIdType TEXT, buyerIdNumber TEXT, buyerName TEXT NOT NULL, buyerAddress TEXT, buyerEmail TEXT, subtotal DOUBLE PRECISION NOT NULL, taxAmount DOUBLE PRECISION NOT NULL, total DOUBLE PRECISION NOT NULL, paymentType TEXT NOT NULL, invoiceNumber TEXT, status TEXT DEFAULT 'CONFIGURATION_REQUIRED', sriMessage TEXT, date TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS sales (id SERIAL PRIMARY KEY, productId INTEGER, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, grossTotal DOUBLE PRECISION DEFAULT 0, discountPercent DOUBLE PRECISION DEFAULT 0, discountAmount DOUBLE PRECISION DEFAULT 0, discountReason TEXT DEFAULT '', grantedByUserId INTEGER, grantedByName TEXT DEFAULT '', total DOUBLE PRECISION, date TEXT, paymentType TEXT, invoiceId INTEGER, company TEXT)`,
+    `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grossTotal DOUBLE PRECISION DEFAULT 0`,
+    `ALTER TABLE sales ADD COLUMN IF NOT EXISTS discountPercent DOUBLE PRECISION DEFAULT 0`,
+    `ALTER TABLE sales ADD COLUMN IF NOT EXISTS discountAmount DOUBLE PRECISION DEFAULT 0`,
+    `ALTER TABLE sales ADD COLUMN IF NOT EXISTS discountReason TEXT DEFAULT ''`,
+    `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grantedByUserId INTEGER`,
+    `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grantedByName TEXT DEFAULT ''`,
+    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceType TEXT NOT NULL, clientId INTEGER, buyerIdType TEXT, buyerIdNumber TEXT, buyerName TEXT NOT NULL, buyerAddress TEXT, buyerEmail TEXT, subtotal DOUBLE PRECISION NOT NULL, taxAmount DOUBLE PRECISION NOT NULL, discountAmount DOUBLE PRECISION DEFAULT 0, total DOUBLE PRECISION NOT NULL, paymentType TEXT NOT NULL, invoiceNumber TEXT, status TEXT DEFAULT 'CONFIGURATION_REQUIRED', sriMessage TEXT, date TEXT NOT NULL)`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS discountAmount DOUBLE PRECISION DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS sri_settings (company TEXT PRIMARY KEY, environment TEXT DEFAULT 'TEST', ruc TEXT, legalName TEXT, commercialName TEXT, mainAddress TEXT, establishmentAddress TEXT, establishmentCode TEXT DEFAULT '001', emissionPoint TEXT DEFAULT '001', nextSequence INTEGER DEFAULT 1, accountingRequired TEXT DEFAULT 'NO', specialTaxpayerNumber TEXT, taxRegime TEXT, senderEmail TEXT, adminCopyEmail TEXT, certificateConfigured INTEGER DEFAULT 0, certificateValidated INTEGER DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS sri_certificates (company TEXT PRIMARY KEY, filename TEXT NOT NULL, certificateEncrypted TEXT NOT NULL, passwordEncrypted TEXT NOT NULL, installedAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS client_intake_tokens (company TEXT PRIMARY KEY, tokenHash TEXT NOT NULL UNIQUE, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
@@ -2034,7 +2092,9 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS restaurant_servers (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS restaurant_table_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableId INTEGER NOT NULL, restaurantServerId INTEGER, serverUserId INTEGER NOT NULL, serverName TEXT NOT NULL, guests INTEGER NOT NULL, status TEXT DEFAULT 'OCCUPIED', openedAt TEXT NOT NULL, closedAt TEXT, durationMinutes INTEGER)`,
     `CREATE TABLE IF NOT EXISTS restaurant_orders (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableSessionId INTEGER NOT NULL, tableId INTEGER NOT NULL, status TEXT DEFAULT 'OPEN', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, paidAt TEXT, invoiceId INTEGER)`,
-    `CREATE TABLE IF NOT EXISTS restaurant_order_items (id SERIAL PRIMARY KEY, company TEXT NOT NULL, orderId INTEGER NOT NULL, productId INTEGER NOT NULL, code TEXT, name TEXT NOT NULL, quantity INTEGER NOT NULL, price DOUBLE PRECISION NOT NULL, note TEXT DEFAULT '')`,
+    `CREATE TABLE IF NOT EXISTS restaurant_order_items (id SERIAL PRIMARY KEY, company TEXT NOT NULL, orderId INTEGER NOT NULL, productId INTEGER NOT NULL, code TEXT, name TEXT NOT NULL, quantity INTEGER NOT NULL, price DOUBLE PRECISION NOT NULL, discountPercent DOUBLE PRECISION DEFAULT 0, discountReason TEXT DEFAULT '', note TEXT DEFAULT '')`,
+    `ALTER TABLE restaurant_order_items ADD COLUMN IF NOT EXISTS discountPercent DOUBLE PRECISION DEFAULT 0`,
+    `ALTER TABLE restaurant_order_items ADD COLUMN IF NOT EXISTS discountReason TEXT DEFAULT ''`,
     `ALTER TABLE restaurant_table_sessions ADD COLUMN IF NOT EXISTS restaurantServerId INTEGER`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_open_table_session ON restaurant_table_sessions(tableId) WHERE closedAt IS NULL`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_order_session ON restaurant_orders(tableSessionId)`,

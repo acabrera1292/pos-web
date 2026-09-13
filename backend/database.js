@@ -49,6 +49,8 @@ function createDatabase() {
     fullname: "fullName", mustchangepassword: "mustChangePassword", expiresat: "expiresAt", userlimit: "userLimit", usercount: "userCount",
     createdat: "createdAt", updatedat: "updatedAt", userid: "userId", codehash: "codeHash", usedat: "usedAt",
     taxrate: "taxRate", productid: "productId", paymenttype: "paymentType", invoiceid: "invoiceId",
+    grosstotal: "grossTotal", discountpercent: "discountPercent", discountamount: "discountAmount",
+    discountreason: "discountReason", grantedbyuserid: "grantedByUserId", grantedbyname: "grantedByName",
     invoicetype: "invoiceType", clientid: "clientId", buyeridtype: "buyerIdType", buyeridnumber: "buyerIdNumber",
     buyername: "buyerName", buyeraddress: "buyerAddress", buyeremail: "buyerEmail", taxamount: "taxAmount",
     invoicenumber: "invoiceNumber", srimessage: "sriMessage", legalname: "legalName", commercialname: "commercialName",
