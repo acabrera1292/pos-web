@@ -122,21 +122,12 @@
         </div>
 
         <h3>Carrito</h3>
+        <p class="cart-table-help">Arrastra un encabezado para cambiar su posición o su borde derecho para ajustar el ancho.</p>
 
-        <div class="table-scroll">
-        <table border="1">
-          <thead>
-            <tr>
-              <th>Código</th>
-              <th>Nombre</th>
-              <th>Cant.</th>
-              <th>Precio</th>
-              <th>Desc. %</th>
-              <th>Total</th>
-              <th id="restaurantNoteHeader" class="hidden">Nota</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
+        <div class="table-scroll cart-table-scroll">
+        <table id="cartTable" class="cart-table" border="1">
+          <colgroup id="cartColgroup"></colgroup>
+          <thead id="cartHead"></thead>
           <tbody id="cartBody"></tbody>
         </table>
         </div>
@@ -197,12 +188,28 @@
       <section id="menu" class="tab-section app-card hidden">
         <div class="restaurant-section-heading">
           <div><h2>Menú</h2><p>Organiza los productos del inventario en categorías para venderlos con un toque.</p></div>
-          <button type="button" onclick="loadProducts()">Actualizar</button>
+        </div>
+        <div class="restaurant-menu-editor">
+          <h3>Agregar / Editar producto</h3>
+          <input id="menuProductId" type="hidden">
+          <div class="restaurant-menu-form">
+            <label>Código <input id="menuProductCode" placeholder="Ej. HAMB01"></label>
+            <label>Nombre <input id="menuProductName" placeholder="Nombre del producto"></label>
+            <label>Categoría <input id="menuProductCategory" placeholder="Ej. Platos fuertes"></label>
+            <label>Precio <input id="menuProductPrice" type="number" min="0" step="0.01" placeholder="0.00"></label>
+            <label>Cantidad <input id="menuProductQuantity" type="number" min="0" step="1" placeholder="0"></label>
+          </div>
+          <div class="restaurant-menu-form-actions">
+            <button type="button" onclick="saveMenuProduct()">Guardar producto</button>
+            <button type="button" onclick="clearMenuProductForm()">Cancelar</button>
+          </div>
+          <p id="menuProductPermissionNote" class="settings-note hidden">Al editar, el rol Usuario solamente puede cambiar el código y el nombre.</p>
         </div>
         <input id="menuSearch" class="menu-search" placeholder="Buscar por código, nombre o categoría" oninput="renderMenuManagement()">
         <div class="table-scroll"><table><thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Precio</th><th>Stock</th></tr></thead><tbody id="menuBody"></tbody></table></div>
-        <div id="menuAdminActions" class="inventory-actions hidden">
-          <button type="button" onclick="changeSelectedMenuCategory()">Cambiar categoría</button>
+        <div id="menuProductActions" class="inventory-actions">
+          <button id="btnEditMenuProduct" type="button" onclick="editSelectedMenuProduct()" disabled>Editar</button>
+          <button id="btnDeleteMenuProduct" class="danger-button" type="button" onclick="deleteSelectedMenuProduct()" disabled>Eliminar</button>
         </div>
       </section>
 
@@ -213,7 +220,6 @@
             <h2>Mesas</h2>
             <p>Selecciona una mesa para sentar clientes o consultar su tiempo.</p>
           </div>
-          <button type="button" onclick="loadRestaurantTables()">Actualizar</button>
         </div>
 
         <div id="restaurantTableAdmin" class="restaurant-table-admin hidden">
@@ -257,7 +263,6 @@
             <h2>Meseros</h2>
             <p>Administra las personas que pueden atender y recibir mesas.</p>
           </div>
-          <button type="button" onclick="loadRestaurantServers()">Actualizar</button>
         </div>
 
         <div id="restaurantServerAdmin" class="restaurant-table-admin hidden">
@@ -293,7 +298,6 @@
             <h2>Historial de atención</h2>
             <p>Consulta tiempos de mesa y productividad del equipo.</p>
           </div>
-          <button type="button" onclick="loadRestaurantTableHistory()">Actualizar</button>
         </div>
 
         <div class="sales-kpis restaurant-history-kpis">
@@ -695,6 +699,8 @@ window.addEventListener("DOMContentLoaded", () => {
   }
   const clientImportAdminOnly = document.getElementById("clientImportAdminOnly");
   if (clientImportAdminOnly) clientImportAdminOnly.style.display = userRole === "Admin" ? "block" : "none";
+  renderCart();
+  window.addEventListener("resize", applyCartColumnWidths);
 });
 
 let selectedProduct = null;
@@ -704,6 +710,18 @@ let currentPage = 1;
 const pageSize = 100;
 
 let cart = [];
+const CART_COLUMN_DEFAULTS = [
+  { id: "code", label: "Código", width: 90 },
+  { id: "name", label: "Nombre", width: 150 },
+  { id: "quantity", label: "Cant.", width: 105 },
+  { id: "price", label: "Precio", width: 85 },
+  { id: "discount", label: "Desc. %", width: 170 },
+  { id: "total", label: "Total", width: 105 },
+  { id: "note", label: "Nota", width: 175 },
+  { id: "actions", label: "Acciones", width: 90 }
+];
+let cartColumnLayout = loadCartColumnLayout();
+let draggedCartColumn = null;
 let allSales = [];
 let selectedSale = null;
 let selectedSaleIds = new Set();
@@ -845,7 +863,7 @@ function showAllInventory() {
 // ------- INVENTARIO CRUD -------
 
 async function loadProducts() {
-  const res = await fetch(`${API}/products/${company}`);
+  const res = await fetch(`${API}/products/${company}`, { cache: "no-store" });
   const data = await res.json();
 
   if (!Array.isArray(data)) {
@@ -861,6 +879,8 @@ async function loadProducts() {
   if (thrInput) thrInput.value = getThreshold();
 
   renderInventoryTable();
+  renderRestaurantQuickMenu();
+  renderMenuManagement();
 }
 
 function renderInventoryTable() {
@@ -1694,12 +1714,14 @@ function renderMenuManagement() {
   const tbody = document.getElementById("menuBody");
   if (!tbody) return;
   const search = String(document.getElementById("menuSearch")?.value || "").trim().toLowerCase();
-  selectedMenuProduct = null;
-  tbody.innerHTML = "";
-  allProducts
+  const products = allProducts
     .filter(product => !search || `${product.code || ""} ${product.name || ""} ${menuCategoryOf(product)}`.toLowerCase().includes(search))
-    .sort((a, b) => menuCategoryOf(a).localeCompare(menuCategoryOf(b)) || String(a.name).localeCompare(String(b.name)))
-    .forEach(product => {
+    .sort((a, b) => menuCategoryOf(a).localeCompare(menuCategoryOf(b)) || String(a.name).localeCompare(String(b.name)));
+  selectedMenuProduct = selectedMenuProduct
+    ? products.find(product => String(product.id) === String(selectedMenuProduct.id)) || null
+    : null;
+  tbody.innerHTML = "";
+  products.forEach(product => {
       const row = document.createElement("tr");
       row.innerHTML = "<td></td><td></td><td></td><td></td><td></td>";
       row.children[0].textContent = product.code;
@@ -1707,28 +1729,97 @@ function renderMenuManagement() {
       row.children[2].textContent = menuCategoryOf(product);
       row.children[3].textContent = `$${Number(product.price).toFixed(2)}`;
       row.children[4].textContent = Number(product.quantity || 0);
+      row.classList.toggle("selected-row", String(selectedMenuProduct?.id) === String(product.id));
       row.onclick = () => {
         selectedMenuProduct = product;
         tbody.querySelectorAll("tr").forEach(item => item.classList.remove("selected-row"));
         row.classList.add("selected-row");
+        updateMenuProductActions();
       };
       tbody.appendChild(row);
     });
   if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="5" class="empty-table">No hay productos con esa búsqueda.</td></tr>';
-  document.getElementById("menuAdminActions")?.classList.toggle("hidden", userRole !== "Admin");
+  updateMenuProductActions();
 }
 
-async function changeSelectedMenuCategory() {
-  if (userRole !== "Admin") return alert("Solo un administrador puede organizar el menú.");
+function updateMenuProductActions() {
+  const editButton = document.getElementById("btnEditMenuProduct");
+  const deleteButton = document.getElementById("btnDeleteMenuProduct");
+  if (editButton) editButton.disabled = !selectedMenuProduct;
+  if (deleteButton) {
+    deleteButton.classList.toggle("hidden", userRole !== "Admin");
+    deleteButton.disabled = userRole !== "Admin" || !selectedMenuProduct;
+  }
+}
+
+function clearMenuProductForm() {
+  ["menuProductId", "menuProductCode", "menuProductName", "menuProductCategory", "menuProductPrice", "menuProductQuantity"]
+    .forEach(id => {
+      const input = document.getElementById(id);
+      if (input) input.value = "";
+    });
+  ["menuProductCategory", "menuProductPrice", "menuProductQuantity"].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.disabled = false;
+  });
+  document.getElementById("menuProductPermissionNote")?.classList.add("hidden");
+}
+
+function editSelectedMenuProduct() {
   if (!selectedMenuProduct) return alert("Selecciona un producto primero.");
-  const category = await appPrompt(`Categoría para ${selectedMenuProduct.name}:`, menuCategoryOf(selectedMenuProduct));
-  if (category === null || !category.trim()) return;
-  const res = await fetch(`${API}/restaurant/menu/${selectedMenuProduct.id}`, {
-    method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ menuCategory: category.trim() })
+  document.getElementById("menuProductId").value = selectedMenuProduct.id;
+  document.getElementById("menuProductCode").value = selectedMenuProduct.code || "";
+  document.getElementById("menuProductName").value = selectedMenuProduct.name || "";
+  document.getElementById("menuProductCategory").value = menuCategoryOf(selectedMenuProduct);
+  document.getElementById("menuProductPrice").value = Number(selectedMenuProduct.price || 0).toFixed(2);
+  document.getElementById("menuProductQuantity").value = Number(selectedMenuProduct.quantity || 0);
+  const restricted = userRole !== "Admin";
+  ["menuProductCategory", "menuProductPrice", "menuProductQuantity"].forEach(id => {
+    document.getElementById(id).disabled = restricted;
+  });
+  document.getElementById("menuProductPermissionNote")?.classList.toggle("hidden", !restricted);
+  document.getElementById("menuProductCode")?.focus();
+}
+
+async function saveMenuProduct() {
+  const id = document.getElementById("menuProductId").value;
+  const priceValue = document.getElementById("menuProductPrice").value;
+  const quantityValue = document.getElementById("menuProductQuantity").value;
+  const payload = {
+    code: document.getElementById("menuProductCode").value.trim(),
+    name: document.getElementById("menuProductName").value.trim(),
+    menuCategory: document.getElementById("menuProductCategory").value.trim() || "General",
+    price: Number(priceValue),
+    quantity: Number(quantityValue)
+  };
+  if (!payload.code || !payload.name) return alert("Completa el código y el nombre del producto.");
+  if (priceValue === "" || quantityValue === "" || !Number.isFinite(payload.price) || payload.price < 0 || !Number.isInteger(payload.quantity) || payload.quantity < 0) {
+    return alert("Ingresa un precio y una cantidad válidos.");
+  }
+  const res = await fetch(id ? `${API}/restaurant/menu/${id}` : `${API}/restaurant/menu`, {
+    method: id ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(payload)
   });
   const data = await res.json();
-  if (!res.ok) return alert(data.error || "No se pudo cambiar la categoría.");
+  if (!res.ok) return alert(data.error || "No se pudo guardar el producto.");
+  selectedMenuProduct = null;
+  clearMenuProductForm();
+  await loadProducts();
+}
+
+async function deleteSelectedMenuProduct() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede eliminar productos.");
+  if (!selectedMenuProduct) return alert("Selecciona un producto primero.");
+  if (!await appConfirm(`¿Eliminar ${selectedMenuProduct.name} del menú y del inventario?`)) return;
+  const res = await fetch(`${API}/restaurant/menu/${selectedMenuProduct.id}`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo eliminar el producto.");
+  selectedMenuProduct = null;
+  clearMenuProductForm();
   await loadProducts();
 }
 
@@ -1938,11 +2029,143 @@ function escapeCartValue(value) {
     .replace(/"/g, "&quot;");
 }
 
+function cartColumnStorageKey() {
+  return `cartColumns_${company || "default"}`;
+}
+
+function loadCartColumnLayout() {
+  let stored = [];
+  try {
+    stored = JSON.parse(localStorage.getItem(cartColumnStorageKey()) || "[]");
+  } catch (err) {
+    stored = [];
+  }
+  const storedById = new Map(
+    (Array.isArray(stored) ? stored : [])
+      .filter(item => item && CART_COLUMN_DEFAULTS.some(column => column.id === item.id))
+      .map(item => [item.id, item])
+  );
+  const orderedIds = (Array.isArray(stored) ? stored : [])
+    .map(item => item?.id)
+    .filter((id, index, ids) => CART_COLUMN_DEFAULTS.some(column => column.id === id) && ids.indexOf(id) === index);
+  CART_COLUMN_DEFAULTS.forEach(column => {
+    if (!orderedIds.includes(column.id)) orderedIds.push(column.id);
+  });
+  return orderedIds.map(id => {
+    const base = CART_COLUMN_DEFAULTS.find(column => column.id === id);
+    const savedWidth = Number(storedById.get(id)?.width);
+    return { ...base, width: Number.isFinite(savedWidth) ? Math.min(420, Math.max(72, savedWidth)) : base.width };
+  });
+}
+
+function saveCartColumnLayout() {
+  localStorage.setItem(cartColumnStorageKey(), JSON.stringify(
+    cartColumnLayout.map(({ id, width }) => ({ id, width }))
+  ));
+}
+
+function visibleCartColumns() {
+  return cartColumnLayout.filter(column => column.id !== "note" || activeRestaurantOrder);
+}
+
+function applyCartColumnWidths() {
+  const table = document.getElementById("cartTable");
+  const wrapper = table?.closest(".cart-table-scroll");
+  if (!table || !wrapper) return;
+  const columns = visibleCartColumns();
+  columns.forEach(column => {
+    const col = table.querySelector(`col[data-cart-column="${column.id}"]`);
+    if (col) col.style.width = `${column.width}px`;
+  });
+  const totalWidth = columns.reduce((sum, column) => sum + column.width, 0);
+  table.style.width = `${Math.max(totalWidth, wrapper.clientWidth)}px`;
+}
+
+function startCartColumnResize(event, columnId) {
+  event.preventDefault();
+  event.stopPropagation();
+  const column = cartColumnLayout.find(item => item.id === columnId);
+  if (!column) return;
+  const startX = event.clientX;
+  const startWidth = column.width;
+  document.body.classList.add("resizing-cart-column");
+
+  const resize = moveEvent => {
+    column.width = Math.min(420, Math.max(72, startWidth + moveEvent.clientX - startX));
+    applyCartColumnWidths();
+  };
+  const finish = () => {
+    document.removeEventListener("pointermove", resize);
+    document.removeEventListener("pointerup", finish);
+    document.body.classList.remove("resizing-cart-column");
+    saveCartColumnLayout();
+  };
+  document.addEventListener("pointermove", resize);
+  document.addEventListener("pointerup", finish, { once: true });
+}
+
+function renderCartHeader() {
+  const head = document.getElementById("cartHead");
+  const colgroup = document.getElementById("cartColgroup");
+  if (!head || !colgroup) return;
+  const columns = visibleCartColumns();
+  colgroup.innerHTML = columns.map(column =>
+    `<col data-cart-column="${column.id}" style="width:${column.width}px">`
+  ).join("");
+  head.innerHTML = `<tr>${columns.map(column => `
+    <th draggable="true" data-cart-column="${column.id}" title="Arrastra para cambiar el orden">
+      <span>${column.label}</span>
+      <span class="cart-column-resizer" role="separator" aria-label="Cambiar ancho de ${column.label}" title="Arrastra para cambiar el ancho"></span>
+    </th>`).join("")}</tr>`;
+
+  head.querySelectorAll("th[data-cart-column]").forEach(header => {
+    header.addEventListener("dragstart", event => {
+      if (event.target.closest(".cart-column-resizer")) {
+        event.preventDefault();
+        return;
+      }
+      draggedCartColumn = header.dataset.cartColumn;
+      header.classList.add("cart-column-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", draggedCartColumn);
+    });
+    header.addEventListener("dragover", event => {
+      event.preventDefault();
+      if (draggedCartColumn && draggedCartColumn !== header.dataset.cartColumn) {
+        header.classList.add("cart-column-drop-target");
+      }
+    });
+    header.addEventListener("dragleave", () => header.classList.remove("cart-column-drop-target"));
+    header.addEventListener("drop", event => {
+      event.preventDefault();
+      const sourceId = draggedCartColumn || event.dataTransfer.getData("text/plain");
+      const targetId = header.dataset.cartColumn;
+      if (!sourceId || sourceId === targetId) return;
+      const sourceIndex = cartColumnLayout.findIndex(column => column.id === sourceId);
+      const targetIndex = cartColumnLayout.findIndex(column => column.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0) return;
+      const [moved] = cartColumnLayout.splice(sourceIndex, 1);
+      cartColumnLayout.splice(targetIndex, 0, moved);
+      saveCartColumnLayout();
+      draggedCartColumn = null;
+      renderCart();
+    });
+    header.addEventListener("dragend", () => {
+      draggedCartColumn = null;
+      head.querySelectorAll("th").forEach(item => item.classList.remove("cart-column-dragging", "cart-column-drop-target"));
+    });
+  });
+  head.querySelectorAll(".cart-column-resizer").forEach(resizer => {
+    resizer.addEventListener("pointerdown", event =>
+      startCartColumnResize(event, resizer.closest("th").dataset.cartColumn)
+    );
+  });
+  applyCartColumnWidths();
+}
+
 function renderRestaurantOrderContext() {
   const panel = document.getElementById("restaurantOrderContext");
-  const noteHeader = document.getElementById("restaurantNoteHeader");
   panel?.classList.toggle("hidden", !activeRestaurantOrder);
-  noteHeader?.classList.toggle("hidden", !activeRestaurantOrder);
   if (!activeRestaurantOrder) return;
   document.getElementById("restaurantOrderTitle").textContent = `Pedido · ${activeRestaurantOrder.tableName}`;
   document.getElementById("restaurantOrderDetail").textContent =
@@ -2010,7 +2233,9 @@ async function returnToRestaurantTables() {
 
 function renderCart() {
   const tbody = document.getElementById("cartBody");
+  renderCartHeader();
   tbody.innerHTML = "";
+  const columns = visibleCartColumns();
   cart.forEach((item, index) => {
     const gross = item.price * item.quantity;
     const discountPercent = Number(item.discountPercent || 0);
@@ -2024,25 +2249,22 @@ function renderCart() {
           <option value="Error de cocina"${discountReason === "Error de cocina" ? " selected" : ""}>Error de cocina</option>
         </select>`
       : "";
-    const noteCell = activeRestaurantOrder
-      ? `<td><input class="restaurant-item-note" maxlength="200" value="${escapeCartValue(item.note)}" placeholder="Ej. sin azúcar" oninput="updateCartNote(${index}, this.value)"></td>`
-      : "";
-    tbody.innerHTML += `
-      <tr>
-        <td>${item.code}</td>
-        <td>${item.name}</td>
-        <td>
+    const cells = {
+      code: `<td>${escapeCartValue(item.code)}</td>`,
+      name: `<td>${escapeCartValue(item.name)}</td>`,
+      quantity: `<td>
           <input type="number" min="1" value="${item.quantity}"
                  onchange="updateCartQuantity(${index}, this.value)">
-        </td>
-        <td>$${item.price.toFixed(2)}</td>
-        <td><div class="cart-discount-control"><input type="number" min="0" max="100" step="1" value="${discountPercent}" onchange="updateCartDiscount(${index}, this.value)"><span>%</span>${reasonControl}</div></td>
-        <td>${discountPercent > 0 ? `<small class="cart-original-total">Antes $${gross.toFixed(2)}</small>` : ""}$${lineTotal.toFixed(2)}</td>
-        ${noteCell}
-        <td><button onclick="removeFromCart(${index})">Quitar</button></td>
-      </tr>
-    `;
+        </td>`,
+      price: `<td>$${item.price.toFixed(2)}</td>`,
+      discount: `<td><div class="cart-discount-control"><input type="number" min="0" max="100" step="1" value="${discountPercent}" onchange="updateCartDiscount(${index}, this.value)"><span>%</span>${reasonControl}</div></td>`,
+      total: `<td>${discountPercent > 0 ? `<small class="cart-original-total">Antes $${gross.toFixed(2)}</small>` : ""}$${lineTotal.toFixed(2)}</td>`,
+      note: `<td><input class="restaurant-item-note" maxlength="200" value="${escapeCartValue(item.note)}" placeholder="Ej. sin azúcar" oninput="updateCartNote(${index}, this.value)"></td>`,
+      actions: `<td><button onclick="removeFromCart(${index})">Quitar</button></td>`
+    };
+    tbody.innerHTML += `<tr>${columns.map(column => cells[column.id]).join("")}</tr>`;
   });
+  applyCartColumnWidths();
   updateTotal();
 }
 
