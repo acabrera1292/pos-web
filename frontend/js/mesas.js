@@ -88,7 +88,10 @@
         ? `${table.guests} cliente${Number(table.guests) === 1 ? "" : "s"} · ${minutesSince(table.openedAt)} min`
         : `Capacidad: ${table.capacity}`;
       const server = document.createElement("small");
-      server.textContent = table.sessionId ? `Atiende: ${table.serverName}` : "";
+      const orderItems = Number(table.orderItemCount || 0);
+      server.textContent = table.sessionId
+        ? `${orderItems ? `Pedido: ${orderItems} producto${orderItems === 1 ? "" : "s"} · ` : ""}Atiende: ${table.serverName}`
+        : "";
       card.append(name, status, detail, server);
       card.addEventListener("click", () => selectRestaurantTable(table.id));
       grid.appendChild(card);
@@ -107,10 +110,11 @@
     const table = selectedRestaurantTable;
     document.getElementById("selectedRestaurantTableName").textContent = table.name;
     document.getElementById("selectedRestaurantTableDetail").textContent = table.sessionId
-      ? `${table.guests} cliente${Number(table.guests) === 1 ? "" : "s"} · ${minutesSince(table.openedAt)} min · ${table.serverName}`
+      ? `${table.guests} cliente${Number(table.guests) === 1 ? "" : "s"} · ${minutesSince(table.openedAt)} min · ${table.serverName}${Number(table.orderItemCount || 0) ? ` · ${table.orderItemCount} producto${Number(table.orderItemCount) === 1 ? "" : "s"}` : ""}`
       : table.active ? `Disponible · capacidad ${table.capacity}` : "Mesa inactiva";
 
     document.getElementById("btnSeatRestaurantTable").classList.toggle("hidden", Boolean(table.sessionId) || !table.active);
+    document.getElementById("btnOpenRestaurantOrder").classList.toggle("hidden", !table.sessionId);
     document.getElementById("restaurantSeatFields").classList.toggle("hidden", Boolean(table.sessionId) || !table.active);
     document.getElementById("btnCloseRestaurantTable").classList.toggle("hidden", !table.sessionId);
     document.getElementById("btnEditRestaurantTable").classList.toggle("hidden", userRole !== "Admin" || Boolean(table.sessionId));
@@ -195,6 +199,20 @@
       const result = await readResponse(res);
       await loadRestaurantTables();
       alert(`Mesa liberada. Duración: ${result.durationMinutes} min.`);
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function openSelectedRestaurantOrder() {
+    if (!selectedRestaurantTable?.sessionId) return;
+    try {
+      const res = await fetch(`${API}/restaurant/table-sessions/${selectedRestaurantTable.sessionId}/order`, {
+        headers: headers(),
+        cache: "no-store"
+      });
+      const order = await readResponse(res);
+      await window.activateRestaurantOrder(order);
     } catch (err) {
       alert(err.message);
     }
@@ -520,6 +538,7 @@
   window.createRestaurantServer = createRestaurantServer;
   window.seatSelectedRestaurantTable = seatSelectedRestaurantTable;
   window.closeSelectedRestaurantTable = closeSelectedRestaurantTable;
+  window.openSelectedRestaurantOrder = openSelectedRestaurantOrder;
   window.editSelectedRestaurantTable = editSelectedRestaurantTable;
   window.deleteSelectedRestaurantTable = deleteSelectedRestaurantTable;
   window.editSelectedRestaurantServer = editSelectedRestaurantServer;
