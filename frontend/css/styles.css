@@ -403,6 +403,21 @@ tbody tr.selected-row {
   background-color: #e5e7eb !important;
 }
 
+.sale-status {
+  display: inline-block;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border: 1px solid #9ca3af;
+  border-radius: 999px;
+  background: #f3f4f6;
+  font-size: 12px;
+}
+.sale-status-devolucion_parcial { background: #fef3c7; border-color: #d6b65c; }
+.sale-status-devuelta { background: #e5e7eb; color: #4b5563; }
+.sale-status-anulada { background: #fee2e2; border-color: #d1a0a0; color: #991b1b; }
+.sale-row-devuelta td,
+.sale-row-anulada td { color: #6b7280; }
+
 /* Centered application dialogs */
 .app-dialog-overlay {
   position: fixed;
