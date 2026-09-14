@@ -44,7 +44,7 @@ function createDatabase() {
     max: Math.max(2, Number(process.env.PG_POOL_MAX) || 10)
   });
   const context = new AsyncLocalStorage();
-  const idTables = new Set(["users", "password_reset_codes", "products", "sales", "invoices", "sale_adjustments", "client_intake_submissions", "clients", "restaurant_tables", "restaurant_servers", "restaurant_table_sessions", "restaurant_orders", "restaurant_order_items", "cash_register_sessions", "cash_register_movements"]);
+  const idTables = new Set(["users", "password_reset_codes", "products", "sales", "invoices", "invoice_payments", "sale_adjustments", "client_intake_submissions", "clients", "restaurant_tables", "restaurant_servers", "restaurant_table_sessions", "restaurant_orders", "restaurant_order_items", "cash_register_sessions", "cash_register_movements"]);
   const camelKeys = {
     fullname: "fullName", mustchangepassword: "mustChangePassword", expiresat: "expiresAt", userlimit: "userLimit", usercount: "userCount",
     createdat: "createdAt", updatedat: "updatedAt", userid: "userId", codehash: "codeHash", usedat: "usedAt",
@@ -53,14 +53,14 @@ function createDatabase() {
     discountreason: "discountReason", selectedmodifiers: "selectedModifiers", grantedbyuserid: "grantedByUserId", grantedbyname: "grantedByName",
     invoicetype: "invoiceType", clientid: "clientId", buyeridtype: "buyerIdType", buyeridnumber: "buyerIdNumber",
     buyername: "buyerName", buyeraddress: "buyerAddress", buyeremail: "buyerEmail", taxamount: "taxAmount",
-    invoicenumber: "invoiceNumber", cashreceived: "cashReceived", changedue: "changeDue", issuedbyuserid: "issuedByUserId", issuedbyname: "issuedByName",
+    invoicenumber: "invoiceNumber", restaurantorderid: "restaurantOrderId", cashreceived: "cashReceived", changedue: "changeDue", issuedbyuserid: "issuedByUserId", issuedbyname: "issuedByName",
     accesskey: "accessKey", authorizationnumber: "authorizationNumber", authorizedat: "authorizedAt", srimessage: "sriMessage", legalname: "legalName", commercialname: "commercialName",
     mainaddress: "mainAddress", establishmentaddress: "establishmentAddress", establishmentcode: "establishmentCode",
     emissionpoint: "emissionPoint", nextsequence: "nextSequence", accountingrequired: "accountingRequired",
     specialtaxpayernumber: "specialTaxpayerNumber", taxregime: "taxRegime", senderemail: "senderEmail",
     admincopyemail: "adminCopyEmail", certificateconfigured: "certificateConfigured", certificatevalidated: "certificateValidated",
     businesstype: "businessType", tableid: "tableId", tablename: "tableName", sessionid: "sessionId", serveruserid: "serverUserId", restaurantserverid: "restaurantServerId",
-    servername: "serverName", openedat: "openedAt", closedat: "closedAt", durationminutes: "durationMinutes",
+    servername: "serverName", openedat: "openedAt", closedat: "closedAt", durationminutes: "durationMinutes", joinedtosessionid: "joinedToSessionId", joinedtablename: "joinedTableName",
     tablesessionid: "tableSessionId", orderid: "orderId", orderstatus: "orderStatus", itemid: "itemId", paidat: "paidAt", itemcount: "itemCount", orderitemcount: "orderItemCount",
     kitchenstatus: "kitchenStatus", kitchenreceivedat: "kitchenReceivedAt", kitchenstartedat: "kitchenStartedAt", kitchenreadyat: "kitchenReadyAt",
     passwordencrypted: "passwordEncrypted", certificateencrypted: "certificateEncrypted", installedat: "installedAt",

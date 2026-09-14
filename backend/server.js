@@ -141,6 +141,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       total REAL NOT NULL,
       paymentType TEXT NOT NULL,
       cashRegisterSessionId INTEGER,
+      restaurantOrderId INTEGER,
       invoiceNumber TEXT,
       status TEXT DEFAULT 'CONFIGURATION_REQUIRED',
       saleStatus TEXT DEFAULT 'COMPLETADA',
@@ -157,6 +158,16 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       authorizedAt TEXT,
       sriMessage TEXT,
       date TEXT NOT NULL
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS invoice_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company TEXT NOT NULL,
+      invoiceId INTEGER NOT NULL,
+      paymentType TEXT NOT NULL,
+      amount REAL NOT NULL
     )
   `);
 
@@ -276,6 +287,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       serverName TEXT NOT NULL,
       guests INTEGER NOT NULL,
       status TEXT DEFAULT 'OCCUPIED',
+      joinedToSessionId INTEGER,
       openedAt TEXT NOT NULL,
       closedAt TEXT,
       durationMinutes INTEGER
@@ -363,6 +375,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
           ON cash_register_sessions(company) WHERE status = 'OPEN'`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_sale_adjustments_sale ON sale_adjustments(saleId)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_sale_adjustments_register ON sale_adjustments(cashRegisterSessionId)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments(invoiceId)`);
 
 });
 
@@ -516,6 +529,27 @@ async function sendTransactionalEmail(to, subject, html) {
 
 function money(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+const PAYMENT_TYPES = ["Efectivo", "Tarjeta", "Transferencia"];
+
+function normalizeInvoicePayments(paymentType, rawPayments, total) {
+  const type = PAYMENT_TYPES.includes(paymentType) ? paymentType : paymentType === "Mixto" ? "Mixto" : "Efectivo";
+  if (type !== "Mixto") return { paymentType: type, payments: [{ paymentType: type, amount: total }] };
+  const grouped = new Map();
+  for (const item of Array.isArray(rawPayments) ? rawPayments : []) {
+    const method = String(item?.paymentType || "");
+    const amount = money(item?.amount || 0);
+    if (!PAYMENT_TYPES.includes(method) || amount <= 0) continue;
+    grouped.set(method, money((grouped.get(method) || 0) + amount));
+  }
+  const payments = Array.from(grouped, ([method, amount]) => ({ paymentType: method, amount }));
+  const paymentTotal = money(payments.reduce((sum, item) => sum + item.amount, 0));
+  if (payments.length < 2) throw Object.assign(new Error("El pago mixto debe usar al menos dos formas de pago."), { status: 400 });
+  if (Math.abs(paymentTotal - total) > 0.009) {
+    throw Object.assign(new Error(`Los pagos deben sumar exactamente $${total.toFixed(2)}.`), { status: 400 });
+  }
+  return { paymentType: "Mixto", payments };
 }
 
 function normalizeModifierGroups(input) {
@@ -1231,10 +1265,9 @@ app.delete("/products/:company/:id", requireUserAdmin, (req, res) => {
 
 app.post("/sales/:company", requireCompanyUser, async (req, res) => {
   const { company } = req.params;
-  const { items, cash, paymentType, invoiceType, clientId } = req.body;
+  const { items, cash, paymentType, payments: requestedPayments, invoiceType, clientId } = req.body;
   const restaurantOrderId = Number(req.body.restaurantOrderId) || null;
   const date = getETLocalISO();
-  const payType = paymentType || "Efectivo";
 
   if (!Array.isArray(items) || !items.length) {
     return res.status(400).json({ error: "Carrito vacío" });
@@ -1276,34 +1309,48 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
     let total = 0;
     let discountAmount = 0;
     for (const item of items) {
+      const orderItem = restaurantOrder
+        ? await dbGet(
+          "SELECT * FROM restaurant_order_items WHERE id = ? AND orderId = ? AND company = ?",
+          [Number(item.orderItemId), restaurantOrder.id, company]
+        )
+        : null;
+      if (restaurantOrder && !orderItem) {
+        return res.status(409).json({ error: "Uno de los productos ya no pertenece a esta cuenta. Vuelve a abrir el pedido." });
+      }
       const product = await dbGet(
         "SELECT * FROM products WHERE id = ? AND company = ?",
-        [item.id, company]
+        [orderItem?.productId || item.id, company]
       );
       if (!product) return res.status(400).json({ error: `Producto no encontrado: ${item.code}` });
       if (!restaurantOrder && Number(product.available ?? 1) !== 1) {
         return res.status(409).json({ error: `${product.name} está marcado como agotado.` });
       }
       const quantity = Math.max(1, Number(item.quantity) || 1);
+      if (orderItem && quantity > Number(orderItem.quantity || 0)) {
+        return res.status(409).json({ error: `Solo quedan ${orderItem.quantity} unidad(es) de ${orderItem.name} en esta cuenta.` });
+      }
       if (quantity > product.quantity) {
         return res.status(400).json({ error: `Inventario insuficiente para ${product.name}.` });
       }
-      const discountPercent = Number(item.discountPercent || 0);
+      const discountPercent = Number(orderItem?.discountPercent ?? item.discountPercent ?? 0);
       if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
         return res.status(400).json({ error: `El descuento de ${product.name} debe estar entre 0% y 100%.` });
       }
-      const discountReason = String(item.discountReason || "").trim().slice(0, 80);
+      const discountReason = String(orderItem?.discountReason ?? item.discountReason ?? "").trim().slice(0, 80);
       if (discountPercent === 100 && !discountReason) {
         return res.status(400).json({ error: `Selecciona el motivo para entregar ${product.name} gratis.` });
       }
       let modifiers;
       try {
-        modifiers = resolveSelectedModifiers(product, item.selectedModifiers);
+        modifiers = orderItem
+          ? { selections: parseJsonArray(orderItem.selectedModifiers), extraPrice: 0 }
+          : resolveSelectedModifiers(product, item.selectedModifiers);
       } catch (err) {
         return res.status(err.status || 400).json({ error: err.message });
       }
       const rate = Number(product.taxRate ?? 15);
-      const unitPrice = money(Number(product.price) + modifiers.extraPrice);
+      const unitPrice = orderItem ? money(orderItem.price) : money(Number(product.price) + modifiers.extraPrice);
       const gross = money(unitPrice * quantity);
       const lineDiscount = money(gross * discountPercent / 100);
       const net = money(gross - lineDiscount);
@@ -1313,7 +1360,19 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       taxAmount = money(taxAmount + tax);
       discountAmount = money(discountAmount + lineDiscount);
       total = money(total + net);
-      lines.push({ product, quantity, unitPrice, gross, discountPercent, discountAmount: lineDiscount, discountReason, selectedModifiers: modifiers.selections, net });
+      lines.push({ orderItemId: orderItem?.id || null, product, quantity, unitPrice, gross, discountPercent, discountAmount: lineDiscount, discountReason, selectedModifiers: modifiers.selections, net });
+    }
+
+    let payment;
+    try {
+      payment = normalizeInvoicePayments(paymentType, requestedPayments, total);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+    const payType = payment.paymentType;
+    const cashPayment = payment.payments.find(item => item.paymentType === "Efectivo")?.amount || 0;
+    if (payType === "Efectivo" && money(Number(cash) || 0) < total) {
+      return res.status(400).json({ error: "El efectivo recibido es insuficiente." });
     }
 
     const settings = await dbGet("SELECT * FROM sri_settings WHERE company = ?", [company]);
@@ -1327,6 +1386,8 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       ? "PENDING_SRI"
       : settings?.certificateConfigured ? "CERTIFICATE_PENDING_VALIDATION" : "CONFIGURATION_REQUIRED";
 
+    let tableClosed = false;
+    let remainingItems = 0;
     const invoice = await dataStore.transaction(async () => {
       if (restaurantOrder) {
         const claimed = await dbRun(
@@ -1339,22 +1400,29 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       `INSERT INTO invoices
        (company, invoiceType, clientId, buyerIdType, buyerIdNumber, buyerName,
         buyerAddress, buyerEmail, subtotal, taxAmount, discountAmount, total, paymentType,
-        cashRegisterSessionId, invoiceNumber, status, cashReceived, changeDue,
+        cashRegisterSessionId, restaurantOrderId, invoiceNumber, status, cashReceived, changeDue,
         issuedByUserId, issuedByName, sriMessage, date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         company, type, client?.id || null, client?.idType || "07",
         client?.idNumber || "9999999999999",
         client?.razonSocial || "CONSUMIDOR FINAL", client?.direccion || "",
         client?.email || "", subtotal, taxAmount, discountAmount, total, payType,
-        cashRegister.id, invoiceNumber, status,
-        payType === "Efectivo" ? money(Number(cash) || 0) : total,
+        cashRegister.id, restaurantOrder?.id || null, invoiceNumber, status,
+        payType === "Efectivo" ? money(Number(cash) || 0) : cashPayment,
         payType === "Efectivo" ? money(Math.max(0, (Number(cash) || 0) - total)) : 0,
         req.user.id, req.user.fullName || req.user.username,
         configured ? "Pendiente de firma y envío al SRI." : "Complete la configuración SRI.",
         date
       ]
       );
+
+      for (const item of payment.payments) {
+        await dbRun(
+          "INSERT INTO invoice_payments (company, invoiceId, paymentType, amount) VALUES (?, ?, ?, ?)",
+          [company, createdInvoice.lastID, item.paymentType, item.amount]
+        );
+      }
 
       for (const line of lines) {
         await dbRun(
@@ -1382,15 +1450,40 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
         [company, sequence + 1, sequence + 1]
       );
       if (restaurantOrder) {
-        const durationMinutes = Math.max(0, Math.round((new Date(date) - new Date(restaurantOrder.openedAt)) / 60000));
-        await dbRun(
-          "UPDATE restaurant_orders SET status = 'PAID', paidAt = ?, invoiceId = ?, updatedAt = ? WHERE id = ? AND company = ?",
-          [date, createdInvoice.lastID, date, restaurantOrder.id, company]
+        for (const line of lines) {
+          await dbRun(
+            "UPDATE restaurant_order_items SET quantity = quantity - ? WHERE id = ? AND orderId = ? AND company = ?",
+            [line.quantity, line.orderItemId, restaurantOrder.id, company]
+          );
+          await dbRun(
+            "DELETE FROM restaurant_order_items WHERE id = ? AND orderId = ? AND company = ? AND quantity <= 0",
+            [line.orderItemId, restaurantOrder.id, company]
+          );
+        }
+        const remaining = await dbGet(
+          "SELECT COALESCE(SUM(quantity), 0) AS total FROM restaurant_order_items WHERE orderId = ? AND company = ?",
+          [restaurantOrder.id, company]
         );
-        await dbRun(
-          "UPDATE restaurant_table_sessions SET closedAt = ?, durationMinutes = ?, status = 'CLOSED' WHERE id = ? AND company = ? AND closedAt IS NULL",
-          [date, durationMinutes, restaurantOrder.tableSessionId, company]
-        );
+        remainingItems = Number(remaining?.total || 0);
+        if (remainingItems > 0) {
+          await dbRun(
+            "UPDATE restaurant_orders SET status = 'OPEN', invoiceId = ?, updatedAt = ? WHERE id = ? AND company = ?",
+            [createdInvoice.lastID, date, restaurantOrder.id, company]
+          );
+        } else {
+          const durationMinutes = Math.max(0, Math.round((new Date(date) - new Date(restaurantOrder.openedAt)) / 60000));
+          await dbRun(
+            "UPDATE restaurant_orders SET status = 'PAID', paidAt = ?, invoiceId = ?, updatedAt = ? WHERE id = ? AND company = ?",
+            [date, createdInvoice.lastID, date, restaurantOrder.id, company]
+          );
+          await dbRun(
+            `UPDATE restaurant_table_sessions
+             SET closedAt = ?, durationMinutes = ?, status = 'CLOSED'
+             WHERE company = ? AND closedAt IS NULL AND (id = ? OR joinedToSessionId = ?)`,
+            [date, durationMinutes, company, restaurantOrder.tableSessionId, restaurantOrder.tableSessionId]
+          );
+          tableClosed = true;
+        }
       }
       return createdInvoice;
     });
@@ -1406,7 +1499,9 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       total,
       cash,
       paymentType: payType,
-      tableClosed: Boolean(restaurantOrder)
+      payments: payment.payments,
+      tableClosed,
+      remainingItems
     });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -1419,7 +1514,7 @@ app.get("/invoices/:id/receipt", requireCompanyUser, async (req, res) => {
   try {
     const invoice = await dbGet("SELECT * FROM invoices WHERE id = ? AND company = ?", [invoiceId, req.user.company]);
     if (!invoice) return res.status(404).json({ error: "Comprobante no encontrado." });
-    const [settings, lines, restaurant] = await Promise.all([
+    const [settings, lines, restaurant, payments] = await Promise.all([
       dbGet("SELECT * FROM sri_settings WHERE company = ?", [req.user.company]),
       dataStore.all(
         `SELECT code, name, quantity, price, grossTotal, discountPercent, discountAmount,
@@ -1428,14 +1523,30 @@ app.get("/invoices/:id/receipt", requireCompanyUser, async (req, res) => {
         [invoiceId, req.user.company]
       ),
       dbGet(
-        `SELECT t.name AS tableName, s.serverName, s.guests
+        `SELECT o.tableSessionId, t.name AS tableName, s.serverName, s.guests
          FROM restaurant_orders o
          JOIN restaurant_table_sessions s ON s.id = o.tableSessionId
          JOIN restaurant_tables t ON t.id = o.tableId
-         WHERE o.invoiceId = ? AND o.company = ?`,
+         WHERE o.id = ? AND o.company = ?`,
+        [invoice.restaurantOrderId, req.user.company]
+      ),
+      dataStore.all(
+        "SELECT paymentType, amount FROM invoice_payments WHERE invoiceId = ? AND company = ? ORDER BY id",
         [invoiceId, req.user.company]
       )
     ]);
+    if (restaurant?.tableSessionId) {
+      const servedTables = await dataStore.all(
+        `SELECT t.name AS tableName, s.guests
+         FROM restaurant_table_sessions s
+         JOIN restaurant_tables t ON t.id = s.tableId
+         WHERE s.company = ? AND (s.id = ? OR s.joinedToSessionId = ?)
+         ORDER BY CASE WHEN s.id = ? THEN 0 ELSE 1 END, t.name`,
+        [req.user.company, restaurant.tableSessionId, restaurant.tableSessionId, restaurant.tableSessionId]
+      );
+      restaurant.tableName = servedTables.map(table => table.tableName).join(" + ") || restaurant.tableName;
+      restaurant.guests = servedTables.reduce((sum, table) => sum + Number(table.guests || 0), 0) || restaurant.guests;
+    }
     const environment = settings?.environment === "PRODUCTION" ? "PRODUCTION" : "TEST";
     const authorized = invoice.status === "AUTHORIZED" && Boolean(invoice.accessKey || invoice.authorizationNumber);
     res.json({
@@ -1453,6 +1564,7 @@ app.get("/invoices/:id/receipt", requireCompanyUser, async (req, res) => {
       environment,
       authorized,
       restaurant: restaurant || null,
+      payments: payments.length ? payments : [{ paymentType: invoice.paymentType, amount: invoice.total }],
       lines: lines.map(line => ({ ...line, selectedModifiers: parseJsonArray(line.selectedModifiers) }))
     });
   } catch (err) {
@@ -1660,7 +1772,7 @@ function etDateWithOffset(days = 0) {
   return new Date(Date.now() + days * 86400000).toLocaleDateString("sv-SE", { timeZone: "America/New_York" });
 }
 
-function summarizeDailySales(rows) {
+function summarizeDailySales(rows, paymentsByInvoice = new Map()) {
   const activeUnits = sale => Math.max(0, Number(sale.quantity || 0) - Number(sale.returnedQuantity || 0));
   const activeTotal = sale => Math.max(0, Number(sale.total || 0) - Number(sale.returnedAmount || 0));
   const activeRows = rows.filter(sale => activeUnits(sale) > 0);
@@ -1679,8 +1791,17 @@ function summarizeDailySales(rows) {
     discount = money(discount + Number(sale.discountAmount || 0) * ratio);
     if (Number(sale.discountPercent || 0) === 100) complimentary += lineUnits;
     if (!lineUnits) continue;
-    const paymentType = ["Efectivo", "Tarjeta", "Transferencia"].includes(sale.paymentType) ? sale.paymentType : "Otros";
-    payments[paymentType] = money(payments[paymentType] + lineTotal);
+    const breakdown = paymentsByInvoice.get(String(sale.invoiceId)) || [];
+    const breakdownTotal = breakdown.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    if (breakdown.length > 1 && breakdownTotal > 0) {
+      for (const item of breakdown) {
+        const method = PAYMENT_TYPES.includes(item.paymentType) ? item.paymentType : "Otros";
+        payments[method] = money(payments[method] + lineTotal * Number(item.amount) / breakdownTotal);
+      }
+    } else {
+      const paymentType = PAYMENT_TYPES.includes(sale.paymentType) ? sale.paymentType : "Otros";
+      payments[paymentType] = money(payments[paymentType] + lineTotal);
+    }
   }
   const transactions = transactionIds.size;
   return { total, transactions, average: money(transactions ? total / transactions : 0), units, discount, complimentary, payments };
@@ -1692,7 +1813,7 @@ app.get("/dashboard/summary", requireCompanyUser, async (req, res) => {
     const yesterday = etDateWithOffset(-1);
     const thresholdInput = Number(req.query.threshold);
     const threshold = Number.isFinite(thresholdInput) && thresholdInput >= 0 ? Math.min(999999, thresholdInput) : 5;
-    const sales = await dataStore.all(
+    const [sales, paymentRows] = await Promise.all([dataStore.all(
       `SELECT s.*, COALESCE(a.returnedQuantity, 0) AS returnedQuantity,
               COALESCE(a.returnedAmount, 0) AS returnedAmount
        FROM sales s
@@ -1703,9 +1824,21 @@ app.get("/dashboard/summary", requireCompanyUser, async (req, res) => {
        WHERE s.company = ? AND s.date >= ? AND s.date <= ?
        ORDER BY s.date DESC, s.id DESC`,
       [req.user.company, `${yesterday}T00:00:00`, `${today}T23:59:59`]
-    );
-    const todaySummary = summarizeDailySales(sales.filter(sale => String(sale.date || "").slice(0, 10) === today));
-    const yesterdaySummary = summarizeDailySales(sales.filter(sale => String(sale.date || "").slice(0, 10) === yesterday));
+    ), dataStore.all(
+      `SELECT ip.invoiceId, ip.paymentType, ip.amount
+       FROM invoice_payments ip
+       JOIN invoices i ON i.id = ip.invoiceId AND i.company = ip.company
+       WHERE ip.company = ? AND i.date >= ? AND i.date <= ?`,
+      [req.user.company, `${yesterday}T00:00:00`, `${today}T23:59:59`]
+    )]);
+    const paymentsByInvoice = new Map();
+    paymentRows.forEach(payment => {
+      const key = String(payment.invoiceId);
+      if (!paymentsByInvoice.has(key)) paymentsByInvoice.set(key, []);
+      paymentsByInvoice.get(key).push(payment);
+    });
+    const todaySummary = summarizeDailySales(sales.filter(sale => String(sale.date || "").slice(0, 10) === today), paymentsByInvoice);
+    const yesterdaySummary = summarizeDailySales(sales.filter(sale => String(sale.date || "").slice(0, 10) === yesterday), paymentsByInvoice);
     const difference = money(todaySummary.total - yesterdaySummary.total);
     const percentage = yesterdaySummary.total > 0 ? Math.round((difference / yesterdaySummary.total) * 1000) / 10 : null;
     const lowStock = await dataStore.all(
@@ -1763,12 +1896,18 @@ app.get("/dashboard/summary", requireCompanyUser, async (req, res) => {
 
 async function cashRegisterSnapshot(session) {
   const payments = await dataStore.all(
-    `SELECT s.paymentType, COALESCE(SUM(s.total), 0) AS total
-     FROM sales s
-     JOIN invoices i ON i.id = s.invoiceId
-     WHERE i.cashRegisterSessionId = ?
-     GROUP BY s.paymentType`,
-    [session.id]
+    `SELECT invoiceId, paymentType, total FROM (
+       SELECT i.id AS invoiceId, ip.paymentType, ip.amount AS total
+       FROM invoice_payments ip
+       JOIN invoices i ON i.id = ip.invoiceId
+       WHERE i.cashRegisterSessionId = ?
+       UNION ALL
+       SELECT i.id AS invoiceId, i.paymentType, i.total
+       FROM invoices i
+       WHERE i.cashRegisterSessionId = ?
+         AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoiceId = i.id)
+     ) payment_rows`,
+    [session.id, session.id]
   );
   const movements = await dataStore.all(
     `SELECT * FROM cash_register_movements
@@ -1776,26 +1915,35 @@ async function cashRegisterSnapshot(session) {
     [session.id, session.company]
   );
   const adjustments = await dataStore.all(
-    `SELECT paymentType, COALESCE(SUM(amount), 0) AS total
+    `SELECT invoiceId, paymentType, amount AS total
      FROM sale_adjustments
-     WHERE cashRegisterSessionId = ? AND company = ?
-     GROUP BY paymentType`,
+     WHERE cashRegisterSessionId = ? AND company = ?`,
     [session.id, session.company]
   );
   const totals = { cash: 0, card: 0, transfer: 0, other: 0 };
+  const addPaymentAmount = (paymentType, amount) => {
+    if (paymentType === "Efectivo") totals.cash += amount;
+    else if (paymentType === "Tarjeta") totals.card += amount;
+    else if (paymentType === "Transferencia") totals.transfer += amount;
+    else totals.other += amount;
+  };
+  const invoicePayments = new Map();
   for (const payment of payments) {
     const amount = money(payment.total || 0);
-    if (payment.paymentType === "Efectivo") totals.cash += amount;
-    else if (payment.paymentType === "Tarjeta") totals.card += amount;
-    else if (payment.paymentType === "Transferencia") totals.transfer += amount;
-    else totals.other += amount;
+    addPaymentAmount(payment.paymentType, amount);
+    const key = String(payment.invoiceId);
+    if (!invoicePayments.has(key)) invoicePayments.set(key, []);
+    invoicePayments.get(key).push({ paymentType: payment.paymentType, amount });
   }
   for (const adjustment of adjustments) {
     const amount = money(adjustment.total || 0);
-    if (adjustment.paymentType === "Efectivo") totals.cash -= amount;
-    else if (adjustment.paymentType === "Tarjeta") totals.card -= amount;
-    else if (adjustment.paymentType === "Transferencia") totals.transfer -= amount;
-    else totals.other -= amount;
+    const breakdown = adjustment.paymentType === "Mixto" ? invoicePayments.get(String(adjustment.invoiceId)) || [] : [];
+    const breakdownTotal = breakdown.reduce((sum, item) => sum + item.amount, 0);
+    if (breakdown.length > 1 && breakdownTotal > 0) {
+      breakdown.forEach(item => addPaymentAmount(item.paymentType, -money(amount * item.amount / breakdownTotal)));
+    } else {
+      addPaymentAmount(adjustment.paymentType, -amount);
+    }
   }
   const cashIn = money(movements.filter(item => item.type === "ENTRADA").reduce((sum, item) => sum + Number(item.amount || 0), 0));
   const cashOut = money(movements.filter(item => item.type === "RETIRO").reduce((sum, item) => sum + Number(item.amount || 0), 0));
@@ -1991,7 +2139,7 @@ app.delete("/store/users/:id", requireUserAdmin, async (req, res) => {
 
 app.get("/sales/:company", requireCompanyUser, async (req, res) => {
   try {
-    const rows = await dataStore.all(
+    const [rows, paymentRows] = await Promise.all([dataStore.all(
       `SELECT s.*, i.invoiceNumber, i.saleStatus AS invoiceSaleStatus,
               COALESCE(a.returnedQuantity, 0) AS returnedQuantity,
               COALESCE(a.returnedAmount, 0) AS returnedAmount,
@@ -2006,9 +2154,22 @@ app.get("/sales/:company", requireCompanyUser, async (req, res) => {
        ) a ON a.saleId = s.id
        WHERE s.company = ? ORDER BY s.date DESC, s.id DESC`,
       [req.params.company]
-    );
+    ), dataStore.all(
+      `SELECT ip.invoiceId, ip.paymentType, ip.amount
+       FROM invoice_payments ip
+       JOIN invoices i ON i.id = ip.invoiceId AND i.company = ip.company
+       WHERE ip.company = ?`,
+      [req.params.company]
+    )]);
+    const paymentsByInvoice = new Map();
+    paymentRows.forEach(payment => {
+      const key = String(payment.invoiceId);
+      if (!paymentsByInvoice.has(key)) paymentsByInvoice.set(key, []);
+      paymentsByInvoice.get(key).push({ paymentType: payment.paymentType, amount: Number(payment.amount) });
+    });
     res.json(rows.map(row => ({
       ...row,
+      payments: paymentsByInvoice.get(String(row.invoiceId)) || [],
       saleStatus: row.invoiceSaleStatus === "ANULADA" || Number(row.hasCancellation || 0) === 1
         ? "ANULADA"
         : Number(row.returnedQuantity || 0) >= Number(row.quantity || 0) && Number(row.quantity || 0) > 0
@@ -2236,6 +2397,7 @@ if (!dataStore.postgres) {
   addColumnIfMissing("sales", "grantedByName TEXT DEFAULT ''");
   addColumnIfMissing("invoices", "discountAmount REAL DEFAULT 0");
   addColumnIfMissing("invoices", "cashReceived REAL DEFAULT 0");
+  addColumnIfMissing("invoices", "restaurantOrderId INTEGER");
   addColumnIfMissing("invoices", "changeDue REAL DEFAULT 0");
   addColumnIfMissing("invoices", "issuedByUserId INTEGER");
   addColumnIfMissing("invoices", "issuedByName TEXT DEFAULT ''");
@@ -2250,6 +2412,7 @@ if (!dataStore.postgres) {
   addColumnIfMissing("restaurant_order_items", "discountPercent REAL DEFAULT 0");
   addColumnIfMissing("restaurant_order_items", "discountReason TEXT DEFAULT ''");
   addColumnIfMissing("restaurant_order_items", "selectedModifiers TEXT DEFAULT '[]'");
+  addColumnIfMissing("restaurant_table_sessions", "joinedToSessionId INTEGER");
   addColumnIfMissing("restaurant_orders", "kitchenStatus TEXT DEFAULT 'NEW'");
   addColumnIfMissing("restaurant_orders", "kitchenReceivedAt TEXT");
   addColumnIfMissing("restaurant_orders", "kitchenStartedAt TEXT");
@@ -2483,6 +2646,31 @@ async function ensureRestaurantOrder(session) {
   return order;
 }
 
+async function primaryRestaurantSession(session, company) {
+  if (!session?.joinedToSessionId) return session;
+  return dbGet(
+    "SELECT * FROM restaurant_table_sessions WHERE id = ? AND company = ? AND closedAt IS NULL",
+    [session.joinedToSessionId, company]
+  );
+}
+
+async function restaurantSessionContext(session) {
+  const rows = await dataStore.all(
+    `SELECT s.id, s.guests, s.serverName, t.name AS tableName
+     FROM restaurant_table_sessions s
+     JOIN restaurant_tables t ON t.id = s.tableId
+     WHERE s.company = ? AND s.closedAt IS NULL AND (s.id = ? OR s.joinedToSessionId = ?)
+     ORDER BY CASE WHEN s.id = ? THEN 0 ELSE 1 END, t.name`,
+    [session.company, session.id, session.id, session.id]
+  );
+  return {
+    tableName: rows.map(row => row.tableName).join(" + "),
+    guests: rows.reduce((sum, row) => sum + Number(row.guests || 0), 0),
+    serverName: session.serverName,
+    joinedTableCount: Math.max(0, rows.length - 1)
+  };
+}
+
 async function restaurantOrderResponse(order) {
   const items = await dataStore.all(
     `SELECT id, productId, code, name, quantity, price, discountPercent, discountReason, selectedModifiers, note
@@ -2496,16 +2684,19 @@ app.get("/restaurant/table-sessions/:sessionId/order", requireRestaurantStore, a
   try {
     const sessionId = Number(req.params.sessionId);
     if (!Number.isInteger(sessionId) || sessionId < 1) return res.status(400).json({ error: "Atención inválida." });
-    const session = await dbGet(
+    const requestedSession = await dbGet(
       `SELECT s.*, t.name AS tableName
        FROM restaurant_table_sessions s
        JOIN restaurant_tables t ON t.id = s.tableId
        WHERE s.id = ? AND s.company = ? AND s.closedAt IS NULL`,
       [sessionId, req.user.company]
     );
-    if (!session) return res.status(404).json({ error: "La mesa ya no está ocupada." });
+    if (!requestedSession) return res.status(404).json({ error: "La mesa ya no está ocupada." });
+    const session = await primaryRestaurantSession(requestedSession, req.user.company);
+    if (!session) return res.status(404).json({ error: "La cuenta principal ya no está disponible." });
     const order = await ensureRestaurantOrder(session);
-    res.json({ ...(await restaurantOrderResponse(order)), tableName: session.tableName, guests: session.guests, serverName: session.serverName });
+    const context = await restaurantSessionContext(session);
+    res.json({ ...(await restaurantOrderResponse(order)), ...context });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -2517,11 +2708,13 @@ app.put("/restaurant/table-sessions/:sessionId/order", requireRestaurantStore, a
   if (!Number.isInteger(sessionId) || sessionId < 1) return res.status(400).json({ error: "Atención inválida." });
   if (requestedItems.length > 200) return res.status(400).json({ error: "El pedido tiene demasiados productos." });
   try {
-    const session = await dbGet(
+    const requestedSession = await dbGet(
       "SELECT * FROM restaurant_table_sessions WHERE id = ? AND company = ? AND closedAt IS NULL",
       [sessionId, req.user.company]
     );
-    if (!session) return res.status(404).json({ error: "La mesa ya no está ocupada." });
+    if (!requestedSession) return res.status(404).json({ error: "La mesa ya no está ocupada." });
+    const session = await primaryRestaurantSession(requestedSession, req.user.company);
+    if (!session) return res.status(404).json({ error: "La cuenta principal ya no está disponible." });
 
     const cleanItems = [];
     for (const item of requestedItems) {
@@ -2699,13 +2892,16 @@ app.get("/restaurant/tables", requireRestaurantStore, async (req, res) => {
     const rows = await dataStore.all(
       `SELECT t.id, t.name, t.capacity, t.active,
               s.id AS sessionId, s.guests, s.status, s.openedAt,
-              s.serverUserId, s.serverName, o.id AS orderId, o.kitchenStatus,
+              s.serverUserId, s.serverName, s.joinedToSessionId,
+              pt.name AS joinedTableName, o.id AS orderId, o.kitchenStatus,
               COALESCE((SELECT SUM(oi.quantity) FROM restaurant_order_items oi WHERE oi.orderId = o.id), 0) AS orderItemCount
        FROM restaurant_tables t
        LEFT JOIN restaurant_table_sessions s
          ON s.tableId = t.id AND s.closedAt IS NULL
+       LEFT JOIN restaurant_table_sessions ps ON ps.id = s.joinedToSessionId AND ps.closedAt IS NULL
+       LEFT JOIN restaurant_tables pt ON pt.id = ps.tableId
        LEFT JOIN restaurant_orders o
-         ON o.tableSessionId = s.id AND o.status = 'OPEN'
+         ON o.tableSessionId = COALESCE(s.joinedToSessionId, s.id) AND o.status = 'OPEN'
        WHERE t.company = ? ${includeInactive ? "" : "AND t.active = 1"}
        ORDER BY t.name, t.id`,
       [req.user.company]
@@ -3004,6 +3200,86 @@ app.post("/restaurant/tables/:id/seat", requireRestaurantStore, async (req, res)
   }
 });
 
+app.post("/restaurant/tables/:id/join", requireRestaurantStore, async (req, res) => {
+  const primaryTableId = Number(req.params.id);
+  const otherTableId = Number(req.body.otherTableId);
+  if (!Number.isInteger(primaryTableId) || !Number.isInteger(otherTableId) || primaryTableId === otherTableId) {
+    return res.status(400).json({ error: "Selecciona dos mesas ocupadas diferentes." });
+  }
+  try {
+    const result = await dataStore.transaction(async () => {
+      const primary = await dbGet(
+        "SELECT * FROM restaurant_table_sessions WHERE tableId = ? AND company = ? AND closedAt IS NULL",
+        [primaryTableId, req.user.company]
+      );
+      const secondary = await dbGet(
+        "SELECT * FROM restaurant_table_sessions WHERE tableId = ? AND company = ? AND closedAt IS NULL",
+        [otherTableId, req.user.company]
+      );
+      if (!primary || !secondary) throw Object.assign(new Error("Las dos mesas deben estar ocupadas."), { status: 409 });
+      if (primary.joinedToSessionId || secondary.joinedToSessionId) {
+        throw Object.assign(new Error("Una de las mesas ya pertenece a otra cuenta unida."), { status: 409 });
+      }
+      const primaryOrder = await ensureRestaurantOrder(primary);
+      const secondaryOrder = await ensureRestaurantOrder(secondary);
+      const [primaryCount, secondaryCount] = await Promise.all([
+        dbGet("SELECT COUNT(*) AS total FROM restaurant_order_items WHERE orderId = ?", [primaryOrder.id]),
+        dbGet("SELECT COUNT(*) AS total FROM restaurant_order_items WHERE orderId = ?", [secondaryOrder.id])
+      ]);
+      const now = getETLocalISO();
+      const primaryHasItems = Number(primaryCount?.total || 0) > 0;
+      const secondaryHasItems = Number(secondaryCount?.total || 0) > 0;
+      if (secondaryHasItems) {
+        await dbRun(
+          "UPDATE restaurant_order_items SET orderId = ? WHERE orderId = ? AND company = ?",
+          [primaryOrder.id, secondaryOrder.id, req.user.company]
+        );
+      }
+      if (!primaryHasItems && secondaryHasItems) {
+        await dbRun(
+          `UPDATE restaurant_orders
+           SET kitchenStatus = ?, kitchenReceivedAt = ?, kitchenStartedAt = ?, kitchenReadyAt = ?, updatedAt = ?
+           WHERE id = ? AND company = ?`,
+          [secondaryOrder.kitchenStatus, secondaryOrder.kitchenReceivedAt, secondaryOrder.kitchenStartedAt,
+            secondaryOrder.kitchenReadyAt, now, primaryOrder.id, req.user.company]
+        );
+      } else if (primaryHasItems && secondaryHasItems) {
+        const bothReady = primaryOrder.kitchenStatus === "READY" && secondaryOrder.kitchenStatus === "READY";
+        const eitherStarted = [primaryOrder.kitchenStatus, secondaryOrder.kitchenStatus].some(status => status === "COOKING" || status === "READY");
+        const received = [primaryOrder.kitchenReceivedAt, secondaryOrder.kitchenReceivedAt].filter(Boolean).sort()[0] || now;
+        const started = [primaryOrder.kitchenStartedAt, secondaryOrder.kitchenStartedAt].filter(Boolean).sort()[0] || null;
+        const ready = bothReady
+          ? [primaryOrder.kitchenReadyAt, secondaryOrder.kitchenReadyAt].filter(Boolean).sort().at(-1) || now
+          : null;
+        await dbRun(
+          `UPDATE restaurant_orders
+           SET kitchenStatus = ?, kitchenReceivedAt = ?, kitchenStartedAt = ?, kitchenReadyAt = ?, updatedAt = ?
+           WHERE id = ? AND company = ?`,
+          [bothReady ? "READY" : eitherStarted ? "COOKING" : "NEW", received,
+            eitherStarted ? (started || now) : null, ready, now, primaryOrder.id, req.user.company]
+        );
+      }
+      await dbRun(
+        "UPDATE restaurant_orders SET status = 'MERGED', updatedAt = ? WHERE id = ? AND company = ?",
+        [now, secondaryOrder.id, req.user.company]
+      );
+      await dbRun(
+        "UPDATE restaurant_table_sessions SET joinedToSessionId = ? WHERE joinedToSessionId = ? AND company = ? AND closedAt IS NULL",
+        [primary.id, secondary.id, req.user.company]
+      );
+      await dbRun(
+        "UPDATE restaurant_table_sessions SET joinedToSessionId = ?, status = 'JOINED' WHERE id = ? AND company = ? AND closedAt IS NULL",
+        [primary.id, secondary.id, req.user.company]
+      );
+      const context = await restaurantSessionContext(primary);
+      return { joined: true, primarySessionId: primary.id, ...context };
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 app.post("/restaurant/tables/:id/close", requireRestaurantStore, async (req, res) => {
   const id = Number(req.params.id);
   try {
@@ -3012,6 +3288,9 @@ app.post("/restaurant/tables/:id/close", requireRestaurantStore, async (req, res
       [id, req.user.company]
     );
     if (!session) return res.status(404).json({ error: "Esta mesa ya está disponible." });
+    if (session.joinedToSessionId) {
+      return res.status(409).json({ error: "Esta mesa comparte una cuenta. Libera o cobra desde la mesa principal." });
+    }
     const pendingOrder = await dbGet(
       `SELECT o.id, COUNT(oi.id) AS itemCount
        FROM restaurant_orders o
@@ -3026,8 +3305,9 @@ app.post("/restaurant/tables/:id/close", requireRestaurantStore, async (req, res
     const closedAt = getETLocalISO();
     const durationMinutes = Math.max(0, Math.round((new Date(closedAt) - new Date(session.openedAt)) / 60000));
     await dbRun(
-      "UPDATE restaurant_table_sessions SET closedAt = ?, durationMinutes = ?, status = 'CLOSED' WHERE id = ?",
-      [closedAt, durationMinutes, session.id]
+      `UPDATE restaurant_table_sessions SET closedAt = ?, durationMinutes = ?, status = 'CLOSED'
+       WHERE company = ? AND closedAt IS NULL AND (id = ? OR joinedToSessionId = ?)`,
+      [closedAt, durationMinutes, req.user.company, session.id, session.id]
     );
     if (pendingOrder?.id) {
       await dbRun(
@@ -3064,7 +3344,10 @@ async function initializePostgres() {
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS selectedModifiers TEXT DEFAULT '[]'`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grantedByUserId INTEGER`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grantedByName TEXT DEFAULT ''`,
-    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceType TEXT NOT NULL, clientId INTEGER, buyerIdType TEXT, buyerIdNumber TEXT, buyerName TEXT NOT NULL, buyerAddress TEXT, buyerEmail TEXT, subtotal DOUBLE PRECISION NOT NULL, taxAmount DOUBLE PRECISION NOT NULL, discountAmount DOUBLE PRECISION DEFAULT 0, total DOUBLE PRECISION NOT NULL, paymentType TEXT NOT NULL, cashRegisterSessionId INTEGER, invoiceNumber TEXT, status TEXT DEFAULT 'CONFIGURATION_REQUIRED', cashReceived DOUBLE PRECISION DEFAULT 0, changeDue DOUBLE PRECISION DEFAULT 0, issuedByUserId INTEGER, issuedByName TEXT DEFAULT '', accessKey TEXT, authorizationNumber TEXT, authorizedAt TEXT, sriMessage TEXT, date TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceType TEXT NOT NULL, clientId INTEGER, buyerIdType TEXT, buyerIdNumber TEXT, buyerName TEXT NOT NULL, buyerAddress TEXT, buyerEmail TEXT, subtotal DOUBLE PRECISION NOT NULL, taxAmount DOUBLE PRECISION NOT NULL, discountAmount DOUBLE PRECISION DEFAULT 0, total DOUBLE PRECISION NOT NULL, paymentType TEXT NOT NULL, cashRegisterSessionId INTEGER, restaurantOrderId INTEGER, invoiceNumber TEXT, status TEXT DEFAULT 'CONFIGURATION_REQUIRED', cashReceived DOUBLE PRECISION DEFAULT 0, changeDue DOUBLE PRECISION DEFAULT 0, issuedByUserId INTEGER, issuedByName TEXT DEFAULT '', accessKey TEXT, authorizationNumber TEXT, authorizedAt TEXT, sriMessage TEXT, date TEXT NOT NULL)`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS restaurantOrderId INTEGER`,
+    `CREATE TABLE IF NOT EXISTS invoice_payments (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceId INTEGER NOT NULL, paymentType TEXT NOT NULL, amount DOUBLE PRECISION NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments(invoiceId)`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS discountAmount DOUBLE PRECISION DEFAULT 0`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cashRegisterSessionId INTEGER`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cashReceived DOUBLE PRECISION DEFAULT 0`,
@@ -3087,7 +3370,7 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS clients (id SERIAL PRIMARY KEY, company TEXT, idType TEXT, idNumber TEXT, razonSocial TEXT, nombreComercial TEXT, ciudad TEXT, direccion TEXT, email TEXT, telefono TEXT, celular TEXT)`,
     `CREATE TABLE IF NOT EXISTS restaurant_tables (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, capacity INTEGER DEFAULT 4, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS restaurant_servers (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS restaurant_table_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableId INTEGER NOT NULL, restaurantServerId INTEGER, serverUserId INTEGER NOT NULL, serverName TEXT NOT NULL, guests INTEGER NOT NULL, status TEXT DEFAULT 'OCCUPIED', openedAt TEXT NOT NULL, closedAt TEXT, durationMinutes INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS restaurant_table_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableId INTEGER NOT NULL, restaurantServerId INTEGER, serverUserId INTEGER NOT NULL, serverName TEXT NOT NULL, guests INTEGER NOT NULL, status TEXT DEFAULT 'OCCUPIED', joinedToSessionId INTEGER, openedAt TEXT NOT NULL, closedAt TEXT, durationMinutes INTEGER)`,
     `CREATE TABLE IF NOT EXISTS restaurant_orders (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableSessionId INTEGER NOT NULL, tableId INTEGER NOT NULL, status TEXT DEFAULT 'OPEN', kitchenStatus TEXT DEFAULT 'NEW', kitchenReceivedAt TEXT, kitchenStartedAt TEXT, kitchenReadyAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, paidAt TEXT, invoiceId INTEGER)`,
     `CREATE TABLE IF NOT EXISTS restaurant_order_items (id SERIAL PRIMARY KEY, company TEXT NOT NULL, orderId INTEGER NOT NULL, productId INTEGER NOT NULL, code TEXT, name TEXT NOT NULL, quantity INTEGER NOT NULL, price DOUBLE PRECISION NOT NULL, discountPercent DOUBLE PRECISION DEFAULT 0, discountReason TEXT DEFAULT '', selectedModifiers TEXT DEFAULT '[]', note TEXT DEFAULT '')`,
     `CREATE TABLE IF NOT EXISTS cash_register_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, openedByUserId INTEGER NOT NULL, openedByName TEXT NOT NULL, openedAt TEXT NOT NULL, openingAmount DOUBLE PRECISION NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'OPEN', closedByUserId INTEGER, closedByName TEXT, closedAt TEXT, cashSales DOUBLE PRECISION NOT NULL DEFAULT 0, cardSales DOUBLE PRECISION NOT NULL DEFAULT 0, transferSales DOUBLE PRECISION NOT NULL DEFAULT 0, otherSales DOUBLE PRECISION NOT NULL DEFAULT 0, cashIn DOUBLE PRECISION NOT NULL DEFAULT 0, cashOut DOUBLE PRECISION NOT NULL DEFAULT 0, expectedAmount DOUBLE PRECISION NOT NULL DEFAULT 0, countedAmount DOUBLE PRECISION, difference DOUBLE PRECISION)`,
@@ -3100,6 +3383,7 @@ async function initializePostgres() {
     `ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS kitchenStartedAt TEXT`,
     `ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS kitchenReadyAt TEXT`,
     `ALTER TABLE restaurant_table_sessions ADD COLUMN IF NOT EXISTS restaurantServerId INTEGER`,
+    `ALTER TABLE restaurant_table_sessions ADD COLUMN IF NOT EXISTS joinedToSessionId INTEGER`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_open_table_session ON restaurant_table_sessions(tableId) WHERE closedAt IS NULL`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_order_session ON restaurant_orders(tableSessionId)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_register_open_company ON cash_register_sessions(company) WHERE status = 'OPEN'`,
