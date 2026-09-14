@@ -1,0 +1,4 @@
+backend/.npm-cache/
+backend/.tmp-*/
+backend/database.sqlite
+node_modules/
