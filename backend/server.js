@@ -95,6 +95,8 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       price REAL,
       taxRate REAL DEFAULT 15,
       menuCategory TEXT DEFAULT 'General',
+      available INTEGER DEFAULT 1,
+      modifierGroups TEXT DEFAULT '[]',
       company TEXT
     )
   `);
@@ -111,6 +113,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       discountPercent REAL DEFAULT 0,
       discountAmount REAL DEFAULT 0,
       discountReason TEXT DEFAULT '',
+      selectedModifiers TEXT DEFAULT '[]',
       grantedByUserId INTEGER,
       grantedByName TEXT DEFAULT '',
       total REAL,
@@ -145,6 +148,13 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       canceledAt TEXT,
       canceledByUserId INTEGER,
       canceledByName TEXT,
+      cashReceived REAL DEFAULT 0,
+      changeDue REAL DEFAULT 0,
+      issuedByUserId INTEGER,
+      issuedByName TEXT DEFAULT '',
+      accessKey TEXT,
+      authorizationNumber TEXT,
+      authorizedAt TEXT,
       sriMessage TEXT,
       date TEXT NOT NULL
     )
@@ -302,6 +312,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       price REAL NOT NULL,
       discountPercent REAL DEFAULT 0,
       discountReason TEXT DEFAULT '',
+      selectedModifiers TEXT DEFAULT '[]',
       note TEXT DEFAULT ''
     )
   `);
@@ -505,6 +516,64 @@ async function sendTransactionalEmail(to, subject, html) {
 
 function money(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function normalizeModifierGroups(input) {
+  let groups = input;
+  if (typeof groups === "string") {
+    try { groups = JSON.parse(groups || "[]"); } catch { groups = []; }
+  }
+  if (!Array.isArray(groups)) return [];
+  return groups.slice(0, 12).map((group, groupIndex) => ({
+    name: String(group?.name || "").trim().slice(0, 60),
+    required: Boolean(group?.required),
+    multiple: Boolean(group?.multiple),
+    sortOrder: groupIndex,
+    options: (Array.isArray(group?.options) ? group.options : []).slice(0, 30).map((option, optionIndex) => ({
+      name: String(option?.name || "").trim().slice(0, 60),
+      priceDelta: money(Math.max(0, Number(option?.priceDelta) || 0)),
+      sortOrder: optionIndex
+    })).filter(option => option.name)
+  })).filter(group => group.name && group.options.length);
+}
+
+function parseProductModifierGroups(product) {
+  return normalizeModifierGroups(product?.modifierGroups || []);
+}
+
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function resolveSelectedModifiers(product, input) {
+  const groups = parseProductModifierGroups(product);
+  const selections = Array.isArray(input) ? input : [];
+  const clean = [];
+  let extraPrice = 0;
+  for (const group of groups) {
+    const requested = selections.find(selection => String(selection?.group || "") === group.name);
+    const names = Array.isArray(requested?.options)
+      ? requested.options.map(option => String(typeof option === "object" ? option?.name : option))
+      : [];
+    const chosen = group.options.filter(option => names.includes(option.name));
+    if (group.required && !chosen.length) {
+      throw Object.assign(new Error(`Selecciona una opción para ${group.name}.`), { status: 400 });
+    }
+    if (!group.multiple && chosen.length > 1) {
+      throw Object.assign(new Error(`Selecciona una sola opción para ${group.name}.`), { status: 400 });
+    }
+    if (chosen.length) {
+      clean.push({ group: group.name, options: chosen.map(option => ({ name: option.name, priceDelta: option.priceDelta })) });
+      extraPrice = money(extraPrice + chosen.reduce((sum, option) => sum + option.priceDelta, 0));
+    }
+  }
+  return { selections: clean, extraPrice };
 }
 
 function certificateEncryptionKey() {
@@ -1212,6 +1281,9 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
         [item.id, company]
       );
       if (!product) return res.status(400).json({ error: `Producto no encontrado: ${item.code}` });
+      if (!restaurantOrder && Number(product.available ?? 1) !== 1) {
+        return res.status(409).json({ error: `${product.name} está marcado como agotado.` });
+      }
       const quantity = Math.max(1, Number(item.quantity) || 1);
       if (quantity > product.quantity) {
         return res.status(400).json({ error: `Inventario insuficiente para ${product.name}.` });
@@ -1224,8 +1296,15 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       if (discountPercent === 100 && !discountReason) {
         return res.status(400).json({ error: `Selecciona el motivo para entregar ${product.name} gratis.` });
       }
+      let modifiers;
+      try {
+        modifiers = resolveSelectedModifiers(product, item.selectedModifiers);
+      } catch (err) {
+        return res.status(err.status || 400).json({ error: err.message });
+      }
       const rate = Number(product.taxRate ?? 15);
-      const gross = money(Number(product.price) * quantity);
+      const unitPrice = money(Number(product.price) + modifiers.extraPrice);
+      const gross = money(unitPrice * quantity);
       const lineDiscount = money(gross * discountPercent / 100);
       const net = money(gross - lineDiscount);
       const base = rate > 0 ? money(net / (1 + rate / 100)) : net;
@@ -1234,7 +1313,7 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       taxAmount = money(taxAmount + tax);
       discountAmount = money(discountAmount + lineDiscount);
       total = money(total + net);
-      lines.push({ product, quantity, gross, discountPercent, discountAmount: lineDiscount, discountReason, net });
+      lines.push({ product, quantity, unitPrice, gross, discountPercent, discountAmount: lineDiscount, discountReason, selectedModifiers: modifiers.selections, net });
     }
 
     const settings = await dbGet("SELECT * FROM sri_settings WHERE company = ?", [company]);
@@ -1260,14 +1339,18 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       `INSERT INTO invoices
        (company, invoiceType, clientId, buyerIdType, buyerIdNumber, buyerName,
         buyerAddress, buyerEmail, subtotal, taxAmount, discountAmount, total, paymentType,
-        cashRegisterSessionId, invoiceNumber, status, sriMessage, date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        cashRegisterSessionId, invoiceNumber, status, cashReceived, changeDue,
+        issuedByUserId, issuedByName, sriMessage, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         company, type, client?.id || null, client?.idType || "07",
         client?.idNumber || "9999999999999",
         client?.razonSocial || "CONSUMIDOR FINAL", client?.direccion || "",
         client?.email || "", subtotal, taxAmount, discountAmount, total, payType,
         cashRegister.id, invoiceNumber, status,
+        payType === "Efectivo" ? money(Number(cash) || 0) : total,
+        payType === "Efectivo" ? money(Math.max(0, (Number(cash) || 0) - total)) : 0,
+        req.user.id, req.user.fullName || req.user.username,
         configured ? "Pendiente de firma y envío al SRI." : "Complete la configuración SRI.",
         date
       ]
@@ -1277,12 +1360,12 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
         await dbRun(
         `INSERT INTO sales
          (productId, code, name, quantity, price, grossTotal, discountPercent,
-          discountAmount, discountReason, grantedByUserId, grantedByName, total,
+          discountAmount, discountReason, selectedModifiers, grantedByUserId, grantedByName, total,
           date, paymentType, invoiceId, company)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [line.product.id, line.product.code, line.product.name, line.quantity,
-          line.product.price, line.gross, line.discountPercent, line.discountAmount,
-          line.discountReason, line.discountPercent > 0 ? req.user.id : null,
+          line.unitPrice, line.gross, line.discountPercent, line.discountAmount,
+          line.discountReason, JSON.stringify(line.selectedModifiers), line.discountPercent > 0 ? req.user.id : null,
           line.discountPercent > 0 ? (req.user.fullName || req.user.username) : "",
           line.net, date, payType, createdInvoice.lastID, company]
         );
@@ -1330,10 +1413,59 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
   }
 });
 
+app.get("/invoices/:id/receipt", requireCompanyUser, async (req, res) => {
+  const invoiceId = Number(req.params.id);
+  if (!Number.isInteger(invoiceId) || invoiceId < 1) return res.status(400).json({ error: "Comprobante inválido." });
+  try {
+    const invoice = await dbGet("SELECT * FROM invoices WHERE id = ? AND company = ?", [invoiceId, req.user.company]);
+    if (!invoice) return res.status(404).json({ error: "Comprobante no encontrado." });
+    const [settings, lines, restaurant] = await Promise.all([
+      dbGet("SELECT * FROM sri_settings WHERE company = ?", [req.user.company]),
+      dataStore.all(
+        `SELECT code, name, quantity, price, grossTotal, discountPercent, discountAmount,
+                discountReason, selectedModifiers, total
+         FROM sales WHERE invoiceId = ? AND company = ? ORDER BY id`,
+        [invoiceId, req.user.company]
+      ),
+      dbGet(
+        `SELECT t.name AS tableName, s.serverName, s.guests
+         FROM restaurant_orders o
+         JOIN restaurant_table_sessions s ON s.id = o.tableSessionId
+         JOIN restaurant_tables t ON t.id = o.tableId
+         WHERE o.invoiceId = ? AND o.company = ?`,
+        [invoiceId, req.user.company]
+      )
+    ]);
+    const environment = settings?.environment === "PRODUCTION" ? "PRODUCTION" : "TEST";
+    const authorized = invoice.status === "AUTHORIZED" && Boolean(invoice.accessKey || invoice.authorizationNumber);
+    res.json({
+      invoice,
+      issuer: {
+        legalName: settings?.legalName || req.user.company,
+        commercialName: settings?.commercialName || "",
+        ruc: settings?.ruc || "",
+        mainAddress: settings?.mainAddress || "",
+        establishmentAddress: settings?.establishmentAddress || settings?.mainAddress || "",
+        accountingRequired: settings?.accountingRequired || "NO",
+        specialTaxpayerNumber: settings?.specialTaxpayerNumber || "",
+        taxRegime: settings?.taxRegime || ""
+      },
+      environment,
+      authorized,
+      restaurant: restaurant || null,
+      lines: lines.map(line => ({ ...line, selectedModifiers: parseJsonArray(line.selectedModifiers) }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/restaurant/menu", requireRestaurantStore, async (req, res) => {
   const code = String(req.body.code || "").trim().slice(0, 80);
   const name = String(req.body.name || "").trim().slice(0, 150);
   const menuCategory = String(req.body.menuCategory || "General").trim().slice(0, 60) || "General";
+  const available = req.user.role === "Admin" && req.body.available === false ? 0 : 1;
+  const modifierGroups = req.user.role === "Admin" ? normalizeModifierGroups(req.body.modifierGroups) : [];
   const price = Number(req.body.price);
   const quantity = Number(req.body.quantity);
   if (!code || !name) return res.status(400).json({ error: "Completa el código y el nombre del producto." });
@@ -1344,8 +1476,8 @@ app.post("/restaurant/menu", requireRestaurantStore, async (req, res) => {
     const duplicate = await dbGet("SELECT id FROM products WHERE company = ? AND code = ?", [req.user.company, code]);
     if (duplicate) return res.status(409).json({ error: "Ya existe un producto con este código." });
     const result = await dbRun(
-      "INSERT INTO products (code, name, quantity, price, menuCategory, company) VALUES (?, ?, ?, ?, ?, ?)",
-      [code, name, quantity, price, menuCategory, req.user.company]
+      "INSERT INTO products (code, name, quantity, price, menuCategory, available, modifierGroups, company) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [code, name, quantity, price, menuCategory, available, JSON.stringify(modifierGroups), req.user.company]
     );
     res.json({ id: result.lastID, created: true });
   } catch (err) {
@@ -1379,14 +1511,16 @@ app.put("/restaurant/menu/:id", requireRestaurantStore, async (req, res) => {
     }
 
     const menuCategory = String(req.body.menuCategory || "General").trim().slice(0, 60) || "General";
+    const available = req.body.available === false ? 0 : 1;
+    const modifierGroups = normalizeModifierGroups(req.body.modifierGroups);
     const price = Number(req.body.price);
     const quantity = Number(req.body.quantity);
     if (req.body.price === "" || req.body.quantity === "" || !Number.isFinite(price) || price < 0 || !Number.isInteger(quantity) || quantity < 0) {
       return res.status(400).json({ error: "Ingresa un precio y una cantidad válidos." });
     }
     await dbRun(
-      "UPDATE products SET code = ?, name = ?, quantity = ?, price = ?, menuCategory = ? WHERE id = ? AND company = ?",
-      [code, name, quantity, price, menuCategory, id, req.user.company]
+      "UPDATE products SET code = ?, name = ?, quantity = ?, price = ?, menuCategory = ?, available = ?, modifierGroups = ? WHERE id = ? AND company = ?",
+      [code, name, quantity, price, menuCategory, available, JSON.stringify(modifierGroups), id, req.user.company]
     );
     res.json({ updated: true });
   } catch (err) {
@@ -1406,6 +1540,22 @@ app.delete("/restaurant/menu/:id", requireRestaurantAdmin, async (req, res) => {
   }
 });
 
+app.put("/restaurant/menu/:id/availability", requireRestaurantAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Producto inválido." });
+  try {
+    const available = req.body.available === false ? 0 : 1;
+    const result = await dbRun(
+      "UPDATE products SET available = ? WHERE id = ? AND company = ?",
+      [available, id, req.user.company]
+    );
+    if (!result.changes) return res.status(404).json({ error: "Producto no encontrado." });
+    res.json({ updated: true, available });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/restaurant/menu/import", requireRestaurantAdmin, async (req, res) => {
   const items = Array.isArray(req.body.items) ? req.body.items : [];
   if (!items.length) return res.status(400).json({ error: "El archivo no contiene productos." });
@@ -1418,6 +1568,8 @@ app.post("/restaurant/menu/import", requireRestaurantAdmin, async (req, res) => 
         const code = String(raw.code || "").trim().slice(0, 80);
         const name = String(raw.name || "").trim().slice(0, 150);
         const menuCategory = String(raw.menuCategory || "General").trim().slice(0, 60) || "General";
+        const available = raw.available === false || raw.available === 0 ? 0 : 1;
+        const modifierGroups = normalizeModifierGroups(raw.modifierGroups);
         const price = Number(raw.price);
         const quantity = Number(raw.quantity ?? 0);
         if (!code || !name || !Number.isFinite(price) || price < 0 || !Number.isInteger(quantity) || quantity < 0) {
@@ -1425,10 +1577,10 @@ app.post("/restaurant/menu/import", requireRestaurantAdmin, async (req, res) => 
         }
         const existing = await dbGet("SELECT id FROM products WHERE company = ? AND code = ?", [req.user.company, code]);
         if (existing) {
-          await dbRun("UPDATE products SET name = ?, quantity = ?, price = ?, menuCategory = ? WHERE id = ? AND company = ?", [name, quantity, price, menuCategory, existing.id, req.user.company]);
+          await dbRun("UPDATE products SET name = ?, quantity = ?, price = ?, menuCategory = ?, available = ?, modifierGroups = ? WHERE id = ? AND company = ?", [name, quantity, price, menuCategory, available, JSON.stringify(modifierGroups), existing.id, req.user.company]);
           updated += 1;
         } else {
-          await dbRun("INSERT INTO products (code, name, quantity, price, menuCategory, company) VALUES (?, ?, ?, ?, ?, ?)", [code, name, quantity, price, menuCategory, req.user.company]);
+          await dbRun("INSERT INTO products (code, name, quantity, price, menuCategory, available, modifierGroups, company) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [code, name, quantity, price, menuCategory, available, JSON.stringify(modifierGroups), req.user.company]);
           inserted += 1;
         }
       }
@@ -2072,14 +2224,24 @@ function addColumnIfMissing(table, definition) {
 if (!dataStore.postgres) {
   addColumnIfMissing("products", "taxRate REAL DEFAULT 15");
   addColumnIfMissing("products", "menuCategory TEXT DEFAULT 'General'");
+  addColumnIfMissing("products", "available INTEGER DEFAULT 1");
+  addColumnIfMissing("products", "modifierGroups TEXT DEFAULT '[]'");
   addColumnIfMissing("sales", "invoiceId INTEGER");
   addColumnIfMissing("sales", "grossTotal REAL DEFAULT 0");
   addColumnIfMissing("sales", "discountPercent REAL DEFAULT 0");
   addColumnIfMissing("sales", "discountAmount REAL DEFAULT 0");
   addColumnIfMissing("sales", "discountReason TEXT DEFAULT ''");
+  addColumnIfMissing("sales", "selectedModifiers TEXT DEFAULT '[]'");
   addColumnIfMissing("sales", "grantedByUserId INTEGER");
   addColumnIfMissing("sales", "grantedByName TEXT DEFAULT ''");
   addColumnIfMissing("invoices", "discountAmount REAL DEFAULT 0");
+  addColumnIfMissing("invoices", "cashReceived REAL DEFAULT 0");
+  addColumnIfMissing("invoices", "changeDue REAL DEFAULT 0");
+  addColumnIfMissing("invoices", "issuedByUserId INTEGER");
+  addColumnIfMissing("invoices", "issuedByName TEXT DEFAULT ''");
+  addColumnIfMissing("invoices", "accessKey TEXT");
+  addColumnIfMissing("invoices", "authorizationNumber TEXT");
+  addColumnIfMissing("invoices", "authorizedAt TEXT");
   addColumnIfMissing("invoices", "saleStatus TEXT DEFAULT 'COMPLETADA'");
   addColumnIfMissing("invoices", "cancellationReason TEXT");
   addColumnIfMissing("invoices", "canceledAt TEXT");
@@ -2087,6 +2249,7 @@ if (!dataStore.postgres) {
   addColumnIfMissing("invoices", "canceledByName TEXT");
   addColumnIfMissing("restaurant_order_items", "discountPercent REAL DEFAULT 0");
   addColumnIfMissing("restaurant_order_items", "discountReason TEXT DEFAULT ''");
+  addColumnIfMissing("restaurant_order_items", "selectedModifiers TEXT DEFAULT '[]'");
   addColumnIfMissing("restaurant_orders", "kitchenStatus TEXT DEFAULT 'NEW'");
   addColumnIfMissing("restaurant_orders", "kitchenReceivedAt TEXT");
   addColumnIfMissing("restaurant_orders", "kitchenStartedAt TEXT");
@@ -2322,11 +2485,11 @@ async function ensureRestaurantOrder(session) {
 
 async function restaurantOrderResponse(order) {
   const items = await dataStore.all(
-    `SELECT id, productId, code, name, quantity, price, discountPercent, discountReason, note
+    `SELECT id, productId, code, name, quantity, price, discountPercent, discountReason, selectedModifiers, note
      FROM restaurant_order_items WHERE orderId = ? AND company = ? ORDER BY id`,
     [order.id, order.company]
   );
-  return { ...order, items };
+  return { ...order, items: items.map(item => ({ ...item, selectedModifiers: parseJsonArray(item.selectedModifiers) })) };
 }
 
 app.get("/restaurant/table-sessions/:sessionId/order", requireRestaurantStore, async (req, res) => {
@@ -2378,11 +2541,19 @@ app.put("/restaurant/table-sessions/:sessionId/order", requireRestaurantStore, a
       if (discountPercent === 100 && !discountReason) {
         return res.status(400).json({ error: `Selecciona el motivo para entregar ${product.name} gratis.` });
       }
+      let modifiers;
+      try {
+        modifiers = resolveSelectedModifiers(product, item.selectedModifiers);
+      } catch (err) {
+        return res.status(err.status || 400).json({ error: err.message });
+      }
       cleanItems.push({
         product,
         quantity,
         discountPercent,
         discountReason,
+        selectedModifiers: modifiers.selections,
+        unitPrice: money(Number(product.price) + modifiers.extraPrice),
         note: String(item.note || "").trim().slice(0, 200)
       });
     }
@@ -2394,10 +2565,10 @@ app.put("/restaurant/table-sessions/:sessionId/order", requireRestaurantStore, a
       for (const item of cleanItems) {
         await dbRun(
           `INSERT INTO restaurant_order_items
-           (company, orderId, productId, code, name, quantity, price, discountPercent, discountReason, note)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (company, orderId, productId, code, name, quantity, price, discountPercent, discountReason, selectedModifiers, note)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [req.user.company, currentOrder.id, item.product.id, item.product.code, item.product.name,
-            item.quantity, item.product.price, item.discountPercent, item.discountReason, item.note]
+            item.quantity, item.unitPrice, item.discountPercent, item.discountReason, JSON.stringify(item.selectedModifiers), item.note]
         );
       }
       const now = getETLocalISO();
@@ -2552,7 +2723,7 @@ app.get("/restaurant/kitchen/orders", requireRestaurantStore, async (req, res) =
               o.kitchenReceivedAt, o.kitchenStartedAt, o.kitchenReadyAt,
               t.name AS tableName, s.guests, s.serverName,
               oi.id AS itemId, oi.productId, oi.code, oi.name, oi.quantity,
-              oi.note, oi.discountPercent, oi.discountReason
+              oi.note, oi.discountPercent, oi.discountReason, oi.selectedModifiers
        FROM restaurant_orders o
        JOIN restaurant_table_sessions s ON s.id = o.tableSessionId AND s.closedAt IS NULL
        JOIN restaurant_tables t ON t.id = o.tableId
@@ -2585,6 +2756,7 @@ app.get("/restaurant/kitchen/orders", requireRestaurantStore, async (req, res) =
         name: row.name,
         quantity: row.quantity,
         note: row.note || "",
+        selectedModifiers: parseJsonArray(row.selectedModifiers),
         discountPercent: Number(row.discountPercent || 0),
         discountReason: row.discountReason || ""
       });
@@ -2880,18 +3052,28 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS store_licenses (company TEXT PRIMARY KEY, active INTEGER DEFAULT 1, expiresAt TEXT, userLimit INTEGER DEFAULT 3, businessType TEXT DEFAULT 'SHOP', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
     `ALTER TABLE store_licenses ADD COLUMN IF NOT EXISTS businessType TEXT DEFAULT 'SHOP'`,
     `CREATE TABLE IF NOT EXISTS password_reset_codes (id SERIAL PRIMARY KEY, userId INTEGER NOT NULL, codeHash TEXT NOT NULL, expiresAt TEXT NOT NULL, usedAt TEXT, createdAt TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, taxRate DOUBLE PRECISION DEFAULT 15, menuCategory TEXT DEFAULT 'General', company TEXT)`,
+    `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, taxRate DOUBLE PRECISION DEFAULT 15, menuCategory TEXT DEFAULT 'General', available INTEGER DEFAULT 1, modifierGroups TEXT DEFAULT '[]', company TEXT)`,
     `ALTER TABLE products ADD COLUMN IF NOT EXISTS menuCategory TEXT DEFAULT 'General'`,
-    `CREATE TABLE IF NOT EXISTS sales (id SERIAL PRIMARY KEY, productId INTEGER, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, grossTotal DOUBLE PRECISION DEFAULT 0, discountPercent DOUBLE PRECISION DEFAULT 0, discountAmount DOUBLE PRECISION DEFAULT 0, discountReason TEXT DEFAULT '', grantedByUserId INTEGER, grantedByName TEXT DEFAULT '', total DOUBLE PRECISION, date TEXT, paymentType TEXT, invoiceId INTEGER, company TEXT)`,
+    `ALTER TABLE products ADD COLUMN IF NOT EXISTS available INTEGER DEFAULT 1`,
+    `ALTER TABLE products ADD COLUMN IF NOT EXISTS modifierGroups TEXT DEFAULT '[]'`,
+    `CREATE TABLE IF NOT EXISTS sales (id SERIAL PRIMARY KEY, productId INTEGER, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, grossTotal DOUBLE PRECISION DEFAULT 0, discountPercent DOUBLE PRECISION DEFAULT 0, discountAmount DOUBLE PRECISION DEFAULT 0, discountReason TEXT DEFAULT '', selectedModifiers TEXT DEFAULT '[]', grantedByUserId INTEGER, grantedByName TEXT DEFAULT '', total DOUBLE PRECISION, date TEXT, paymentType TEXT, invoiceId INTEGER, company TEXT)`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grossTotal DOUBLE PRECISION DEFAULT 0`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS discountPercent DOUBLE PRECISION DEFAULT 0`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS discountAmount DOUBLE PRECISION DEFAULT 0`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS discountReason TEXT DEFAULT ''`,
+    `ALTER TABLE sales ADD COLUMN IF NOT EXISTS selectedModifiers TEXT DEFAULT '[]'`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grantedByUserId INTEGER`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grantedByName TEXT DEFAULT ''`,
-    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceType TEXT NOT NULL, clientId INTEGER, buyerIdType TEXT, buyerIdNumber TEXT, buyerName TEXT NOT NULL, buyerAddress TEXT, buyerEmail TEXT, subtotal DOUBLE PRECISION NOT NULL, taxAmount DOUBLE PRECISION NOT NULL, discountAmount DOUBLE PRECISION DEFAULT 0, total DOUBLE PRECISION NOT NULL, paymentType TEXT NOT NULL, cashRegisterSessionId INTEGER, invoiceNumber TEXT, status TEXT DEFAULT 'CONFIGURATION_REQUIRED', sriMessage TEXT, date TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceType TEXT NOT NULL, clientId INTEGER, buyerIdType TEXT, buyerIdNumber TEXT, buyerName TEXT NOT NULL, buyerAddress TEXT, buyerEmail TEXT, subtotal DOUBLE PRECISION NOT NULL, taxAmount DOUBLE PRECISION NOT NULL, discountAmount DOUBLE PRECISION DEFAULT 0, total DOUBLE PRECISION NOT NULL, paymentType TEXT NOT NULL, cashRegisterSessionId INTEGER, invoiceNumber TEXT, status TEXT DEFAULT 'CONFIGURATION_REQUIRED', cashReceived DOUBLE PRECISION DEFAULT 0, changeDue DOUBLE PRECISION DEFAULT 0, issuedByUserId INTEGER, issuedByName TEXT DEFAULT '', accessKey TEXT, authorizationNumber TEXT, authorizedAt TEXT, sriMessage TEXT, date TEXT NOT NULL)`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS discountAmount DOUBLE PRECISION DEFAULT 0`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cashRegisterSessionId INTEGER`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cashReceived DOUBLE PRECISION DEFAULT 0`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS changeDue DOUBLE PRECISION DEFAULT 0`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issuedByUserId INTEGER`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS issuedByName TEXT DEFAULT ''`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS accessKey TEXT`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS authorizationNumber TEXT`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS authorizedAt TEXT`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS saleStatus TEXT DEFAULT 'COMPLETADA'`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancellationReason TEXT`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS canceledAt TEXT`,
@@ -2907,11 +3089,12 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS restaurant_servers (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS restaurant_table_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableId INTEGER NOT NULL, restaurantServerId INTEGER, serverUserId INTEGER NOT NULL, serverName TEXT NOT NULL, guests INTEGER NOT NULL, status TEXT DEFAULT 'OCCUPIED', openedAt TEXT NOT NULL, closedAt TEXT, durationMinutes INTEGER)`,
     `CREATE TABLE IF NOT EXISTS restaurant_orders (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableSessionId INTEGER NOT NULL, tableId INTEGER NOT NULL, status TEXT DEFAULT 'OPEN', kitchenStatus TEXT DEFAULT 'NEW', kitchenReceivedAt TEXT, kitchenStartedAt TEXT, kitchenReadyAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, paidAt TEXT, invoiceId INTEGER)`,
-    `CREATE TABLE IF NOT EXISTS restaurant_order_items (id SERIAL PRIMARY KEY, company TEXT NOT NULL, orderId INTEGER NOT NULL, productId INTEGER NOT NULL, code TEXT, name TEXT NOT NULL, quantity INTEGER NOT NULL, price DOUBLE PRECISION NOT NULL, discountPercent DOUBLE PRECISION DEFAULT 0, discountReason TEXT DEFAULT '', note TEXT DEFAULT '')`,
+    `CREATE TABLE IF NOT EXISTS restaurant_order_items (id SERIAL PRIMARY KEY, company TEXT NOT NULL, orderId INTEGER NOT NULL, productId INTEGER NOT NULL, code TEXT, name TEXT NOT NULL, quantity INTEGER NOT NULL, price DOUBLE PRECISION NOT NULL, discountPercent DOUBLE PRECISION DEFAULT 0, discountReason TEXT DEFAULT '', selectedModifiers TEXT DEFAULT '[]', note TEXT DEFAULT '')`,
     `CREATE TABLE IF NOT EXISTS cash_register_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, openedByUserId INTEGER NOT NULL, openedByName TEXT NOT NULL, openedAt TEXT NOT NULL, openingAmount DOUBLE PRECISION NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'OPEN', closedByUserId INTEGER, closedByName TEXT, closedAt TEXT, cashSales DOUBLE PRECISION NOT NULL DEFAULT 0, cardSales DOUBLE PRECISION NOT NULL DEFAULT 0, transferSales DOUBLE PRECISION NOT NULL DEFAULT 0, otherSales DOUBLE PRECISION NOT NULL DEFAULT 0, cashIn DOUBLE PRECISION NOT NULL DEFAULT 0, cashOut DOUBLE PRECISION NOT NULL DEFAULT 0, expectedAmount DOUBLE PRECISION NOT NULL DEFAULT 0, countedAmount DOUBLE PRECISION, difference DOUBLE PRECISION)`,
     `CREATE TABLE IF NOT EXISTS cash_register_movements (id SERIAL PRIMARY KEY, company TEXT NOT NULL, sessionId INTEGER NOT NULL, type TEXT NOT NULL, amount DOUBLE PRECISION NOT NULL, reason TEXT NOT NULL, recordedByUserId INTEGER NOT NULL, recordedByName TEXT NOT NULL, createdAt TEXT NOT NULL)`,
     `ALTER TABLE restaurant_order_items ADD COLUMN IF NOT EXISTS discountPercent DOUBLE PRECISION DEFAULT 0`,
     `ALTER TABLE restaurant_order_items ADD COLUMN IF NOT EXISTS discountReason TEXT DEFAULT ''`,
+    `ALTER TABLE restaurant_order_items ADD COLUMN IF NOT EXISTS selectedModifiers TEXT DEFAULT '[]'`,
     `ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS kitchenStatus TEXT DEFAULT 'NEW'`,
     `ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS kitchenReceivedAt TEXT`,
     `ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS kitchenStartedAt TEXT`,
