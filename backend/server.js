@@ -140,8 +140,31 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       cashRegisterSessionId INTEGER,
       invoiceNumber TEXT,
       status TEXT DEFAULT 'CONFIGURATION_REQUIRED',
+      saleStatus TEXT DEFAULT 'COMPLETADA',
+      cancellationReason TEXT,
+      canceledAt TEXT,
+      canceledByUserId INTEGER,
+      canceledByName TEXT,
       sriMessage TEXT,
       date TEXT NOT NULL
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sale_adjustments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company TEXT NOT NULL,
+      invoiceId INTEGER,
+      saleId INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      reason TEXT NOT NULL,
+      paymentType TEXT NOT NULL,
+      cashRegisterSessionId INTEGER NOT NULL,
+      performedByUserId INTEGER,
+      performedByName TEXT NOT NULL,
+      createdAt TEXT NOT NULL
     )
   `);
 
@@ -327,6 +350,8 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
           ON restaurant_orders(tableSessionId)`);
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_register_open_company
           ON cash_register_sessions(company) WHERE status = 'OPEN'`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_sale_adjustments_sale ON sale_adjustments(saleId)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_sale_adjustments_register ON sale_adjustments(cashRegisterSessionId)`);
 
 });
 
@@ -1493,6 +1518,13 @@ async function cashRegisterSnapshot(session) {
      WHERE sessionId = ? AND company = ? ORDER BY createdAt DESC, id DESC`,
     [session.id, session.company]
   );
+  const adjustments = await dataStore.all(
+    `SELECT paymentType, COALESCE(SUM(amount), 0) AS total
+     FROM sale_adjustments
+     WHERE cashRegisterSessionId = ? AND company = ?
+     GROUP BY paymentType`,
+    [session.id, session.company]
+  );
   const totals = { cash: 0, card: 0, transfer: 0, other: 0 };
   for (const payment of payments) {
     const amount = money(payment.total || 0);
@@ -1500,6 +1532,13 @@ async function cashRegisterSnapshot(session) {
     else if (payment.paymentType === "Tarjeta") totals.card += amount;
     else if (payment.paymentType === "Transferencia") totals.transfer += amount;
     else totals.other += amount;
+  }
+  for (const adjustment of adjustments) {
+    const amount = money(adjustment.total || 0);
+    if (adjustment.paymentType === "Efectivo") totals.cash -= amount;
+    else if (adjustment.paymentType === "Tarjeta") totals.card -= amount;
+    else if (adjustment.paymentType === "Transferencia") totals.transfer -= amount;
+    else totals.other -= amount;
   }
   const cashIn = money(movements.filter(item => item.type === "ENTRADA").reduce((sum, item) => sum + Number(item.amount || 0), 0));
   const cashOut = money(movements.filter(item => item.type === "RETIRO").reduce((sum, item) => sum + Number(item.amount || 0), 0));
@@ -1693,15 +1732,35 @@ app.delete("/store/users/:id", requireUserAdmin, async (req, res) => {
   }
 });
 
-app.get("/sales/:company", (req, res) => {
-  db.all(
-    "SELECT * FROM sales WHERE company = ? ORDER BY date DESC",
-    [req.params.company],
-    (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
-    }
-  );
+app.get("/sales/:company", requireCompanyUser, async (req, res) => {
+  try {
+    const rows = await dataStore.all(
+      `SELECT s.*, i.invoiceNumber, i.saleStatus AS invoiceSaleStatus,
+              COALESCE(a.returnedQuantity, 0) AS returnedQuantity,
+              COALESCE(a.returnedAmount, 0) AS returnedAmount,
+              a.adjustmentReason, a.adjustmentByName
+       FROM sales s
+       LEFT JOIN invoices i ON i.id = s.invoiceId AND i.company = s.company
+       LEFT JOIN (
+         SELECT saleId, SUM(quantity) AS returnedQuantity, SUM(amount) AS returnedAmount,
+                MAX(reason) AS adjustmentReason, MAX(performedByName) AS adjustmentByName,
+                MAX(CASE WHEN type = 'ANULACION' THEN 1 ELSE 0 END) AS hasCancellation
+         FROM sale_adjustments GROUP BY saleId
+       ) a ON a.saleId = s.id
+       WHERE s.company = ? ORDER BY s.date DESC, s.id DESC`,
+      [req.params.company]
+    );
+    res.json(rows.map(row => ({
+      ...row,
+      saleStatus: row.invoiceSaleStatus === "ANULADA" || Number(row.hasCancellation || 0) === 1
+        ? "ANULADA"
+        : Number(row.returnedQuantity || 0) >= Number(row.quantity || 0) && Number(row.quantity || 0) > 0
+          ? "DEVUELTA"
+          : Number(row.returnedQuantity || 0) > 0 ? "DEVOLUCION_PARCIAL" : "COMPLETADA"
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- CLIENTES (por empresa) ----------
@@ -1916,6 +1975,11 @@ if (!dataStore.postgres) {
   addColumnIfMissing("sales", "grantedByUserId INTEGER");
   addColumnIfMissing("sales", "grantedByName TEXT DEFAULT ''");
   addColumnIfMissing("invoices", "discountAmount REAL DEFAULT 0");
+  addColumnIfMissing("invoices", "saleStatus TEXT DEFAULT 'COMPLETADA'");
+  addColumnIfMissing("invoices", "cancellationReason TEXT");
+  addColumnIfMissing("invoices", "canceledAt TEXT");
+  addColumnIfMissing("invoices", "canceledByUserId INTEGER");
+  addColumnIfMissing("invoices", "canceledByName TEXT");
   addColumnIfMissing("restaurant_order_items", "discountPercent REAL DEFAULT 0");
   addColumnIfMissing("restaurant_order_items", "discountReason TEXT DEFAULT ''");
   addColumnIfMissing("restaurant_orders", "kitchenStatus TEXT DEFAULT 'NEW'");
@@ -1926,20 +1990,126 @@ if (!dataStore.postgres) {
   addColumnIfMissing("store_licenses", "businessType TEXT DEFAULT 'SHOP'");
 }
 
-app.delete("/sales/:company/:id", requireUserAdmin, async (req, res) => {
+async function updateInvoiceReturnStatus(invoiceId, company) {
+  if (!invoiceId) return;
+  const summary = await dbGet(
+    `SELECT COALESCE(SUM(s.quantity), 0) AS soldQuantity,
+            COALESCE(SUM(a.returnedQuantity), 0) AS returnedQuantity
+     FROM sales s
+     LEFT JOIN (
+       SELECT saleId, SUM(quantity) AS returnedQuantity
+       FROM sale_adjustments GROUP BY saleId
+     ) a ON a.saleId = s.id
+     WHERE s.invoiceId = ? AND s.company = ?`,
+    [invoiceId, company]
+  );
+  const status = Number(summary?.returnedQuantity || 0) >= Number(summary?.soldQuantity || 0)
+    ? "DEVUELTA"
+    : "DEVOLUCION_PARCIAL";
+  await dbRun("UPDATE invoices SET saleStatus = ? WHERE id = ? AND company = ? AND COALESCE(saleStatus, 'COMPLETADA') <> 'ANULADA'", [status, invoiceId, company]);
+}
+
+app.post("/sales/:company/:id/return", requireUserAdmin, async (req, res) => {
   const { company, id } = req.params;
+  const quantity = Number(req.body.quantity);
+  const reason = String(req.body.reason || "").trim().slice(0, 180);
+  if (!Number.isInteger(quantity) || quantity <= 0) return res.status(400).json({ error: "Ingresa una cantidad válida para devolver." });
+  if (reason.length < 3) return res.status(400).json({ error: "Escribe el motivo de la devolución." });
   try {
-    const deleted = await dataStore.transaction(async () => {
-      const sale = await dbGet("SELECT id, productId, quantity FROM sales WHERE id = ? AND company = ?", [id, company]);
-      if (!sale) return null;
-      await dbRun("UPDATE products SET quantity = quantity + ? WHERE id = ? AND company = ?", [sale.quantity, sale.productId, company]);
-      return dbRun("DELETE FROM sales WHERE id = ? AND company = ?", [id, company]);
+    const result = await dataStore.transaction(async () => {
+      const register = await dbGet("SELECT id FROM cash_register_sessions WHERE company = ? AND status = 'OPEN'", [company]);
+      if (!register) throw Object.assign(new Error("Abre la caja antes de registrar una devolución."), { status: 409 });
+      const sale = await dbGet(
+        `SELECT s.*, i.saleStatus AS invoiceSaleStatus, COALESCE(i.paymentType, s.paymentType) AS originalPaymentType
+         FROM sales s LEFT JOIN invoices i ON i.id = s.invoiceId AND i.company = s.company
+         WHERE s.id = ? AND s.company = ?`,
+        [id, company]
+      );
+      if (!sale) throw Object.assign(new Error("Venta no encontrada."), { status: 404 });
+      if (sale.invoiceSaleStatus === "ANULADA") throw Object.assign(new Error("Esta venta ya fue anulada."), { status: 409 });
+      const previous = await dbGet("SELECT COALESCE(SUM(quantity), 0) AS quantity, COALESCE(SUM(amount), 0) AS amount FROM sale_adjustments WHERE saleId = ? AND company = ?", [sale.id, company]);
+      const remaining = Number(sale.quantity || 0) - Number(previous?.quantity || 0);
+      if (quantity > remaining) throw Object.assign(new Error(`Solo quedan ${remaining} unidades disponibles para devolver.`), { status: 409 });
+      const returnedAfter = Number(previous?.quantity || 0) + quantity;
+      const amount = money(
+        money(Number(sale.total || 0) * returnedAfter / Math.max(1, Number(sale.quantity || 0))) - Number(previous?.amount || 0)
+      );
+      await dbRun("UPDATE products SET quantity = quantity + ? WHERE id = ? AND company = ?", [quantity, sale.productId, company]);
+      await dbRun(
+        `INSERT INTO sale_adjustments
+         (company, invoiceId, saleId, type, quantity, amount, reason, paymentType,
+          cashRegisterSessionId, performedByUserId, performedByName, createdAt)
+         VALUES (?, ?, ?, 'DEVOLUCION', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [company, sale.invoiceId || null, sale.id, quantity, amount, reason,
+          sale.originalPaymentType || "Efectivo", register.id, req.user.id,
+          req.user.fullName || req.user.username, getETLocalISO()]
+      );
+      await updateInvoiceReturnStatus(sale.invoiceId, company);
+      return { quantity, amount };
     });
-    if (!deleted) return res.status(404).json({ error: "Venta no encontrada." });
-    res.json({ deleted: deleted.changes });
+    res.json({ returned: true, ...result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
+});
+
+app.post("/sales/:company/:id/cancel", requireUserAdmin, async (req, res) => {
+  const { company, id } = req.params;
+  const reason = String(req.body.reason || "").trim().slice(0, 180);
+  if (reason.length < 3) return res.status(400).json({ error: "Escribe el motivo de la anulación." });
+  try {
+    const result = await dataStore.transaction(async () => {
+      const register = await dbGet("SELECT id FROM cash_register_sessions WHERE company = ? AND status = 'OPEN'", [company]);
+      if (!register) throw Object.assign(new Error("Abre la caja antes de anular una venta."), { status: 409 });
+      const selected = await dbGet(
+        `SELECT s.*, i.saleStatus AS invoiceSaleStatus, COALESCE(i.paymentType, s.paymentType) AS originalPaymentType
+         FROM sales s LEFT JOIN invoices i ON i.id = s.invoiceId AND i.company = s.company
+         WHERE s.id = ? AND s.company = ?`,
+        [id, company]
+      );
+      if (!selected) throw Object.assign(new Error("Venta no encontrada."), { status: 404 });
+      if (selected.invoiceSaleStatus === "ANULADA") throw Object.assign(new Error("Esta venta ya fue anulada."), { status: 409 });
+      const lines = selected.invoiceId
+        ? await dataStore.all("SELECT * FROM sales WHERE invoiceId = ? AND company = ?", [selected.invoiceId, company])
+        : [selected];
+      let quantity = 0;
+      let amount = 0;
+      for (const line of lines) {
+        const previous = await dbGet("SELECT COALESCE(SUM(quantity), 0) AS quantity, COALESCE(SUM(amount), 0) AS amount FROM sale_adjustments WHERE saleId = ? AND company = ?", [line.id, company]);
+        const remaining = Math.max(0, Number(line.quantity || 0) - Number(previous?.quantity || 0));
+        if (!remaining) continue;
+        const lineAmount = money(Number(line.total || 0) - Number(previous?.amount || 0));
+        await dbRun("UPDATE products SET quantity = quantity + ? WHERE id = ? AND company = ?", [remaining, line.productId, company]);
+        await dbRun(
+          `INSERT INTO sale_adjustments
+           (company, invoiceId, saleId, type, quantity, amount, reason, paymentType,
+            cashRegisterSessionId, performedByUserId, performedByName, createdAt)
+           VALUES (?, ?, ?, 'ANULACION', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [company, line.invoiceId || null, line.id, remaining, lineAmount, reason,
+            selected.originalPaymentType || line.paymentType || "Efectivo", register.id,
+            req.user.id, req.user.fullName || req.user.username, getETLocalISO()]
+        );
+        quantity += remaining;
+        amount = money(amount + lineAmount);
+      }
+      if (!quantity) throw Object.assign(new Error("Esta venta ya fue devuelta completamente."), { status: 409 });
+      if (selected.invoiceId) {
+        await dbRun(
+          `UPDATE invoices SET saleStatus = 'ANULADA', cancellationReason = ?, canceledAt = ?,
+           canceledByUserId = ?, canceledByName = ? WHERE id = ? AND company = ?`,
+          [reason, getETLocalISO(), req.user.id, req.user.fullName || req.user.username, selected.invoiceId, company]
+        );
+      }
+      return { quantity, amount, invoiceId: selected.invoiceId || null };
+    });
+    res.json({ canceled: true, ...result });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.delete("/sales/:company/:id", requireUserAdmin, (_req, res) => {
+  res.status(410).json({ error: "Las ventas ya no se eliminan. Usa Devolver producto o Anular venta para conservar el historial." });
 });
 
 app.post("/auth/create-password", async (req, res) => {
@@ -2617,6 +2787,12 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceType TEXT NOT NULL, clientId INTEGER, buyerIdType TEXT, buyerIdNumber TEXT, buyerName TEXT NOT NULL, buyerAddress TEXT, buyerEmail TEXT, subtotal DOUBLE PRECISION NOT NULL, taxAmount DOUBLE PRECISION NOT NULL, discountAmount DOUBLE PRECISION DEFAULT 0, total DOUBLE PRECISION NOT NULL, paymentType TEXT NOT NULL, cashRegisterSessionId INTEGER, invoiceNumber TEXT, status TEXT DEFAULT 'CONFIGURATION_REQUIRED', sriMessage TEXT, date TEXT NOT NULL)`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS discountAmount DOUBLE PRECISION DEFAULT 0`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cashRegisterSessionId INTEGER`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS saleStatus TEXT DEFAULT 'COMPLETADA'`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cancellationReason TEXT`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS canceledAt TEXT`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS canceledByUserId INTEGER`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS canceledByName TEXT`,
+    `CREATE TABLE IF NOT EXISTS sale_adjustments (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceId INTEGER, saleId INTEGER NOT NULL, type TEXT NOT NULL, quantity INTEGER NOT NULL, amount DOUBLE PRECISION NOT NULL, reason TEXT NOT NULL, paymentType TEXT NOT NULL, cashRegisterSessionId INTEGER NOT NULL, performedByUserId INTEGER, performedByName TEXT NOT NULL, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS sri_settings (company TEXT PRIMARY KEY, environment TEXT DEFAULT 'TEST', ruc TEXT, legalName TEXT, commercialName TEXT, mainAddress TEXT, establishmentAddress TEXT, establishmentCode TEXT DEFAULT '001', emissionPoint TEXT DEFAULT '001', nextSequence INTEGER DEFAULT 1, accountingRequired TEXT DEFAULT 'NO', specialTaxpayerNumber TEXT, taxRegime TEXT, senderEmail TEXT, adminCopyEmail TEXT, certificateConfigured INTEGER DEFAULT 0, certificateValidated INTEGER DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS sri_certificates (company TEXT PRIMARY KEY, filename TEXT NOT NULL, certificateEncrypted TEXT NOT NULL, passwordEncrypted TEXT NOT NULL, installedAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS client_intake_tokens (company TEXT PRIMARY KEY, tokenHash TEXT NOT NULL UNIQUE, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
@@ -2650,7 +2826,9 @@ async function initializePostgres() {
     `CREATE INDEX IF NOT EXISTS idx_restaurant_orders_company ON restaurant_orders(company, status)`,
     `CREATE INDEX IF NOT EXISTS idx_restaurant_order_items_order ON restaurant_order_items(orderId)`,
     `CREATE INDEX IF NOT EXISTS idx_cash_register_company_opened ON cash_register_sessions(company, openedAt)`,
-    `CREATE INDEX IF NOT EXISTS idx_cash_register_movements_session ON cash_register_movements(sessionId)`
+    `CREATE INDEX IF NOT EXISTS idx_cash_register_movements_session ON cash_register_movements(sessionId)`,
+    `CREATE INDEX IF NOT EXISTS idx_sale_adjustments_sale ON sale_adjustments(saleId)`,
+    `CREATE INDEX IF NOT EXISTS idx_sale_adjustments_register ON sale_adjustments(cashRegisterSessionId)`
   ];
   for (const statement of statements) await dataStore.run(statement);
   console.log("PostgreSQL conectado y tablas verificadas.");
