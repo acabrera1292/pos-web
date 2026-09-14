@@ -1572,6 +1572,60 @@ tbody td {
   border-bottom-color: #e5e7eb;
 }
 
+/* --------------------------------------------------
+   FASE 4: MODIFICADORES Y DISPONIBILIDAD
+-------------------------------------------------- */
+.menu-availability-field { align-items: flex-start !important; justify-content: flex-end; }
+.menu-availability-field input { width: auto; margin: 8px 0 0; }
+.menu-modifiers-editor { display: grid; gap: 5px; margin-top: 12px; max-width: 900px; }
+.menu-modifiers-editor textarea { min-height: 88px; resize: vertical; font-family: inherit; }
+.menu-modifiers-editor small { color: #6b7280; line-height: 1.35; }
+.availability-status { display: inline-block; padding: 3px 7px; border-radius: 10px; font-size: 12px; }
+.availability-status.available { color: #166534; background: #dcfce7; }
+.availability-status.sold-out { color: #991b1b; background: #fee2e2; }
+.menu-product-sold-out { color: #6b7280; background: #f9fafb; }
+.cart-modifier-summary { display: block; margin-top: 3px; color: #4b5563; line-height: 1.25; }
+.modifier-modal { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; padding: 20px; background: rgba(17, 24, 39, 0.48); }
+.modifier-modal.hidden { display: none; }
+.modifier-window { width: min(620px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 18px; border: 1px solid #cbd5e1; border-radius: 7px; background: #f9fafb; box-shadow: 0 18px 50px rgba(0,0,0,.28); }
+.modifier-window-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.modifier-window-heading h2 { margin: 0 0 4px; }
+.modifier-window-heading p { margin: 0; color: #6b7280; }
+.modifier-close { margin: 0; border: 0; background: transparent; font-size: 27px; line-height: 1; }
+.modifier-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 15px 0 0; padding: 12px; border: 1px solid #d1d5db; border-radius: 5px; background: #fff; }
+.modifier-group legend { padding: 0 5px; font-weight: 700; }
+.modifier-group label { display: flex; align-items: center; gap: 7px; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px; cursor: pointer; }
+.modifier-group input { width: auto; margin: 0; }
+.modifier-validation { padding: 9px; color: #991b1b; background: #fee2e2; border-radius: 4px; }
+.modifier-total { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid #d1d5db; font-size: 17px; }
+.modifier-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 15px; }
+.modifier-actions button { margin: 0; }
+
+/* Recibo térmico POSINTMART PM-80E: rollo de 80 mm, área útil de 72 mm. */
+.print-only { display: none; }
+.thermal-receipt { color: #000; background: #fff; font-family: "Courier New", monospace; font-size: 9.5pt; line-height: 1.18; overflow-wrap: anywhere; }
+.thermal-receipt h1 { margin: 0 0 3px; font-size: 13pt; }
+.receipt-center { text-align: center; }
+.receipt-separator { margin: 6px 0; border-top: 1px dashed #000; }
+.receipt-status { margin-top: 4px; font-weight: 700; }
+.receipt-items { width: 100%; border-collapse: collapse; }
+.receipt-items td { padding: 2px 0; border: 0 !important; vertical-align: top; }
+.receipt-items td:nth-child(2) { text-align: center; }
+.receipt-items td:last-child { text-align: right; }
+.receipt-items small { display: block; padding-left: 8px; }
+.receipt-totals > div { display: flex; justify-content: space-between; gap: 8px; }
+.receipt-grand-total { margin-top: 3px; padding-top: 3px; border-top: 1px solid #000; font-size: 11pt; }
+.receipt-access-key, .receipt-warning { margin-top: 7px; text-align: center; overflow-wrap: anywhere; }
+.receipt-warning { font-weight: 700; }
+
+@media print {
+  @page { margin: 0; }
+  html, body { width: 80mm !important; min-width: 80mm !important; margin: 0 !important; padding: 0 !important; background: #fff !important; }
+  body * { visibility: hidden !important; }
+  #thermalReceipt, #thermalReceipt * { visibility: visible !important; }
+  #thermalReceipt { display: block !important; position: absolute; inset: 0 auto auto 0; box-sizing: border-box; width: 80mm; padding: 3mm 4mm 5mm; }
+}
+
 
 /* --------------------------------------------------
    RESPONSIVE
@@ -1599,4 +1653,5 @@ tbody td {
   .main-area {
     padding: 10px 12px;
   }
+  .modifier-group { grid-template-columns: 1fr; }
 }
