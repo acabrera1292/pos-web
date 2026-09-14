@@ -2452,7 +2452,9 @@ async function finishSale() {
   );
   if (!confirmed) return;
 
-  if (activeRestaurantOrder && !await saveRestaurantOrder(true)) return;
+  // No reenviar un pedido sin cambios: hacerlo reiniciaría sus tiempos de Cocina
+  // justo antes de cobrar y lo quitaría del reporte de rendimiento.
+  if (activeRestaurantOrder && restaurantOrderDirty && !await saveRestaurantOrder(true)) return;
 
   const completedRestaurantOrder = activeRestaurantOrder;
 
