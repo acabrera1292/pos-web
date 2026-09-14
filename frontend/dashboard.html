@@ -26,6 +26,7 @@
           <button id="nav-mesas" data-module="mesas" class="hidden" onclick="showTab('mesas')">Mesas</button>
           <button id="nav-meseros" data-module="meseros" class="hidden" onclick="showTab('meseros')">Meseros</button>
           <button id="nav-menu" data-module="menu" class="hidden" onclick="showTab('menu')">Menú</button>
+          <button id="nav-cocina" data-module="cocina" class="hidden" onclick="showTab('cocina')">Cocina</button>
           <button id="nav-historial-mesas" data-module="historial-mesas" class="hidden" onclick="showTab('historial-mesas')">Historial de atención</button>
         </div>
       </div>
@@ -104,7 +105,7 @@
             <span id="restaurantOrderDetail"></span>
           </div>
           <div class="restaurant-order-actions">
-            <button id="btnSaveRestaurantOrder" type="button" onclick="saveRestaurantOrder()">Guardar pedido</button>
+            <button id="btnSaveRestaurantOrder" type="button" onclick="saveRestaurantOrder()">Enviar / actualizar cocina</button>
             <button type="button" onclick="returnToRestaurantTables()">Volver a Mesas</button>
           </div>
         </div>
@@ -254,6 +255,29 @@
           </div>
         </div>
 
+      </section>
+
+      <!-- TAB: COCINA (RESTAURANTE) -->
+      <section id="cocina" class="tab-section hidden restaurant-tables-section kitchen-section">
+        <div class="restaurant-section-heading">
+          <div>
+            <h2>Cocina</h2>
+            <p>Los pedidos enviados desde las mesas aparecen aquí automáticamente.</p>
+          </div>
+        </div>
+        <div class="sales-kpis kitchen-kpis">
+          <article><span>Nuevos</span><strong id="kitchenNewCount">0</strong></article>
+          <article><span>Cocinando</span><strong id="kitchenCookingCount">0</strong></article>
+          <article><span>Listos</span><strong id="kitchenReadyCount">0</strong></article>
+        </div>
+        <section class="kitchen-summary">
+          <h3>Preparación agrupada</h3>
+          <p>Totales pendientes de todos los pedidos para coordinar la preparación.</p>
+          <div id="kitchenProductSummary" class="kitchen-summary-items"></div>
+          <span id="kitchenProductSummaryEmpty" class="settings-note">No hay productos pendientes.</span>
+        </section>
+        <div id="kitchenEmpty" class="restaurant-empty hidden">No hay pedidos activos en cocina.</div>
+        <div id="kitchenBoard" class="kitchen-board"></div>
       </section>
 
       <!-- TAB: MESEROS (RESTAURANTE) -->
@@ -620,6 +644,7 @@
 
 <script src="js/dialogs.js"></script>
 <script src="js/mesas.js"></script>
+<script src="js/cocina.js"></script>
 <script>
 const API = "";
 const company = localStorage.getItem("company");
@@ -674,6 +699,7 @@ window.addEventListener("DOMContentLoaded", () => {
   loadStoreContext();
   initializeRestaurantTables();
   initializeRestaurantServers();
+  initializeKitchen();
   const label = document.getElementById("storeNameLabel");
   if (label) {
     label.textContent = company;
@@ -754,7 +780,7 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inventario", "pos", "mesas", "meseros", "menu", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
+  ["inventario", "pos", "mesas", "meseros", "menu", "cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
@@ -771,6 +797,7 @@ function showTab(tabId) {
   if (tabId === "meseros") loadRestaurantServers();
   if (tabId === "historial-mesas") loadRestaurantTableHistory();
   if (tabId === "menu") loadProducts();
+  if (tabId === "cocina") loadKitchenOrders();
 
   // actualizar panel derecho
   updateRightPanel(tabId);
@@ -2210,7 +2237,7 @@ async function saveRestaurantOrder(silent = false) {
     if (!res.ok) throw new Error(data.error || "No se pudo guardar el pedido.");
     activeRestaurantOrder = { ...activeRestaurantOrder, ...data };
     restaurantOrderDirty = false;
-    if (!silent) alert("Pedido guardado.");
+    if (!silent) alert("Pedido enviado a Cocina.");
     return true;
   } catch (err) {
     alert(err.message);
