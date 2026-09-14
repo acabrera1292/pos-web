@@ -54,6 +54,9 @@
 
   function tableState(table) {
     if (!table.active) return { className: "inactive", label: "Inactiva" };
+    if (table.sessionId && table.kitchenStatus === "READY" && Number(table.orderItemCount || 0)) return { className: "ready", label: "Comida lista" };
+    if (table.sessionId && table.kitchenStatus === "COOKING") return { className: "cooking", label: "En cocina" };
+    if (table.sessionId && table.kitchenStatus === "NEW" && Number(table.orderItemCount || 0)) return { className: "ordered", label: "Pedido enviado" };
     if (table.sessionId) return { className: "occupied", label: "Ocupada" };
     return { className: "available", label: "Disponible" };
   }
