@@ -237,6 +237,7 @@
           </div>
           <div class="restaurant-order-actions">
             <button id="btnSaveRestaurantOrder" type="button" onclick="saveRestaurantOrder()">Enviar / actualizar cocina</button>
+            <button id="btnSplitRestaurantBill" type="button" onclick="openSplitBillModal()">Dividir cuenta</button>
             <button type="button" onclick="returnToRestaurantTables()">Volver a Mesas</button>
           </div>
         </div>
@@ -274,12 +275,23 @@
         </div>
 
         <label>Tipo de pago:
-          <select id="paymentType">
+          <select id="paymentType" onchange="updatePaymentFields()">
             <option value="Efectivo" selected>Efectivo</option>
             <option value="Tarjeta">Tarjeta</option>
             <option value="Transferencia">Transferencia</option>
+            <option value="Mixto">Pago mixto</option>
           </select>
         </label>
+
+        <div id="mixedPaymentPanel" class="mixed-payment-panel hidden">
+          <strong>Distribución del pago</strong>
+          <div class="mixed-payment-fields">
+            <label>Efectivo $ <input id="mixedCash" type="number" min="0" step="0.01" value="0" oninput="updateMixedPaymentTotal()"></label>
+            <label>Tarjeta $ <input id="mixedCard" type="number" min="0" step="0.01" value="0" oninput="updateMixedPaymentTotal()"></label>
+            <label>Transferencia $ <input id="mixedTransfer" type="number" min="0" step="0.01" value="0" oninput="updateMixedPaymentTotal()"></label>
+          </div>
+          <p><span id="mixedPaymentRemainingLabel">Falta por asignar:</span> <strong>$<span id="mixedPaymentRemaining">0.00</span></strong></p>
+        </div>
 
         <div class="invoice-choice">
           <span class="invoice-choice-label">Comprobante:</span>
@@ -308,9 +320,11 @@
 
         <br>
 
-        <label>Efectivo recibido:</label>
-        <input id="cashReceived" type="number" step="0.01" oninput="updateChange()">
-        <p>Cambio: $<span id="changeDue">0.00</span></p>
+        <div id="cashReceivedPanel">
+          <label>Efectivo recibido:</label>
+          <input id="cashReceived" type="number" step="0.01" oninput="updateChange()">
+          <p>Cambio: $<span id="changeDue">0.00</span></p>
+        </div>
 
         <button onclick="finishSale()">Finalizar venta</button>
       </section>
@@ -387,9 +401,15 @@
           <div class="inventory-actions">
             <button id="btnSeatRestaurantTable" type="button" onclick="seatSelectedRestaurantTable()">Sentar clientes</button>
             <button id="btnOpenRestaurantOrder" type="button" onclick="openSelectedRestaurantOrder()">Abrir pedido</button>
+            <button id="btnJoinRestaurantTable" type="button" onclick="toggleRestaurantJoinFields()">Unir mesa</button>
             <button id="btnCloseRestaurantTable" type="button" onclick="closeSelectedRestaurantTable()">Liberar mesa</button>
             <button id="btnEditRestaurantTable" type="button" onclick="editSelectedRestaurantTable()">Editar mesa</button>
             <button id="btnDeleteRestaurantTable" class="danger-button" type="button" onclick="deleteSelectedRestaurantTable()">Eliminar mesa</button>
+          </div>
+          <div id="restaurantJoinFields" class="restaurant-join-fields hidden">
+            <label>Unir con <select id="restaurantJoinTableSelect"></select></label>
+            <button type="button" onclick="joinSelectedRestaurantTable()">Confirmar unión</button>
+            <button type="button" onclick="toggleRestaurantJoinFields(false)">Cancelar</button>
           </div>
         </div>
 
@@ -847,6 +867,21 @@
   </div>
 </div>
 
+<div id="splitBillModal" class="modifier-modal hidden" role="dialog" aria-modal="true" aria-labelledby="splitBillTitle">
+  <div class="modifier-window split-bill-window">
+    <div class="modifier-window-heading">
+      <div><h2 id="splitBillTitle">Dividir cuenta</h2><p>Elige cuánto se pagará ahora. El resto seguirá en la mesa.</p></div>
+      <button type="button" class="modifier-close" aria-label="Cerrar" onclick="closeSplitBillModal()">×</button>
+    </div>
+    <div class="table-scroll"><table class="split-bill-table"><thead><tr><th>Producto</th><th>En cuenta</th><th>Pagar ahora</th><th>Total</th></tr></thead><tbody id="splitBillBody"></tbody></table></div>
+    <div class="modifier-total"><span>Total de este pago</span><strong>$<span id="splitBillTotal">0.00</span></strong></div>
+    <div class="modifier-actions">
+      <button type="button" onclick="closeSplitBillModal()">Cancelar</button>
+      <button type="button" class="primary-button" onclick="confirmSplitBill()">Continuar al pago</button>
+    </div>
+  </div>
+</div>
+
 <section id="thermalReceipt" class="thermal-receipt print-only" aria-hidden="true"></section>
 
 <script src="js/dialogs.js"></script>
@@ -947,6 +982,7 @@ window.addEventListener("DOMContentLoaded", () => {
     document.getElementById(id)?.classList.toggle("hidden", userRole !== "Admin");
   });
   renderCart();
+  updatePaymentFields();
   window.addEventListener("resize", applyCartColumnWidths);
 });
 
@@ -984,6 +1020,8 @@ let currentStoreUserId = null;
 let storeUserLimit = 0;
 let activeRestaurantOrder = null;
 let restaurantOrderDirty = false;
+let restaurantFullCart = [];
+let restaurantSplitMode = false;
 let selectedMenuProduct = null;
 let quickMenuCategory = "Todas";
 let pendingModifierProduct = null;
@@ -2660,6 +2698,10 @@ function addToCartByCode() {
 }
 
 function addToCart(product, selectedModifiers = []) {
+  if (restaurantSplitMode) {
+    alert("Termina o cancela la cuenta dividida antes de agregar productos.");
+    return;
+  }
   const modifierKey = JSON.stringify(selectedModifiers.map(selection => ({
     group: selection.group,
     options: (selection.options || []).map(option => option.name).sort()
@@ -2835,7 +2877,75 @@ function renderRestaurantOrderContext() {
   if (!activeRestaurantOrder) return;
   document.getElementById("restaurantOrderTitle").textContent = `Pedido · ${activeRestaurantOrder.tableName}`;
   document.getElementById("restaurantOrderDetail").textContent =
-    `${activeRestaurantOrder.guests} cliente${Number(activeRestaurantOrder.guests) === 1 ? "" : "s"} · ${activeRestaurantOrder.serverName}`;
+    `${activeRestaurantOrder.guests} cliente${Number(activeRestaurantOrder.guests) === 1 ? "" : "s"} · ${activeRestaurantOrder.serverName}${restaurantSplitMode ? " · Pago parcial" : ""}`;
+  const splitButton = document.getElementById("btnSplitRestaurantBill");
+  if (splitButton) splitButton.textContent = restaurantSplitMode ? "Cancelar división" : "Dividir cuenta";
+}
+
+function roundMoneyValue(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function splitLineTotal(item, quantity) {
+  const gross = roundMoneyValue(Number(item.price || 0) * Number(quantity || 0));
+  const discount = roundMoneyValue(gross * Number(item.discountPercent || 0) / 100);
+  return roundMoneyValue(gross - discount);
+}
+
+async function openSplitBillModal() {
+  if (!activeRestaurantOrder || !cart.length) return alert("Esta mesa todavía no tiene productos para dividir.");
+  if (restaurantSplitMode) {
+    cart = restaurantFullCart.map(item => ({ ...item, selectedModifiers: JSON.parse(JSON.stringify(item.selectedModifiers || [])) }));
+    restaurantSplitMode = false;
+    renderRestaurantOrderContext();
+    renderCart();
+    return;
+  }
+  if (restaurantOrderDirty && !await saveRestaurantOrder(true)) return;
+  restaurantFullCart = cart.map(item => ({ ...item, selectedModifiers: JSON.parse(JSON.stringify(item.selectedModifiers || [])) }));
+  const tbody = document.getElementById("splitBillBody");
+  tbody.innerHTML = "";
+  restaurantFullCart.forEach((item, index) => {
+    const row = document.createElement("tr");
+    const modifiers = modifierSelectionLabel(item.selectedModifiers);
+    row.innerHTML = `<td>${escapeCartValue(item.name)}${modifiers ? `<small class="cart-modifier-summary">${escapeCartValue(modifiers)}</small>` : ""}</td><td>${item.quantity}</td><td><input type="number" min="0" max="${item.quantity}" step="1" value="0" data-split-index="${index}" oninput="updateSplitBillTotal()"></td><td>$0.00</td>`;
+    tbody.appendChild(row);
+  });
+  updateSplitBillTotal();
+  document.getElementById("splitBillModal").classList.remove("hidden");
+}
+
+function updateSplitBillTotal() {
+  let total = 0;
+  document.querySelectorAll("#splitBillBody input[data-split-index]").forEach(input => {
+    const index = Number(input.dataset.splitIndex);
+    const item = restaurantFullCart[index];
+    const quantity = Math.min(Number(item?.quantity || 0), Math.max(0, Math.floor(Number(input.value) || 0)));
+    const lineTotal = splitLineTotal(item, quantity);
+    total += lineTotal;
+    input.closest("tr").lastElementChild.textContent = `$${lineTotal.toFixed(2)}`;
+  });
+  document.getElementById("splitBillTotal").textContent = total.toFixed(2);
+}
+
+function closeSplitBillModal() {
+  document.getElementById("splitBillModal").classList.add("hidden");
+}
+
+function confirmSplitBill() {
+  const selected = [];
+  document.querySelectorAll("#splitBillBody input[data-split-index]").forEach(input => {
+    const item = restaurantFullCart[Number(input.dataset.splitIndex)];
+    const quantity = Math.min(Number(item?.quantity || 0), Math.max(0, Math.floor(Number(input.value) || 0)));
+    if (item && quantity > 0) selected.push({ ...item, quantity, selectedModifiers: JSON.parse(JSON.stringify(item.selectedModifiers || [])) });
+  });
+  if (!selected.length) return alert("Selecciona al menos un producto o una unidad para cobrar.");
+  cart = selected;
+  restaurantSplitMode = true;
+  closeSplitBillModal();
+  renderRestaurantOrderContext();
+  renderCart();
+  updatePaymentFields();
 }
 
 async function activateRestaurantOrder(order) {
@@ -2845,12 +2955,14 @@ async function activateRestaurantOrder(order) {
   }
   activeRestaurantOrder = order;
   restaurantOrderDirty = false;
+  restaurantSplitMode = false;
   cart = (order.items || []).map(item => {
     const selectedModifiers = Array.isArray(item.selectedModifiers) ? item.selectedModifiers : [];
     const modifierKey = JSON.stringify(selectedModifiers.map(selection => ({ group: selection.group, options: (selection.options || []).map(option => option.name).sort() })));
     const modifierExtra = selectedModifiers.flatMap(selection => selection.options || []).reduce((sum, option) => sum + Number(option.priceDelta || 0), 0);
     return {
       id: Number(item.productId),
+      orderItemId: Number(item.id),
       code: item.code,
       name: item.name,
       basePrice: Number(item.price) - modifierExtra,
@@ -2863,6 +2975,7 @@ async function activateRestaurantOrder(order) {
       note: item.note || ""
     };
   });
+  restaurantFullCart = cart.map(item => ({ ...item, selectedModifiers: JSON.parse(JSON.stringify(item.selectedModifiers || [])) }));
   renderRestaurantOrderContext();
   renderCart();
   showTab("pos");
@@ -2871,6 +2984,10 @@ async function activateRestaurantOrder(order) {
 
 async function saveRestaurantOrder(silent = false) {
   if (!activeRestaurantOrder) return true;
+  if (restaurantSplitMode) {
+    if (!silent) alert("Primero termina o cancela el pago dividido.");
+    return false;
+  }
   if (!validateCartDiscounts()) return false;
   const button = document.getElementById("btnSaveRestaurantOrder");
   if (button) button.disabled = true;
@@ -2898,6 +3015,8 @@ async function returnToRestaurantTables() {
   if (activeRestaurantOrder && restaurantOrderDirty && !await saveRestaurantOrder(true)) return;
   activeRestaurantOrder = null;
   restaurantOrderDirty = false;
+  restaurantSplitMode = false;
+  restaurantFullCart = [];
   cart = [];
   renderRestaurantOrderContext();
   renderCart();
@@ -2953,14 +3072,14 @@ function updateCartDiscount(index, value) {
   }
   cart[index].discountPercent = discount;
   if (discount === 0) cart[index].discountReason = "";
-  if (activeRestaurantOrder) restaurantOrderDirty = true;
+  if (activeRestaurantOrder && !restaurantSplitMode) restaurantOrderDirty = true;
   renderCart();
 }
 
 function updateCartDiscountReason(index, value) {
   if (!cart[index]) return;
   cart[index].discountReason = String(value || "");
-  if (activeRestaurantOrder) restaurantOrderDirty = true;
+  if (activeRestaurantOrder && !restaurantSplitMode) restaurantOrderDirty = true;
 }
 
 function validateCartDiscounts() {
@@ -2974,26 +3093,31 @@ function updateCartQuantity(index, newQty) {
   const qty = Number(newQty);
   if (!qty || qty <= 0) return;
   cart[index].quantity = qty;
-  if (activeRestaurantOrder) restaurantOrderDirty = true;
+  if (activeRestaurantOrder && !restaurantSplitMode) restaurantOrderDirty = true;
   renderCart();
 }
 
 function updateCartNote(index, note) {
   if (!cart[index]) return;
   cart[index].note = String(note || "").slice(0, 200);
-  if (activeRestaurantOrder) restaurantOrderDirty = true;
+  if (activeRestaurantOrder && !restaurantSplitMode) restaurantOrderDirty = true;
 }
 
 function removeFromCart(index) {
   cart.splice(index, 1);
-  if (activeRestaurantOrder) restaurantOrderDirty = true;
+  if (activeRestaurantOrder && !restaurantSplitMode) restaurantOrderDirty = true;
   renderCart();
 }
 
 function updateTotal() {
-  const grossTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const discount = cart.reduce((sum, item) => sum + item.price * item.quantity * Number(item.discountPercent || 0) / 100, 0);
-  const total = Math.max(0, grossTotal - discount);
+  const lines = cart.map(item => {
+    const gross = roundMoneyValue(item.price * item.quantity);
+    const discount = roundMoneyValue(gross * Number(item.discountPercent || 0) / 100);
+    return { gross, discount, total: roundMoneyValue(gross - discount) };
+  });
+  const grossTotal = roundMoneyValue(lines.reduce((sum, line) => sum + line.gross, 0));
+  const discount = roundMoneyValue(lines.reduce((sum, line) => sum + line.discount, 0));
+  const total = roundMoneyValue(lines.reduce((sum, line) => sum + line.total, 0));
   const subtotal = total / 1.15;
   const tax = total - subtotal;
   document.getElementById("cartGrossTotal").innerText = grossTotal.toFixed(2);
@@ -3002,6 +3126,43 @@ function updateTotal() {
   document.getElementById("cartTax").innerText = tax.toFixed(2);
   document.getElementById("cartTotal").innerText = total.toFixed(2);
   updateChange();
+  updateMixedPaymentTotal();
+}
+
+function updatePaymentFields() {
+  const type = document.getElementById("paymentType")?.value || "Efectivo";
+  document.getElementById("cashReceivedPanel")?.classList.toggle("hidden", type !== "Efectivo");
+  document.getElementById("mixedPaymentPanel")?.classList.toggle("hidden", type !== "Mixto");
+  updateChange();
+  updateMixedPaymentTotal();
+}
+
+function updateMixedPaymentTotal() {
+  const target = document.getElementById("mixedPaymentRemaining");
+  const label = document.getElementById("mixedPaymentRemainingLabel");
+  if (!target) return;
+  const total = Number(document.getElementById("cartTotal")?.innerText || 0);
+  const assigned = ["mixedCash", "mixedCard", "mixedTransfer"]
+    .reduce((sum, id) => sum + Math.max(0, Number(document.getElementById(id)?.value) || 0), 0);
+  const remaining = Math.round((total - assigned) * 100) / 100;
+  target.textContent = Math.abs(remaining).toFixed(2);
+  target.parentElement.classList.toggle("payment-over", remaining < 0);
+  target.parentElement.classList.toggle("payment-complete", Math.abs(remaining) < 0.01);
+  if (label) label.textContent = remaining < 0 ? "Exceso asignado:" : Math.abs(remaining) < 0.01 ? "Pago completo:" : "Falta por asignar:";
+}
+
+function paymentPayload(total) {
+  const paymentType = document.getElementById("paymentType").value || "Efectivo";
+  if (paymentType !== "Mixto") return { paymentType, payments: [] };
+  const payments = [
+    { paymentType: "Efectivo", amount: Math.max(0, Number(document.getElementById("mixedCash").value) || 0) },
+    { paymentType: "Tarjeta", amount: Math.max(0, Number(document.getElementById("mixedCard").value) || 0) },
+    { paymentType: "Transferencia", amount: Math.max(0, Number(document.getElementById("mixedTransfer").value) || 0) }
+  ].filter(item => item.amount > 0).map(item => ({ ...item, amount: Math.round(item.amount * 100) / 100 }));
+  const assigned = Math.round(payments.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+  if (payments.length < 2) throw new Error("El pago mixto debe usar al menos dos formas de pago.");
+  if (Math.abs(assigned - total) > 0.009) throw new Error(`Los pagos deben sumar exactamente $${total.toFixed(2)}.`);
+  return { paymentType, payments };
 }
 
 function updateChange() {
@@ -3028,6 +3189,12 @@ function renderThermalReceipt(data) {
     <tr><td>${Number(line.quantity)} × $${Number(line.price).toFixed(2)}</td><td>${Number(line.discountAmount || 0) ? `Desc. $${Number(line.discountAmount).toFixed(2)}` : ""}</td><td>$${Number(line.total).toFixed(2)}</td></tr>
   `).join("");
   const accessKey = invoice.accessKey || invoice.authorizationNumber || "";
+  const payments = Array.isArray(data.payments) && data.payments.length
+    ? data.payments
+    : [{ paymentType: invoice.paymentType || "—", amount: Number(invoice.total || 0) }];
+  const paymentHtml = payments.length > 1
+    ? `<div><strong>Formas de pago:</strong></div>${payments.map(payment => `<div>${escapeCartValue(payment.paymentType)}: $${Number(payment.amount || 0).toFixed(2)}</div>`).join("")}`
+    : `<div>Forma de pago: ${escapeCartValue(payments[0].paymentType)}</div>`;
   document.getElementById("thermalReceipt").innerHTML = `
     <header class="receipt-center">
       <h1>${escapeCartValue(issuer.commercialName || issuer.legalName || company)}</h1>
@@ -3071,7 +3238,7 @@ function renderThermalReceipt(data) {
     </section>
     <div class="receipt-separator"></div>
     <section>
-      <div>Forma de pago: ${escapeCartValue(invoice.paymentType || "—")}</div>
+      ${paymentHtml}
       ${invoice.paymentType === "Efectivo" ? `<div>Recibido: $${Number(invoice.cashReceived || 0).toFixed(2)} · Cambio: $${Number(invoice.changeDue || 0).toFixed(2)}</div>` : ""}
       ${accessKey ? `<div class="receipt-access-key">${invoice.authorizationNumber ? `<strong>NÚMERO DE AUTORIZACIÓN</strong><br>${escapeCartValue(invoice.authorizationNumber)}<br>` : ""}${invoice.authorizedAt ? `Fecha autorización: ${escapeCartValue(invoice.authorizedAt)}<br>` : ""}<strong>CLAVE DE ACCESO</strong><br>${escapeCartValue(invoice.accessKey || invoice.authorizationNumber)}</div>` : `<div class="receipt-warning">La clave de acceso aparecerá cuando el SRI autorice el comprobante.</div>`}
     </section>
@@ -3117,7 +3284,14 @@ async function finishSale() {
 
   const total = Number(document.getElementById("cartTotal").innerText || 0);
   const cash = Number(document.getElementById("cashReceived").value || 0);
-  const paymentType = document.getElementById("paymentType").value || "Efectivo";
+  let payment;
+  try {
+    payment = paymentPayload(total);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  const paymentType = payment.paymentType;
 
   if (invoiceType === "FACTURA" && !selectedInvoiceClient) {
     alert("Selecciona o agrega un cliente para emitir la factura.");
@@ -3129,19 +3303,22 @@ async function finishSale() {
     return;
   }
 
+  const paymentSummary = payment.payments.length
+    ? `\nFormas de pago:\n${payment.payments.map(item => `${item.paymentType}: $${item.amount.toFixed(2)}`).join("\n")}`
+    : `\nForma de pago: ${paymentType}`;
   const confirmed = await appConfirm(
     `${invoiceType === "FACTURA" ? selectedInvoiceClient.razonSocial : "CONSUMIDOR FINAL"}\n` +
     `Precio antes de descuento: $${document.getElementById("cartGrossTotal").innerText}\n` +
     `Valor descontado: $${document.getElementById("cartDiscount").innerText}\n` +
     `Subtotal: $${document.getElementById("cartSubtotal").innerText}\n` +
     `IVA 15%: $${document.getElementById("cartTax").innerText}\n` +
-    `Total: $${total.toFixed(2)}\n\n¿Emitir comprobante?`
+    `Total: $${total.toFixed(2)}${paymentSummary}\n\n¿Emitir comprobante?`
   );
   if (!confirmed) return;
 
   // No reenviar un pedido sin cambios: hacerlo reiniciaría sus tiempos de Cocina
   // justo antes de cobrar y lo quitaría del reporte de rendimiento.
-  if (activeRestaurantOrder && restaurantOrderDirty && !await saveRestaurantOrder(true)) return;
+  if (activeRestaurantOrder && !restaurantSplitMode && restaurantOrderDirty && !await saveRestaurantOrder(true)) return;
 
   const completedRestaurantOrder = activeRestaurantOrder;
 
@@ -3153,6 +3330,7 @@ async function finishSale() {
       total,
       cash,
       paymentType,
+      payments: payment.payments,
       invoiceType,
       clientId: selectedInvoiceClient?.id || null,
       restaurantOrderId: completedRestaurantOrder?.id || null
@@ -3166,14 +3344,23 @@ async function finishSale() {
   cart = [];
   activeRestaurantOrder = null;
   restaurantOrderDirty = false;
+  restaurantSplitMode = false;
+  restaurantFullCart = [];
   renderRestaurantOrderContext();
   renderCart();
   document.getElementById("cashReceived").value = "";
-  updateChange();
+  ["mixedCash", "mixedCard", "mixedTransfer"].forEach(id => { document.getElementById(id).value = "0"; });
+  document.getElementById("paymentType").value = "Efectivo";
+  updatePaymentFields();
   await Promise.all([loadProducts(), loadCashRegister()]); // actualizar inventario y caja
   selectedInvoiceClient = null;
   setInvoiceType("CONSUMIDOR_FINAL");
-  alert(`Venta registrada.\nComprobante: ${data.invoiceNumber}\nEstado SRI: ${data.status}${data.tableClosed ? "\nMesa liberada automáticamente." : ""}`);
+  const restaurantMessage = completedRestaurantOrder
+    ? data.tableClosed
+      ? "\nMesa liberada automáticamente."
+      : `\nPago parcial registrado. Quedan ${data.remainingItems} producto(s) en la cuenta.`
+    : "";
+  alert(`Venta registrada.\nComprobante: ${data.invoiceNumber}\nEstado SRI: ${data.status}${restaurantMessage}`);
   if (completedRestaurantOrder) {
     showTab("mesas");
     await loadRestaurantTables();
@@ -3525,6 +3712,15 @@ function renderSalesReport(list, label) {
   const payments = new Map();
   list.forEach(sale => {
     if (!currentUnits(sale)) return;
+    const breakdown = Array.isArray(sale.payments) ? sale.payments.filter(item => Number(item.amount) > 0) : [];
+    const breakdownTotal = breakdown.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    if (breakdown.length > 1 && breakdownTotal > 0) {
+      breakdown.forEach(item => {
+        const amount = currentTotal(sale) * Number(item.amount) / breakdownTotal;
+        payments.set(item.paymentType, (payments.get(item.paymentType) || 0) + amount);
+      });
+      return;
+    }
     const type = sale.paymentType || "Efectivo";
     payments.set(type, (payments.get(type) || 0) + currentTotal(sale));
   });
