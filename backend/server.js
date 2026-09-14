@@ -316,7 +316,7 @@ const BUSINESS_TYPES = Object.freeze({
   }),
   RESTAURANT: Object.freeze({
     label: "Restaurante",
-    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "reloj"])
+    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"])
   })
 });
 
@@ -540,7 +540,7 @@ function requireRestaurantStore(req, res, next) {
 function requireRestaurantAdmin(req, res, next) {
   requireRestaurantStore(req, res, () => {
     if (req.user.role !== "Admin") {
-      return res.status(403).json({ error: "Solo un administrador puede configurar las mesas." });
+      return res.status(403).json({ error: "Solo un administrador puede usar esta función de Restaurante." });
     }
     next();
   });
@@ -2149,6 +2149,119 @@ app.put("/restaurant/kitchen/orders/:id/status", requireRestaurantStore, async (
     res.json(await dbGet("SELECT * FROM restaurant_orders WHERE id = ? AND company = ?", [id, req.user.company]));
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.get("/restaurant/kitchen/performance", requireRestaurantAdmin, async (req, res) => {
+  try {
+    const conditions = ["o.company = ?", "o.kitchenReadyAt IS NOT NULL"];
+    const params = [req.user.company];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || ""))) {
+      conditions.push("o.kitchenReadyAt >= ?");
+      params.push(`${req.query.from}T00:00:00`);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ""))) {
+      conditions.push("o.kitchenReadyAt <= ?");
+      params.push(`${req.query.to}T23:59:59`);
+    }
+    const rows = await dataStore.all(
+      `SELECT o.id AS orderId, o.status AS orderStatus, o.kitchenReceivedAt,
+              o.kitchenStartedAt, o.kitchenReadyAt, t.name AS tableName,
+              s.serverName, s.guests, oi.productId, oi.code, oi.name, oi.quantity
+       FROM restaurant_orders o
+       LEFT JOIN restaurant_table_sessions s ON s.id = o.tableSessionId
+       LEFT JOIN restaurant_tables t ON t.id = o.tableId
+       LEFT JOIN restaurant_order_items oi ON oi.orderId = o.id
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY o.kitchenReadyAt DESC, o.id DESC, oi.id`,
+      params
+    );
+    const minutesBetween = (start, end) => {
+      const difference = new Date(end).getTime() - new Date(start).getTime();
+      return Number.isFinite(difference) ? Math.max(0, Math.round(difference / 6000) / 10) : 0;
+    };
+    const grouped = new Map();
+    rows.forEach(row => {
+      if (!grouped.has(row.orderId)) {
+        grouped.set(row.orderId, {
+          id: row.orderId,
+          tableName: row.tableName || `Mesa #${row.orderId}`,
+          serverName: row.serverName || "Sin asignar",
+          guests: Number(row.guests || 0),
+          orderStatus: row.orderStatus,
+          receivedAt: row.kitchenReceivedAt,
+          startedAt: row.kitchenStartedAt,
+          readyAt: row.kitchenReadyAt,
+          waitingMinutes: minutesBetween(row.kitchenReceivedAt, row.kitchenStartedAt || row.kitchenReadyAt),
+          preparationMinutes: minutesBetween(row.kitchenStartedAt || row.kitchenReceivedAt, row.kitchenReadyAt),
+          totalMinutes: minutesBetween(row.kitchenReceivedAt, row.kitchenReadyAt),
+          items: []
+        });
+      }
+      if (row.productId) grouped.get(row.orderId).items.push({ productId: row.productId, code: row.code || "", name: row.name, quantity: Number(row.quantity || 0) });
+    });
+    const orders = Array.from(grouped.values());
+    const total = values => values.reduce((sum, value) => sum + Number(value || 0), 0);
+    const average = values => values.length ? Math.round((total(values) / values.length) * 10) / 10 : 0;
+    const totalItems = total(orders.map(order => total(order.items.map(item => item.quantity))));
+    const targetMinutes = 20;
+    const onTimeOrders = orders.filter(order => order.totalMinutes <= targetMinutes).length;
+
+    const productMap = new Map();
+    orders.forEach(order => {
+      const seen = new Set();
+      order.items.forEach(item => {
+        const key = item.productId || item.name;
+        const product = productMap.get(key) || { productId: item.productId, name: item.name, quantity: 0, orderCount: 0, totalMinutes: 0 };
+        product.quantity += item.quantity;
+        if (!seen.has(key)) {
+          product.orderCount += 1;
+          product.totalMinutes += order.totalMinutes;
+          seen.add(key);
+        }
+        productMap.set(key, product);
+      });
+    });
+    const products = Array.from(productMap.values()).map(product => ({
+      productId: product.productId,
+      name: product.name,
+      quantity: product.quantity,
+      orderCount: product.orderCount,
+      averageMinutes: product.orderCount ? Math.round((product.totalMinutes / product.orderCount) * 10) / 10 : 0
+    })).sort((a, b) => b.quantity - a.quantity || a.name.localeCompare(b.name)).slice(0, 20);
+
+    const hourMap = new Map();
+    orders.forEach(order => {
+      const hour = String(order.receivedAt || "").slice(11, 13) || "00";
+      const entry = hourMap.get(hour) || { hour: `${hour}:00`, orders: 0, items: 0, totalMinutes: 0 };
+      entry.orders += 1;
+      entry.items += total(order.items.map(item => item.quantity));
+      entry.totalMinutes += order.totalMinutes;
+      hourMap.set(hour, entry);
+    });
+    const hours = Array.from(hourMap.values()).map(entry => ({
+      hour: entry.hour,
+      orders: entry.orders,
+      items: entry.items,
+      averageMinutes: Math.round((entry.totalMinutes / entry.orders) * 10) / 10
+    })).sort((a, b) => b.orders - a.orders || a.hour.localeCompare(b.hour));
+
+    res.json({
+      targetMinutes,
+      summary: {
+        orders: orders.length,
+        items: totalItems,
+        averageWaitMinutes: average(orders.map(order => order.waitingMinutes)),
+        averagePreparationMinutes: average(orders.map(order => order.preparationMinutes)),
+        averageTotalMinutes: average(orders.map(order => order.totalMinutes)),
+        onTimePercent: orders.length ? Math.round((onTimeOrders / orders.length) * 100) : 0
+      },
+      products,
+      hours,
+      orders
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
