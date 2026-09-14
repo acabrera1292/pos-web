@@ -1299,6 +1299,91 @@ td button {
 .payment-summary .empty-table { margin: 0; padding: 16px; }
 
 /* --------------------------------------------------
+   INICIO
+-------------------------------------------------- */
+
+.home-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.home-heading h2,
+.home-heading p { margin: 0; }
+.home-heading p { margin-top: 5px; color: #6b7280; text-transform: capitalize; }
+.home-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0 12px;
+}
+.home-kpis article {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: #f9fafb;
+}
+.home-kpis span { display: block; color: #6b7280; font-size: 12px; }
+.home-kpis strong { display: block; margin-top: 5px; color: #111827; font-size: 22px; }
+.home-kpis strong span { display: inline; color: inherit; font-size: inherit; }
+.home-comparison {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 11px 13px;
+  border: 1px solid #d1d5db;
+  border-left-width: 4px;
+  border-radius: 4px;
+  background: #f9fafb;
+}
+.home-comparison.positive { border-left-color: #6f9479; }
+.home-comparison.negative { border-left-color: #b17878; }
+.home-comparison.neutral { border-left-color: #9ca3af; }
+.home-columns { display: grid; grid-template-columns: minmax(220px, 0.8fr) minmax(360px, 1.2fr); gap: 18px; }
+.home-columns > section,
+.home-restaurant {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: #fff;
+}
+.home-columns h3,
+.home-restaurant h3 { margin: 0 0 10px; }
+.home-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.home-section-heading h3 { margin: 0; }
+.home-section-heading button { margin: 0; }
+.home-muted { margin: 7px 0 10px; color: #6b7280; font-size: 13px; }
+.home-restaurant { margin-top: 18px; background: #f9fafb; }
+.home-restaurant-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.home-restaurant-kpis button {
+  margin: 0;
+  padding: 13px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #fff;
+  text-align: left;
+}
+.home-restaurant-kpis button:hover { background: #f3f4f6; }
+.home-restaurant-kpis span { display: block; color: #6b7280; font-size: 12px; }
+.home-restaurant-kpis strong { display: block; margin-top: 5px; color: #111827; font-size: 21px; }
+.home-restaurant-kpis strong span { display: inline; color: inherit; font-size: inherit; }
+.home-quick-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
+.home-quick-actions button { margin: 0; }
+
+@media (max-width: 1050px) {
+  .home-columns { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .home-kpis,
+  .home-restaurant-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-comparison { flex-direction: column; }
+}
+
+/* --------------------------------------------------
    CAJA
 -------------------------------------------------- */
 
