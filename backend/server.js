@@ -137,6 +137,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       discountAmount REAL DEFAULT 0,
       total REAL NOT NULL,
       paymentType TEXT NOT NULL,
+      cashRegisterSessionId INTEGER,
       invoiceNumber TEXT,
       status TEXT DEFAULT 'CONFIGURATION_REQUIRED',
       sriMessage TEXT,
@@ -282,11 +283,57 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
     )
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS cash_register_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company TEXT NOT NULL,
+      openedByUserId INTEGER NOT NULL,
+      openedByName TEXT NOT NULL,
+      openedAt TEXT NOT NULL,
+      openingAmount REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'OPEN',
+      closedByUserId INTEGER,
+      closedByName TEXT,
+      closedAt TEXT,
+      cashSales REAL NOT NULL DEFAULT 0,
+      cardSales REAL NOT NULL DEFAULT 0,
+      transferSales REAL NOT NULL DEFAULT 0,
+      otherSales REAL NOT NULL DEFAULT 0,
+      cashIn REAL NOT NULL DEFAULT 0,
+      cashOut REAL NOT NULL DEFAULT 0,
+      expectedAmount REAL NOT NULL DEFAULT 0,
+      countedAmount REAL,
+      difference REAL
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS cash_register_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company TEXT NOT NULL,
+      sessionId INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      amount REAL NOT NULL,
+      reason TEXT NOT NULL,
+      recordedByUserId INTEGER NOT NULL,
+      recordedByName TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    )
+  `);
+
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_open_table_session
           ON restaurant_table_sessions(tableId) WHERE closedAt IS NULL`);
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_order_session
           ON restaurant_orders(tableSessionId)`);
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_register_open_company
+          ON cash_register_sessions(company) WHERE status = 'OPEN'`);
 
+});
+
+if (!dataStore.postgres) db.run("ALTER TABLE invoices ADD COLUMN cashRegisterSessionId INTEGER", (err) => {
+  if (err && !String(err.message).includes("duplicate column")) {
+    console.error("Error agregando cashRegisterSessionId:", err.message);
+  }
 });
 
 // Migración por si la BD es vieja: asegurar columna 'active'
@@ -312,11 +359,11 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET || "posmaster";
 const BUSINESS_TYPES = Object.freeze({
   SHOP: Object.freeze({
     label: "Tienda",
-    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config"])
+    modules: Object.freeze(["inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config"])
   }),
   RESTAURANT: Object.freeze({
     label: "Restaurante",
-    modules: Object.freeze(["inventario", "pos", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"])
+    modules: Object.freeze(["inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"])
   })
 });
 
@@ -1102,6 +1149,13 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
   const type = invoiceType === "FACTURA" ? "FACTURA" : "CONSUMIDOR_FINAL";
 
   try {
+    const cashRegister = await dbGet(
+      "SELECT * FROM cash_register_sessions WHERE company = ? AND status = 'OPEN' ORDER BY id DESC LIMIT 1",
+      [company]
+    );
+    if (!cashRegister) {
+      return res.status(409).json({ error: "Abre la caja antes de registrar una venta." });
+    }
     const restaurantOrder = restaurantOrderId
       ? await dbGet(
         `SELECT o.*, s.openedAt
@@ -1181,14 +1235,14 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       `INSERT INTO invoices
        (company, invoiceType, clientId, buyerIdType, buyerIdNumber, buyerName,
         buyerAddress, buyerEmail, subtotal, taxAmount, discountAmount, total, paymentType,
-        invoiceNumber, status, sriMessage, date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        cashRegisterSessionId, invoiceNumber, status, sriMessage, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         company, type, client?.id || null, client?.idType || "07",
         client?.idNumber || "9999999999999",
         client?.razonSocial || "CONSUMIDOR FINAL", client?.direccion || "",
         client?.email || "", subtotal, taxAmount, discountAmount, total, payType,
-        invoiceNumber, status,
+        cashRegister.id, invoiceNumber, status,
         configured ? "Pendiente de firma y envío al SRI." : "Complete la configuración SRI.",
         date
       ]
@@ -1418,6 +1472,152 @@ app.get("/store/context", requireCompanyUser, async (req, res) => {
       businessTypeLabel: BUSINESS_TYPES[businessType].label,
       enabledModules: BUSINESS_TYPES[businessType].modules
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------- CAJA ----------
+
+async function cashRegisterSnapshot(session) {
+  const payments = await dataStore.all(
+    `SELECT s.paymentType, COALESCE(SUM(s.total), 0) AS total
+     FROM sales s
+     JOIN invoices i ON i.id = s.invoiceId
+     WHERE i.cashRegisterSessionId = ?
+     GROUP BY s.paymentType`,
+    [session.id]
+  );
+  const movements = await dataStore.all(
+    `SELECT * FROM cash_register_movements
+     WHERE sessionId = ? AND company = ? ORDER BY createdAt DESC, id DESC`,
+    [session.id, session.company]
+  );
+  const totals = { cash: 0, card: 0, transfer: 0, other: 0 };
+  for (const payment of payments) {
+    const amount = money(payment.total || 0);
+    if (payment.paymentType === "Efectivo") totals.cash += amount;
+    else if (payment.paymentType === "Tarjeta") totals.card += amount;
+    else if (payment.paymentType === "Transferencia") totals.transfer += amount;
+    else totals.other += amount;
+  }
+  const cashIn = money(movements.filter(item => item.type === "ENTRADA").reduce((sum, item) => sum + Number(item.amount || 0), 0));
+  const cashOut = money(movements.filter(item => item.type === "RETIRO").reduce((sum, item) => sum + Number(item.amount || 0), 0));
+  const expectedAmount = money(Number(session.openingAmount || 0) + totals.cash + cashIn - cashOut);
+  return {
+    session,
+    movements,
+    totals: {
+      cashSales: money(totals.cash),
+      cardSales: money(totals.card),
+      transferSales: money(totals.transfer),
+      otherSales: money(totals.other),
+      totalSales: money(totals.cash + totals.card + totals.transfer + totals.other),
+      cashIn,
+      cashOut,
+      expectedAmount
+    }
+  };
+}
+
+app.get("/cash-register/current", requireCompanyUser, async (req, res) => {
+  try {
+    const session = await dbGet(
+      "SELECT * FROM cash_register_sessions WHERE company = ? AND status = 'OPEN' ORDER BY id DESC LIMIT 1",
+      [req.user.company]
+    );
+    if (!session) return res.json({ open: false });
+    res.json({ open: true, ...(await cashRegisterSnapshot(session)) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/cash-register/open", requireCompanyUser, async (req, res) => {
+  const openingAmount = Number(req.body.openingAmount);
+  if (!Number.isFinite(openingAmount) || openingAmount < 0) {
+    return res.status(400).json({ error: "Ingresa un fondo inicial válido." });
+  }
+  try {
+    const existing = await dbGet("SELECT id FROM cash_register_sessions WHERE company = ? AND status = 'OPEN'", [req.user.company]);
+    if (existing) return res.status(409).json({ error: "Esta tienda ya tiene una caja abierta." });
+    const now = getETLocalISO();
+    const openedByName = req.user.fullName || req.user.username;
+    const created = await dbRun(
+      `INSERT INTO cash_register_sessions
+       (company, openedByUserId, openedByName, openedAt, openingAmount, status)
+       VALUES (?, ?, ?, ?, ?, 'OPEN')`,
+      [req.user.company, req.user.id, openedByName, now, money(openingAmount)]
+    );
+    const session = await dbGet("SELECT * FROM cash_register_sessions WHERE id = ?", [created.lastID]);
+    res.json({ open: true, ...(await cashRegisterSnapshot(session)) });
+  } catch (err) {
+    const conflict = /unique|constraint/i.test(String(err.message));
+    res.status(conflict ? 409 : 500).json({ error: conflict ? "Esta tienda ya tiene una caja abierta." : err.message });
+  }
+});
+
+app.post("/cash-register/movements", requireCompanyUser, async (req, res) => {
+  const type = req.body.type === "RETIRO" ? "RETIRO" : req.body.type === "ENTRADA" ? "ENTRADA" : "";
+  const amount = Number(req.body.amount);
+  const reason = String(req.body.reason || "").trim().slice(0, 150);
+  if (!type || !Number.isFinite(amount) || amount <= 0 || !reason) {
+    return res.status(400).json({ error: "Selecciona el tipo, ingresa un valor mayor a cero y escribe el motivo." });
+  }
+  try {
+    const session = await dbGet("SELECT * FROM cash_register_sessions WHERE company = ? AND status = 'OPEN'", [req.user.company]);
+    if (!session) return res.status(409).json({ error: "No hay una caja abierta." });
+    await dbRun(
+      `INSERT INTO cash_register_movements
+       (company, sessionId, type, amount, reason, recordedByUserId, recordedByName, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [req.user.company, session.id, type, money(amount), reason, req.user.id, req.user.fullName || req.user.username, getETLocalISO()]
+    );
+    res.json({ open: true, ...(await cashRegisterSnapshot(session)) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/cash-register/close", requireCompanyUser, async (req, res) => {
+  const countedAmount = Number(req.body.countedAmount);
+  if (!Number.isFinite(countedAmount) || countedAmount < 0) {
+    return res.status(400).json({ error: "Ingresa el efectivo contado en caja." });
+  }
+  try {
+    const result = await dataStore.transaction(async () => {
+      const session = await dbGet("SELECT * FROM cash_register_sessions WHERE company = ? AND status = 'OPEN'", [req.user.company]);
+      if (!session) throw Object.assign(new Error("No hay una caja abierta."), { status: 409 });
+      const snapshot = await cashRegisterSnapshot(session);
+      const closedAt = getETLocalISO();
+      const difference = money(countedAmount - snapshot.totals.expectedAmount);
+      const updated = await dbRun(
+        `UPDATE cash_register_sessions SET status = 'CLOSED', closedByUserId = ?, closedByName = ?, closedAt = ?,
+         cashSales = ?, cardSales = ?, transferSales = ?, otherSales = ?, cashIn = ?, cashOut = ?,
+         expectedAmount = ?, countedAmount = ?, difference = ?
+         WHERE id = ? AND company = ? AND status = 'OPEN'`,
+        [req.user.id, req.user.fullName || req.user.username, closedAt,
+          snapshot.totals.cashSales, snapshot.totals.cardSales, snapshot.totals.transferSales, snapshot.totals.otherSales,
+          snapshot.totals.cashIn, snapshot.totals.cashOut, snapshot.totals.expectedAmount, money(countedAmount), difference,
+          session.id, req.user.company]
+      );
+      if (!updated.changes) throw Object.assign(new Error("La caja ya fue cerrada."), { status: 409 });
+      return { ...snapshot, difference, countedAmount: money(countedAmount), closedAt };
+    });
+    res.json({ closed: true, ...result });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.get("/cash-register/history", requireUserAdmin, async (req, res) => {
+  try {
+    const rows = await dataStore.all(
+      `SELECT * FROM cash_register_sessions
+       WHERE company = ? AND status = 'CLOSED' ORDER BY closedAt DESC, id DESC LIMIT 50`,
+      [req.user.company]
+    );
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2414,8 +2614,9 @@ async function initializePostgres() {
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS discountReason TEXT DEFAULT ''`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grantedByUserId INTEGER`,
     `ALTER TABLE sales ADD COLUMN IF NOT EXISTS grantedByName TEXT DEFAULT ''`,
-    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceType TEXT NOT NULL, clientId INTEGER, buyerIdType TEXT, buyerIdNumber TEXT, buyerName TEXT NOT NULL, buyerAddress TEXT, buyerEmail TEXT, subtotal DOUBLE PRECISION NOT NULL, taxAmount DOUBLE PRECISION NOT NULL, discountAmount DOUBLE PRECISION DEFAULT 0, total DOUBLE PRECISION NOT NULL, paymentType TEXT NOT NULL, invoiceNumber TEXT, status TEXT DEFAULT 'CONFIGURATION_REQUIRED', sriMessage TEXT, date TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS invoices (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceType TEXT NOT NULL, clientId INTEGER, buyerIdType TEXT, buyerIdNumber TEXT, buyerName TEXT NOT NULL, buyerAddress TEXT, buyerEmail TEXT, subtotal DOUBLE PRECISION NOT NULL, taxAmount DOUBLE PRECISION NOT NULL, discountAmount DOUBLE PRECISION DEFAULT 0, total DOUBLE PRECISION NOT NULL, paymentType TEXT NOT NULL, cashRegisterSessionId INTEGER, invoiceNumber TEXT, status TEXT DEFAULT 'CONFIGURATION_REQUIRED', sriMessage TEXT, date TEXT NOT NULL)`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS discountAmount DOUBLE PRECISION DEFAULT 0`,
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS cashRegisterSessionId INTEGER`,
     `CREATE TABLE IF NOT EXISTS sri_settings (company TEXT PRIMARY KEY, environment TEXT DEFAULT 'TEST', ruc TEXT, legalName TEXT, commercialName TEXT, mainAddress TEXT, establishmentAddress TEXT, establishmentCode TEXT DEFAULT '001', emissionPoint TEXT DEFAULT '001', nextSequence INTEGER DEFAULT 1, accountingRequired TEXT DEFAULT 'NO', specialTaxpayerNumber TEXT, taxRegime TEXT, senderEmail TEXT, adminCopyEmail TEXT, certificateConfigured INTEGER DEFAULT 0, certificateValidated INTEGER DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS sri_certificates (company TEXT PRIMARY KEY, filename TEXT NOT NULL, certificateEncrypted TEXT NOT NULL, passwordEncrypted TEXT NOT NULL, installedAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS client_intake_tokens (company TEXT PRIMARY KEY, tokenHash TEXT NOT NULL UNIQUE, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
@@ -2426,6 +2627,8 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS restaurant_table_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableId INTEGER NOT NULL, restaurantServerId INTEGER, serverUserId INTEGER NOT NULL, serverName TEXT NOT NULL, guests INTEGER NOT NULL, status TEXT DEFAULT 'OCCUPIED', openedAt TEXT NOT NULL, closedAt TEXT, durationMinutes INTEGER)`,
     `CREATE TABLE IF NOT EXISTS restaurant_orders (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableSessionId INTEGER NOT NULL, tableId INTEGER NOT NULL, status TEXT DEFAULT 'OPEN', kitchenStatus TEXT DEFAULT 'NEW', kitchenReceivedAt TEXT, kitchenStartedAt TEXT, kitchenReadyAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, paidAt TEXT, invoiceId INTEGER)`,
     `CREATE TABLE IF NOT EXISTS restaurant_order_items (id SERIAL PRIMARY KEY, company TEXT NOT NULL, orderId INTEGER NOT NULL, productId INTEGER NOT NULL, code TEXT, name TEXT NOT NULL, quantity INTEGER NOT NULL, price DOUBLE PRECISION NOT NULL, discountPercent DOUBLE PRECISION DEFAULT 0, discountReason TEXT DEFAULT '', note TEXT DEFAULT '')`,
+    `CREATE TABLE IF NOT EXISTS cash_register_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, openedByUserId INTEGER NOT NULL, openedByName TEXT NOT NULL, openedAt TEXT NOT NULL, openingAmount DOUBLE PRECISION NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'OPEN', closedByUserId INTEGER, closedByName TEXT, closedAt TEXT, cashSales DOUBLE PRECISION NOT NULL DEFAULT 0, cardSales DOUBLE PRECISION NOT NULL DEFAULT 0, transferSales DOUBLE PRECISION NOT NULL DEFAULT 0, otherSales DOUBLE PRECISION NOT NULL DEFAULT 0, cashIn DOUBLE PRECISION NOT NULL DEFAULT 0, cashOut DOUBLE PRECISION NOT NULL DEFAULT 0, expectedAmount DOUBLE PRECISION NOT NULL DEFAULT 0, countedAmount DOUBLE PRECISION, difference DOUBLE PRECISION)`,
+    `CREATE TABLE IF NOT EXISTS cash_register_movements (id SERIAL PRIMARY KEY, company TEXT NOT NULL, sessionId INTEGER NOT NULL, type TEXT NOT NULL, amount DOUBLE PRECISION NOT NULL, reason TEXT NOT NULL, recordedByUserId INTEGER NOT NULL, recordedByName TEXT NOT NULL, createdAt TEXT NOT NULL)`,
     `ALTER TABLE restaurant_order_items ADD COLUMN IF NOT EXISTS discountPercent DOUBLE PRECISION DEFAULT 0`,
     `ALTER TABLE restaurant_order_items ADD COLUMN IF NOT EXISTS discountReason TEXT DEFAULT ''`,
     `ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS kitchenStatus TEXT DEFAULT 'NEW'`,
@@ -2435,6 +2638,7 @@ async function initializePostgres() {
     `ALTER TABLE restaurant_table_sessions ADD COLUMN IF NOT EXISTS restaurantServerId INTEGER`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_open_table_session ON restaurant_table_sessions(tableId) WHERE closedAt IS NULL`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_order_session ON restaurant_orders(tableSessionId)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_register_open_company ON cash_register_sessions(company) WHERE status = 'OPEN'`,
     `CREATE INDEX IF NOT EXISTS idx_users_company ON users(company)`,
     `CREATE INDEX IF NOT EXISTS idx_products_company ON products(company)`,
     `CREATE INDEX IF NOT EXISTS idx_sales_company_date ON sales(company, date)`,
@@ -2444,7 +2648,9 @@ async function initializePostgres() {
     `CREATE INDEX IF NOT EXISTS idx_restaurant_servers_company ON restaurant_servers(company)`,
     `CREATE INDEX IF NOT EXISTS idx_restaurant_sessions_company ON restaurant_table_sessions(company, openedAt)`,
     `CREATE INDEX IF NOT EXISTS idx_restaurant_orders_company ON restaurant_orders(company, status)`,
-    `CREATE INDEX IF NOT EXISTS idx_restaurant_order_items_order ON restaurant_order_items(orderId)`
+    `CREATE INDEX IF NOT EXISTS idx_restaurant_order_items_order ON restaurant_order_items(orderId)`,
+    `CREATE INDEX IF NOT EXISTS idx_cash_register_company_opened ON cash_register_sessions(company, openedAt)`,
+    `CREATE INDEX IF NOT EXISTS idx_cash_register_movements_session ON cash_register_movements(sessionId)`
   ];
   for (const statement of statements) await dataStore.run(statement);
   console.log("PostgreSQL conectado y tablas verificadas.");

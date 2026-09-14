@@ -44,7 +44,7 @@ function createDatabase() {
     max: Math.max(2, Number(process.env.PG_POOL_MAX) || 10)
   });
   const context = new AsyncLocalStorage();
-  const idTables = new Set(["users", "password_reset_codes", "products", "sales", "invoices", "client_intake_submissions", "clients", "restaurant_tables", "restaurant_servers", "restaurant_table_sessions", "restaurant_orders", "restaurant_order_items"]);
+  const idTables = new Set(["users", "password_reset_codes", "products", "sales", "invoices", "client_intake_submissions", "clients", "restaurant_tables", "restaurant_servers", "restaurant_table_sessions", "restaurant_orders", "restaurant_order_items", "cash_register_sessions", "cash_register_movements"]);
   const camelKeys = {
     fullname: "fullName", mustchangepassword: "mustChangePassword", expiresat: "expiresAt", userlimit: "userLimit", usercount: "userCount",
     createdat: "createdAt", updatedat: "updatedAt", userid: "userId", codehash: "codeHash", usedat: "usedAt",
@@ -64,7 +64,12 @@ function createDatabase() {
     kitchenstatus: "kitchenStatus", kitchenreceivedat: "kitchenReceivedAt", kitchenstartedat: "kitchenStartedAt", kitchenreadyat: "kitchenReadyAt",
     passwordencrypted: "passwordEncrypted", certificateencrypted: "certificateEncrypted", installedat: "installedAt",
     tokenhash: "tokenHash", claimedat: "claimedAt", idtype: "idType", idnumber: "idNumber",
-    razonsocial: "razonSocial", nombrecomercial: "nombreComercial"
+    razonsocial: "razonSocial", nombrecomercial: "nombreComercial",
+    cashregistersessionid: "cashRegisterSessionId", openedbyuserid: "openedByUserId", openedbyname: "openedByName",
+    openingamount: "openingAmount", closedbyuserid: "closedByUserId", closedbyname: "closedByName",
+    cashsales: "cashSales", cardsales: "cardSales", transfersales: "transferSales", othersales: "otherSales",
+    cashin: "cashIn", cashout: "cashOut", expectedamount: "expectedAmount", countedamount: "countedAmount",
+    recordedbyuserid: "recordedByUserId", recordedbyname: "recordedByName"
   };
 
   function normalizeRow(row) {
