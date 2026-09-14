@@ -1,0 +1,3823 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>POS Simple - Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <!-- LEFT NAV -->
+    <aside class="side-nav">
+      <div class="logo">POS Simple</div>
+
+      <div class="nav-section-title">Módulos</div>
+      <button id="nav-inicio" data-module="inicio" onclick="showTab('inicio')">
+        Inicio
+      </button>
+      <button id="nav-inventario" data-module="inventario" onclick="showTab('inventario'); loadProducts();">
+        Inventario
+      </button>
+      <button id="nav-pos" data-module="pos" onclick="showTab('pos')">
+        Punto de Venta
+      </button>
+      <button id="nav-caja" data-module="caja" onclick="showTab('caja')">
+        Caja
+      </button>
+      <div id="restaurantNavGroup" class="nav-group hidden">
+        <button id="nav-restaurante" class="nav-group-toggle" type="button" aria-expanded="false" onclick="toggleRestaurantMenu()">
+          <span>Restaurante</span><span id="restaurantNavArrow" class="nav-group-arrow">›</span>
+        </button>
+        <div id="restaurantNavItems" class="nav-submenu hidden">
+          <button id="nav-mesas" data-module="mesas" class="hidden" onclick="showTab('mesas')">Mesas</button>
+          <button id="nav-meseros" data-module="meseros" class="hidden" onclick="showTab('meseros')">Meseros</button>
+          <button id="nav-menu" data-module="menu" class="hidden" onclick="showTab('menu')">Menú</button>
+          <button id="nav-cocina" data-module="cocina" class="hidden" onclick="showTab('cocina')">Cocina</button>
+          <button id="nav-rendimiento-cocina" data-module="rendimiento-cocina" data-admin-only="true" class="hidden" onclick="showTab('rendimiento-cocina')">Rendimiento de cocina</button>
+          <button id="nav-historial-mesas" data-module="historial-mesas" class="hidden" onclick="showTab('historial-mesas')">Historial de atención</button>
+        </div>
+      </div>
+      <button id="nav-ventas" data-module="ventas" onclick="showTab('ventas')">
+        Ventas
+      </button>
+      <button id="nav-clientes" data-module="clientes" onclick="showTab('clientes')">
+        Clientes</button>
+      <button id="nav-usuarios" data-module="usuarios" onclick="showTab('usuarios')">
+        Usuarios
+      </button>
+      <button id="nav-config" data-module="config" onclick="showTab('config')">
+        Configuración
+      </button>
+    </aside>
+
+    <!-- CENTER -->
+    <main class="main-area">
+      <header class="topbar">
+        <div class="topbar-title" id="sectionTitle"></div>
+        <div class="top-user">
+          <span class="top-user-store" id="storeNameLabel"></span>
+          <button onclick="logout()">Cerrar Sesión</button>
+        </div>
+      </header>
+
+      <!-- TAB: INICIO -->
+      <section id="inicio" class="tab-section app-card">
+        <div class="home-heading">
+          <div>
+            <h2>Resumen de hoy</h2>
+            <p id="homeDateLabel">Cargando información...</p>
+          </div>
+          <span id="homeCashStatus" class="cash-register-status closed">Caja cerrada</span>
+        </div>
+
+        <div class="home-kpis">
+          <article><span>Ventas netas</span><strong>$<span id="homeSalesTotal">0.00</span></strong></article>
+          <article><span>Transacciones</span><strong id="homeTransactions">0</strong></article>
+          <article><span>Venta promedio</span><strong>$<span id="homeAverage">0.00</span></strong></article>
+          <article><span>Productos vendidos</span><strong id="homeUnits">0</strong></article>
+          <article><span>Valor descontado</span><strong>$<span id="homeDiscount">0.00</span></strong></article>
+          <article><span>Productos de cortesía</span><strong id="homeComplimentary">0</strong></article>
+        </div>
+
+        <div id="homeComparison" class="home-comparison neutral">
+          <strong id="homeComparisonTitle">Comparación con ayer</strong>
+          <span id="homeComparisonText">Sin datos todavía.</span>
+        </div>
+
+        <div class="home-columns">
+          <section>
+            <h3>Métodos de pago de hoy</h3>
+            <div class="payment-summary">
+              <div><span>Efectivo</span><strong>$<span id="homeCashPayments">0.00</span></strong></div>
+              <div><span>Tarjeta</span><strong>$<span id="homeCardPayments">0.00</span></strong></div>
+              <div><span>Transferencia</span><strong>$<span id="homeTransferPayments">0.00</span></strong></div>
+              <div id="homeOtherPaymentsRow" class="hidden"><span>Otros</span><strong>$<span id="homeOtherPayments">0.00</span></strong></div>
+            </div>
+          </section>
+          <section>
+            <div class="home-section-heading">
+              <h3>Stock bajo</h3>
+              <button type="button" onclick="showTab('inventario'); showLowStock();">Ver inventario</button>
+            </div>
+            <p id="homeLowStockSummary" class="home-muted">No hay productos con stock bajo.</p>
+            <div class="table-scroll"><table><thead><tr><th>Producto</th><th>Código</th><th>Cantidad</th></tr></thead><tbody id="homeLowStockBody"></tbody></table></div>
+          </section>
+        </div>
+
+        <section id="homeRestaurantSummary" class="home-restaurant hidden">
+          <h3>Restaurante ahora</h3>
+          <div class="home-restaurant-kpis">
+            <button type="button" onclick="showTab('mesas')"><span>Mesas abiertas</span><strong id="homeOpenTables">0</strong></button>
+            <button type="button" onclick="showTab('cocina')"><span>Pedidos activos en cocina</span><strong id="homeActiveOrders">0</strong></button>
+            <button type="button" onclick="showTab(userRole === 'Admin' ? 'rendimiento-cocina' : 'cocina')"><span>Preparación promedio hoy</span><strong><span id="homePreparationTime">0</span> min</strong></button>
+          </div>
+        </section>
+
+        <div class="home-quick-actions">
+          <button type="button" onclick="showTab('pos')">Ir a Punto de Venta</button>
+          <button type="button" onclick="showTab('caja')">Ver Caja</button>
+          <button type="button" onclick="showTab('ventas')">Ver Ventas</button>
+        </div>
+      </section>
+
+      <!-- TAB: INVENTARIO -->
+      <section id="inventario" class="tab-section app-card hidden">
+        <h2>Agregar / Editar Producto</h2>
+        <div class="form-row">
+          <input id="code" placeholder="Código">
+          <input id="name" placeholder="Nombre">
+          <input id="qty" type="number" placeholder="Cantidad">
+          <input id="price" type="number" placeholder="Precio">
+          <button onclick="saveProduct()">Guardar</button>
+          <button onclick="clearForm()">Cancelar</button>
+        </div>
+
+        <input type="hidden" id="productId">
+
+<h2 style="margin-top:18px;">Inventario</h2>
+<div class="table-scroll">
+<table border="1">
+  <thead>
+    <tr>
+      <th>Código</th>
+      <th>Nombre</th>
+      <th>Cantidad</th>
+      <th>Precio</th>
+    </tr>
+  </thead>
+  <tbody id="tableBody"></tbody>
+</table>
+</div>
+<!-- 🔁 Paginación -->
+<div class="pagination">
+  <button onclick="prevPage()">Anterior</button>
+  <span id="pageInfo">1 / 1</span>
+  <button onclick="nextPage()">Siguiente</button>
+</div>
+
+<div class="inventory-actions">
+  <button id="btnEdit" onclick="editSelected()">Editar</button>
+  <button id="btnDelete" data-action="delete" onclick="deleteSelected()">Eliminar</button>
+</div>
+
+      </section>
+
+      <!-- TAB: CAJA -->
+      <section id="caja" class="tab-section app-card hidden">
+        <div class="cash-register-heading">
+          <div>
+            <h2>Caja</h2>
+            <p>Controla el efectivo y revisa las ventas de cada turno.</p>
+          </div>
+          <span id="cashRegisterStatus" class="cash-register-status closed">Cerrada</span>
+        </div>
+
+        <div id="cashRegisterClosed">
+          <div class="cash-register-empty">
+            <h3>Abrir caja</h3>
+            <p>Escribe cuánto efectivo hay al comenzar el turno.</p>
+            <label>Fondo inicial $ <input id="cashRegisterOpeningAmount" type="number" min="0" step="0.01" value="0"></label>
+            <button type="button" onclick="openCashRegister()">Abrir caja</button>
+          </div>
+        </div>
+
+        <div id="cashRegisterOpen" class="hidden">
+          <p class="cash-register-session-detail">Abierta por <strong id="cashRegisterOpenedBy">—</strong> · <span id="cashRegisterOpenedAt">—</span></p>
+          <div class="sales-kpis cash-register-kpis">
+            <article><span>Fondo inicial</span><strong>$<span id="cashRegisterOpening">0.00</span></strong></article>
+            <article><span>Ventas en efectivo</span><strong>$<span id="cashRegisterCashSales">0.00</span></strong></article>
+            <article><span>Tarjeta</span><strong>$<span id="cashRegisterCardSales">0.00</span></strong></article>
+            <article><span>Transferencia</span><strong>$<span id="cashRegisterTransferSales">0.00</span></strong></article>
+            <article><span>Entradas / Retiros</span><strong><span id="cashRegisterMovementsTotal">+$0.00 / -$0.00</span></strong></article>
+            <article class="cash-register-expected"><span>Efectivo esperado</span><strong>$<span id="cashRegisterExpected">0.00</span></strong></article>
+          </div>
+
+          <div class="cash-register-columns">
+            <section>
+              <h3>Movimiento de efectivo</h3>
+              <p class="settings-note">Registra dinero que entra o sale sin ser una venta.</p>
+              <div class="cash-register-movement-form">
+                <select id="cashMovementType"><option value="ENTRADA">Entrada</option><option value="RETIRO">Retiro</option></select>
+                <input id="cashMovementAmount" type="number" min="0.01" step="0.01" placeholder="Valor">
+                <input id="cashMovementReason" type="text" maxlength="150" placeholder="Motivo">
+                <button type="button" onclick="addCashMovement()">Registrar</button>
+              </div>
+              <div class="table-scroll cash-register-movements-table">
+                <table><thead><tr><th>Hora</th><th>Tipo</th><th>Valor</th><th>Motivo</th><th>Usuario</th></tr></thead><tbody id="cashMovementsBody"></tbody></table>
+              </div>
+            </section>
+
+            <section class="cash-register-close-card">
+              <h3>Cerrar caja</h3>
+              <p>Cuenta únicamente el efectivo que está físicamente en la caja.</p>
+              <label>Efectivo contado $ <input id="cashRegisterCountedAmount" type="number" min="0" step="0.01" oninput="updateCashRegisterDifference()"></label>
+              <div class="cash-register-difference-row"><span>Diferencia</span><strong id="cashRegisterDifference">$0.00</strong></div>
+              <button type="button" onclick="closeCashRegister()">Cerrar caja</button>
+            </section>
+          </div>
+        </div>
+
+        <div id="cashRegisterAdminHistory" class="hidden">
+          <h3 class="sales-detail-title">Historial de cierres</h3>
+          <div class="table-scroll">
+            <table><thead><tr><th>Apertura</th><th>Cierre</th><th>Abrió / Cerró</th><th>Efectivo</th><th>Tarjeta</th><th>Transferencia</th><th>Esperado</th><th>Contado</th><th>Diferencia</th></tr></thead><tbody id="cashRegisterHistoryBody"></tbody></table>
+          </div>
+          <button type="button" onclick="exportCashRegisterHistory()">Exportar cierres (CSV)</button>
+        </div>
+      </section>
+
+      <!-- TAB: PUNTO DE VENTA -->
+      <section id="pos" class="tab-section app-card";">
+        <h2>Punto de Venta</h2>
+
+        <div id="restaurantOrderContext" class="restaurant-order-context hidden">
+          <div>
+            <strong id="restaurantOrderTitle">Pedido de mesa</strong>
+            <span id="restaurantOrderDetail"></span>
+          </div>
+          <div class="restaurant-order-actions">
+            <button id="btnSaveRestaurantOrder" type="button" onclick="saveRestaurantOrder()">Enviar / actualizar cocina</button>
+            <button id="btnSplitRestaurantBill" type="button" onclick="openSplitBillModal()">Dividir cuenta</button>
+            <button type="button" onclick="returnToRestaurantTables()">Volver a Mesas</button>
+          </div>
+        </div>
+
+        <div>
+          <label>Código de producto:</label>
+          <input id="posCode" placeholder="Escanear o escribir código">
+          <button onclick="addToCartByCode()">Agregar</button>
+        </div>
+
+        <div id="restaurantQuickMenu" class="restaurant-quick-menu hidden">
+          <div class="restaurant-section-heading"><div><h3>Menú rápido</h3><p>Toca un producto para agregarlo al pedido.</p></div></div>
+          <div id="quickMenuCategories" class="quick-menu-categories"></div>
+          <div id="quickMenuProducts" class="quick-menu-products"></div>
+        </div>
+
+        <h3>Carrito</h3>
+        <p class="cart-table-help">Arrastra un encabezado para cambiar su posición o su borde derecho para ajustar el ancho.</p>
+
+        <div class="table-scroll cart-table-scroll">
+        <table id="cartTable" class="cart-table" border="1">
+          <colgroup id="cartColgroup"></colgroup>
+          <thead id="cartHead"></thead>
+          <tbody id="cartBody"></tbody>
+        </table>
+        </div>
+
+        <h3>Totales</h3>
+        <div class="invoice-totals">
+          <p>Precio antes de descuento: $<span id="cartGrossTotal">0.00</span></p>
+          <p>Valor descontado: -$<span id="cartDiscount">0.00</span></p>
+          <p>Subtotal sin IVA: $<span id="cartSubtotal">0.00</span></p>
+          <p>IVA 15%: $<span id="cartTax">0.00</span></p>
+          <p class="invoice-grand-total">Total: $<span id="cartTotal">0.00</span></p>
+        </div>
+
+        <label>Tipo de pago:
+          <select id="paymentType" onchange="updatePaymentFields()">
+            <option value="Efectivo" selected>Efectivo</option>
+            <option value="Tarjeta">Tarjeta</option>
+            <option value="Transferencia">Transferencia</option>
+            <option value="Mixto">Pago mixto</option>
+          </select>
+        </label>
+
+        <div id="mixedPaymentPanel" class="mixed-payment-panel hidden">
+          <strong>Distribución del pago</strong>
+          <div class="mixed-payment-fields">
+            <label>Efectivo $ <input id="mixedCash" type="number" min="0" step="0.01" value="0" oninput="updateMixedPaymentTotal()"></label>
+            <label>Tarjeta $ <input id="mixedCard" type="number" min="0" step="0.01" value="0" oninput="updateMixedPaymentTotal()"></label>
+            <label>Transferencia $ <input id="mixedTransfer" type="number" min="0" step="0.01" value="0" oninput="updateMixedPaymentTotal()"></label>
+          </div>
+          <p><span id="mixedPaymentRemainingLabel">Falta por asignar:</span> <strong>$<span id="mixedPaymentRemaining">0.00</span></strong></p>
+        </div>
+
+        <div class="invoice-choice">
+          <span class="invoice-choice-label">Comprobante:</span>
+          <button id="btnConsumerFinal" class="invoice-choice-button active" type="button" onclick="setInvoiceType('CONSUMIDOR_FINAL')">Consumidor Final</button>
+          <button id="btnInvoice" class="invoice-choice-button" type="button" onclick="setInvoiceType('FACTURA')">Factura</button>
+        </div>
+
+        <div id="invoiceClientPanel" class="invoice-client-panel hidden">
+          <h3>Datos del cliente</h3>
+          <p id="tabletClientStatus" class="tablet-client-status">Esperando datos desde la tablet...</p>
+          <label for="invoiceClientSearch">Buscar por cédula, RUC o nombre</label>
+          <input id="invoiceClientSearch" type="text" placeholder="Empieza a escribir..." oninput="searchInvoiceClients()">
+          <div id="invoiceClientResults" class="invoice-client-results"></div>
+          <div id="selectedInvoiceClient" class="selected-invoice-client hidden"></div>
+          <button type="button" onclick="toggleQuickClientForm(true)">Agregar nuevo cliente</button>
+          <div id="quickClientForm" class="quick-client-form hidden">
+            <select id="quickClientIdType"><option value="Cedula">Cédula</option><option value="RUC">RUC</option><option value="Pasaporte">Pasaporte</option></select>
+            <input id="quickClientIdNumber" placeholder="Número de identificación">
+            <input id="quickClientName" placeholder="Razón social / Nombre completo">
+            <input id="quickClientAddress" placeholder="Dirección">
+            <input id="quickClientEmail" type="email" placeholder="Correo electrónico">
+            <input id="quickClientPhone" placeholder="Teléfono">
+            <div><button type="button" onclick="saveQuickClient()">Guardar y seleccionar</button> <button type="button" onclick="toggleQuickClientForm(false)">Cancelar</button></div>
+          </div>
+        </div>
+
+        <br>
+
+        <div id="cashReceivedPanel">
+          <label>Efectivo recibido:</label>
+          <input id="cashReceived" type="number" step="0.01" oninput="updateChange()">
+          <p>Cambio: $<span id="changeDue">0.00</span></p>
+        </div>
+
+        <button onclick="finishSale()">Finalizar venta</button>
+      </section>
+
+      <!-- TAB: VENTAS -->
+<!-- VENTAS -->
+      <section id="menu" class="tab-section app-card hidden">
+        <div class="restaurant-section-heading">
+          <div><h2>Menú</h2><p>Organiza los productos del inventario en categorías para venderlos con un toque.</p></div>
+        </div>
+        <div class="restaurant-menu-editor">
+          <h3>Agregar / Editar producto</h3>
+          <input id="menuProductId" type="hidden">
+          <div class="restaurant-menu-form">
+            <label>Código <input id="menuProductCode" placeholder="Ej. HAMB01"></label>
+            <label>Nombre <input id="menuProductName" placeholder="Nombre del producto"></label>
+            <label>Categoría <input id="menuProductCategory" placeholder="Ej. Platos fuertes"></label>
+            <label>Precio <input id="menuProductPrice" type="number" min="0" step="0.01" placeholder="0.00"></label>
+            <label>Cantidad <input id="menuProductQuantity" type="number" min="0" step="1" placeholder="0"></label>
+            <label id="menuProductAvailableLabel" class="menu-availability-field"><span>Disponible para vender</span><input id="menuProductAvailable" type="checkbox" checked></label>
+          </div>
+          <label id="menuProductModifiersLabel" class="menu-modifiers-editor">
+            <span>Opciones del producto (opcional)</span>
+            <textarea id="menuProductModifiers" rows="4" placeholder="Término*: Poco cocida | 3/4 | Bien cocida&#10;Acompañamiento*: Papas | Ensalada&#10;Extras+: Queso +1.00 | Tocino +1.50"></textarea>
+            <small>Una línea por grupo. <strong>*</strong> = obligatorio; <strong>+</strong> = permite varias opciones. Agrega un valor como “+1.50” para cobrar un extra.</small>
+          </label>
+          <div class="restaurant-menu-form-actions">
+            <button type="button" onclick="saveMenuProduct()">Guardar producto</button>
+            <button type="button" onclick="clearMenuProductForm()">Cancelar</button>
+          </div>
+          <p id="menuProductPermissionNote" class="settings-note hidden">Al editar, el rol Usuario solamente puede cambiar el código y el nombre.</p>
+        </div>
+        <input id="menuSearch" class="menu-search" placeholder="Buscar por código, nombre o categoría" oninput="renderMenuManagement()">
+        <div class="table-scroll"><table><thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Opciones</th><th>Estado</th></tr></thead><tbody id="menuBody"></tbody></table></div>
+        <div id="menuProductActions" class="inventory-actions">
+          <button id="btnEditMenuProduct" type="button" onclick="editSelectedMenuProduct()" disabled>Editar</button>
+          <button id="btnToggleMenuAvailability" type="button" onclick="toggleSelectedMenuAvailability()" disabled>Marcar agotado</button>
+          <button id="btnDeleteMenuProduct" class="danger-button" type="button" onclick="deleteSelectedMenuProduct()" disabled>Eliminar</button>
+        </div>
+      </section>
+
+      <!-- TAB: MESAS (RESTAURANTE) -->
+      <section id="mesas" class="tab-section hidden restaurant-tables-section">
+        <div class="restaurant-section-heading">
+          <div>
+            <h2>Mesas</h2>
+            <p>Selecciona una mesa para sentar clientes o consultar su tiempo.</p>
+          </div>
+        </div>
+
+        <div id="restaurantTableAdmin" class="restaurant-table-admin hidden">
+          <h3>Administrar mesas</h3>
+          <div class="restaurant-table-form">
+            <label>Nombre <input id="restaurantTableName" placeholder="Ej. Mesa 1"></label>
+            <label>Capacidad <input id="restaurantTableCapacity" type="number" min="1" max="30" value="4"></label>
+            <button type="button" onclick="createRestaurantTable()">Agregar mesa</button>
+          </div>
+        </div>
+
+        <div id="restaurantTablesEmpty" class="restaurant-empty hidden">
+          No hay mesas configuradas. Un administrador puede crear la primera mesa aquí.
+        </div>
+        <div id="restaurantTablesGrid" class="restaurant-tables-grid"></div>
+
+        <div id="restaurantTableSelection" class="restaurant-table-selection hidden">
+          <div>
+            <strong id="selectedRestaurantTableName">Mesa</strong>
+            <span id="selectedRestaurantTableDetail"></span>
+          </div>
+          <div id="restaurantSeatFields" class="restaurant-seat-fields">
+            <label>Clientes <input id="restaurantGuestsInput" type="number" min="1" max="99" value="2"></label>
+            <label>Mesero (opcional) <select id="restaurantServerSelect"><option value="">Sin mesero</option></select></label>
+          </div>
+          <div class="inventory-actions">
+            <button id="btnSeatRestaurantTable" type="button" onclick="seatSelectedRestaurantTable()">Sentar clientes</button>
+            <button id="btnOpenRestaurantOrder" type="button" onclick="openSelectedRestaurantOrder()">Abrir pedido</button>
+            <button id="btnJoinRestaurantTable" type="button" onclick="toggleRestaurantJoinFields()">Unir mesa</button>
+            <button id="btnCloseRestaurantTable" type="button" onclick="closeSelectedRestaurantTable()">Liberar mesa</button>
+            <button id="btnEditRestaurantTable" type="button" onclick="editSelectedRestaurantTable()">Editar mesa</button>
+            <button id="btnDeleteRestaurantTable" class="danger-button" type="button" onclick="deleteSelectedRestaurantTable()">Eliminar mesa</button>
+          </div>
+          <div id="restaurantJoinFields" class="restaurant-join-fields hidden">
+            <label>Unir con <select id="restaurantJoinTableSelect"></select></label>
+            <button type="button" onclick="joinSelectedRestaurantTable()">Confirmar unión</button>
+            <button type="button" onclick="toggleRestaurantJoinFields(false)">Cancelar</button>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- TAB: COCINA (RESTAURANTE) -->
+      <section id="cocina" class="tab-section hidden restaurant-tables-section kitchen-section">
+        <div class="restaurant-section-heading">
+          <div>
+            <h2>Cocina</h2>
+            <p>Los pedidos enviados desde las mesas aparecen aquí automáticamente.</p>
+          </div>
+        </div>
+        <div class="sales-kpis kitchen-kpis">
+          <article><span>Nuevos</span><strong id="kitchenNewCount">0</strong></article>
+          <article><span>Cocinando</span><strong id="kitchenCookingCount">0</strong></article>
+          <article><span>Listos</span><strong id="kitchenReadyCount">0</strong></article>
+        </div>
+        <section class="kitchen-summary">
+          <h3>Preparación agrupada</h3>
+          <p>Totales pendientes de todos los pedidos para coordinar la preparación.</p>
+          <div id="kitchenProductSummary" class="kitchen-summary-items"></div>
+          <span id="kitchenProductSummaryEmpty" class="settings-note">No hay productos pendientes.</span>
+        </section>
+        <div id="kitchenEmpty" class="restaurant-empty hidden">No hay pedidos activos en cocina.</div>
+        <div id="kitchenBoard" class="kitchen-board"></div>
+      </section>
+
+      <!-- TAB: RENDIMIENTO DE COCINA (SOLO ADMIN) -->
+      <section id="rendimiento-cocina" class="tab-section hidden restaurant-tables-section kitchen-performance-section">
+        <div class="restaurant-section-heading">
+          <div>
+            <h2>Rendimiento de cocina</h2>
+            <p>Analiza tiempos, volumen y cumplimiento de la cocina.</p>
+          </div>
+        </div>
+        <div class="sales-kpis kitchen-performance-kpis">
+          <article><span>Pedidos terminados</span><strong id="performanceOrderCount">0</strong></article>
+          <article><span>Productos preparados</span><strong id="performanceItemCount">0</strong></article>
+          <article><span>Espera promedio</span><strong><span id="performanceWaitAverage">0</span> min</strong></article>
+          <article><span>Preparación promedio</span><strong><span id="performancePrepAverage">0</span> min</strong></article>
+          <article><span>Tiempo total promedio</span><strong><span id="performanceTotalAverage">0</span> min</strong></article>
+          <article><span id="performanceTargetLabel">Listos en 20 min</span><strong><span id="performanceOnTime">0</span>%</strong></article>
+        </div>
+        <div class="kitchen-performance-insights">
+          <section>
+            <h3>Productos más preparados</h3>
+            <div class="table-scroll"><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Pedidos</th><th>Tiempo prom.</th></tr></thead><tbody id="performanceProductsBody"></tbody></table></div>
+          </section>
+          <section>
+            <h3>Horas de mayor actividad</h3>
+            <div class="table-scroll"><table><thead><tr><th>Hora</th><th>Pedidos</th><th>Productos</th><th>Tiempo prom.</th></tr></thead><tbody id="performanceHoursBody"></tbody></table></div>
+          </section>
+        </div>
+        <h3 class="sales-detail-title">Detalle de pedidos terminados</h3>
+        <p id="performanceRangeLabel" class="settings-note">Todas las fechas</p>
+        <div class="table-scroll">
+          <table><thead><tr><th>Pedido</th><th>Mesa</th><th>Mesero</th><th>Recibido</th><th>Inicio</th><th>Listo</th><th>Espera</th><th>Preparación</th><th>Total</th><th>Productos</th></tr></thead><tbody id="performanceOrdersBody"></tbody></table>
+        </div>
+      </section>
+
+      <!-- TAB: MESEROS (RESTAURANTE) -->
+      <section id="meseros" class="tab-section hidden restaurant-tables-section">
+        <div class="restaurant-section-heading">
+          <div>
+            <h2>Meseros</h2>
+            <p>Administra las personas que pueden atender y recibir mesas.</p>
+          </div>
+        </div>
+
+        <div id="restaurantServerAdmin" class="restaurant-table-admin hidden">
+          <h3>Agregar mesero</h3>
+          <div class="restaurant-server-form">
+            <label>Nombre <input id="restaurantServerName" placeholder="Ej. María López"></label>
+            <button type="button" onclick="createRestaurantServer()">Agregar mesero</button>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Nombre</th><th>Estado</th></tr></thead>
+            <tbody id="restaurantServersBody"></tbody>
+          </table>
+        </div>
+        <div id="restaurantServerSelection" class="restaurant-table-selection hidden">
+          <div>
+            <strong id="selectedRestaurantServerName">Mesero</strong>
+            <span id="selectedRestaurantServerStatus"></span>
+          </div>
+          <div class="inventory-actions">
+            <button type="button" onclick="editSelectedRestaurantServer()">Editar</button>
+            <button id="btnToggleRestaurantServer" type="button" onclick="toggleSelectedRestaurantServer()">Desactivar</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: HISTORIAL DE ATENCIÓN (RESTAURANTE) -->
+      <section id="historial-mesas" class="tab-section hidden restaurant-tables-section">
+        <div class="restaurant-section-heading">
+          <div>
+            <h2>Historial de atención</h2>
+            <p>Consulta tiempos de mesa y productividad del equipo.</p>
+          </div>
+        </div>
+
+        <div class="sales-kpis restaurant-history-kpis">
+          <article><span>Mesas atendidas</span><strong id="restaurantHistorySessions">0</strong></article>
+          <article><span>Clientes atendidos</span><strong id="restaurantHistoryGuests">0</strong></article>
+          <article><span>Tiempo promedio</span><strong><span id="restaurantHistoryAverage">0</span> min</strong></article>
+          <article><span>Mayor duración</span><strong><span id="restaurantHistoryLongest">0</span> min</strong></article>
+        </div>
+
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Mesa</th><th>Mesero</th><th>Clientes</th><th>Inicio</th><th>Fin</th><th>Duración</th></tr></thead>
+            <tbody id="restaurantTableHistoryBody"></tbody>
+          </table>
+        </div>
+        <div id="restaurantHistoryAdminActions" class="inventory-actions hidden">
+          <button id="btnDeleteRestaurantHistory" type="button" onclick="deleteSelectedRestaurantHistory()" disabled>Eliminar</button>
+        </div>
+      </section>
+
+<section id="ventas" class="tab-section hidden">
+  <div class="app-card">
+    <h2>Ventas</h2>
+    <div class="sales-report-heading">
+      <div><h3>Resumen</h3><p>Rango: <span id="summaryLabel">Sin datos</span></p></div>
+    </div>
+    <div class="sales-kpis">
+      <article><span>Ventas netas</span><strong>$<span id="summaryTotal">0.00</span></strong></article>
+      <article><span>Valor descontado</span><strong>$<span id="summaryDiscount">0.00</span></strong></article>
+      <article><span>Productos de cortesía</span><strong id="summaryComplimentary">0</strong></article>
+      <article><span>Número de ventas</span><strong id="summaryTransactions">0</strong></article>
+      <article><span>Productos vendidos</span><strong id="summaryUnits">0</strong></article>
+      <article><span>Venta promedio</span><strong>$<span id="summaryAverage">0.00</span></strong></article>
+    </div>
+    <div class="sales-insights">
+      <section>
+        <h3>Productos más vendidos</h3>
+        <div class="table-scroll"><table><thead><tr><th>Producto</th><th>Unidades</th><th>Total</th></tr></thead><tbody id="topProductsBody"></tbody></table></div>
+      </section>
+      <section>
+        <h3>Métodos de pago</h3>
+        <div id="paymentSummary" class="payment-summary"></div>
+      </section>
+    </div>
+
+    <h3 class="sales-detail-title">Detalle de ventas</h3>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Fecha</th><th>Factura</th><th>Código</th><th>Nombre</th><th>Vendida</th><th>Devuelta</th><th>Precio</th><th>Total original</th><th>Neto actual</th><th>Estado</th><th>Motivo / Usuario</th><th>Tipo</th></tr></thead>
+        <tbody id="salesBody"></tbody>
+      </table>
+    </div>
+    <button onclick="loadSales(true)">Actualizar</button>
+    <button id="btnPrintSaleReceipt" onclick="printSelectedSaleReceipt()" disabled>Imprimir recibo</button>
+    <span id="saleDeleteActions">
+      <button id="btnReturnSale" onclick="returnSelectedSale()">Devolver producto</button>
+      <button id="btnCancelSale" class="danger-button" onclick="cancelSelectedSale()">Anular venta</button>
+    </span>
+
+  </div>
+</section>
+
+      <!-- TAB: Clientes -->
+<!-- CLIENTES -->
+<section id="clientes" class="tab-section app-card">
+  <h2>Agregar / Editar Clientes</h2>
+
+  <div class="form-row" style="margin-bottom:12px; display:flex; flex-wrap:wrap; gap:8px;">
+   <!-- FORMULARIO CLIENTE -->
+<select id="clientType">
+  <option value="Cedula">Cédula</option>
+  <option value="RUC">RUC</option>
+</select>
+
+<input id="clientIdNumber"    placeholder="Identificación" />
+<input id="clientRazonSocial" placeholder="Razón social" />
+<input id="clientNombreCom"   placeholder="Nombre comercial" />
+<input id="clientCiudad"      placeholder="Ciudad" />
+<input id="clientDireccion"   placeholder="Dirección" />
+<input id="clientEmail"       placeholder="Email" />
+<input id="clientTelefono"    placeholder="Teléfono" />
+<input id="clientCelular"     placeholder="Celular" />
+
+<button type="button" onclick="saveClient()">Guardar</button>
+<button type="button" onclick="clearClientForm()">Cancelar</button>
+</div>
+
+<h2 style="margin-top:18px;">Clientes</h2>
+<div class="table-scroll">
+<table border="1">
+  <thead>
+    <tr>
+      <th>Tipo</th>
+      <th>Identificación</th>
+      <th>Razón Social</th>
+      <th>Nombre Comercial</th>
+      <th>Ciudad</th>
+      <th>Email</th>
+      <th>Teléfono</th>
+      <th>Celular</th>
+    </tr>
+  </thead>
+  <tbody id="clientsBody"></tbody>
+</table>
+</div>
+
+
+<div class="pagination">
+  <button id="clientPrev" onclick="clientPrevPage()">Anterior</button>
+  <span id="clientPageInfo">1 / 1</span>
+  <button id="clientNext" onclick="clientNextPage()">Siguiente</button>
+</div>
+
+<div class="inventory-actions">
+  <button onclick="startEditClient()">Editar</button>
+  <button onclick="deleteSelectedClient()">Eliminar</button>
+</div>
+
+</section>
+
+      <!-- TAB: USUARIOS -->
+      <section id="usuarios" class="tab-section app-card hidden">
+        <h2>Usuarios</h2>
+        <h3>Cambiar contraseña</h3>
+        <div class="config-form-row">
+          <input id="currentPass" type="password" placeholder="Contraseña actual">
+          <input id="newPass" type="password" placeholder="Nueva contraseña">
+          <input id="newPass2" type="password" placeholder="Repetir nueva contraseña">
+          <button onclick="changePassword()">Guardar nueva contraseña</button>
+        </div>
+
+        <div id="storeUserAdminSettings">
+          <hr style="margin:20px 0;">
+          <h3>Usuarios de la tienda</h3>
+          <p class="settings-note">Crea cuentas con una contraseña temporal. En su primer acceso, cada persona deberá crear su propia contraseña.</p>
+          <p id="storeUserLicenseStatus" class="settings-note"></p>
+          <div class="store-user-form">
+            <label>Nombre <input id="storeUserName" autocomplete="name"></label>
+            <label>Correo <input id="storeUserEmail" type="email" autocomplete="email"></label>
+            <label>Contraseña temporal <input id="storeUserTemporaryPassword" type="password" autocomplete="new-password"></label>
+            <label>Rol <select id="storeUserRole"><option value="Usuario">Usuario</option><option value="Admin">Admin</option></select></label>
+            <button type="button" onclick="createStoreUser()">Agregar usuario</button>
+          </div>
+          <input id="storeUserSearch" class="store-user-search" placeholder="Buscar por nombre o correo" oninput="renderStoreUsers()">
+          <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th></tr></thead><tbody id="storeUsersBody"></tbody></table></div>
+          <div class="inventory-actions">
+            <button type="button" onclick="changeSelectedStoreUserRole()">Cambiar rol</button>
+            <button type="button" onclick="setSelectedStoreUserTemporaryPassword()">Contraseña temporal</button>
+            <button type="button" class="danger-button" onclick="deleteSelectedStoreUser()">Eliminar</button>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- TAB: CONFIGURACIÓN -->
+      <section id="config" class="tab-section app-card hidden">
+        <h2>Configuración</h2>
+
+        <h3>Stock Bajo</h3>
+        <label>
+          Umbral stock bajo:
+          <input id="lowThreshold" type="number" style="width:80px;">
+        </label>
+        <button onclick="saveThreshold()">Guardar umbral</button>
+
+        <div id="sriAdminSettings">
+          <hr style="margin:20px 0;">
+          <h3>Facturación Electrónica SRI</h3>
+          <p class="settings-note">Usa Pruebas hasta validar la firma electrónica y la autorización del SRI.</p>
+          <div class="sri-settings-grid">
+            <label>Ambiente <select id="sriEnvironment"><option value="TEST">Pruebas</option><option value="PRODUCTION">Producción</option></select></label>
+            <label>RUC <input id="sriRuc" maxlength="13"></label>
+            <label>Razón social <input id="sriLegalName"></label>
+            <label>Nombre comercial <input id="sriCommercialName"></label>
+            <label>Dirección matriz <input id="sriMainAddress"></label>
+            <label>Dirección establecimiento <input id="sriEstablishmentAddress"></label>
+            <label>Código establecimiento <input id="sriEstablishmentCode" maxlength="3" value="001"></label>
+            <label>Punto de emisión <input id="sriEmissionPoint" maxlength="3" value="001"></label>
+            <label>Próximo secuencial <input id="sriNextSequence" type="number" min="1" value="1"></label>
+            <label>Obligado a contabilidad <select id="sriAccountingRequired"><option value="NO">No</option><option value="SI">Sí</option></select></label>
+            <label>Contribuyente especial <input id="sriSpecialTaxpayerNumber"></label>
+            <label>Régimen tributario <input id="sriTaxRegime" placeholder="General, RIMPE, etc."></label>
+            <label>Correo remitente <input id="sriSenderEmail" type="email"></label>
+            <label>Correo copia Admin <input id="sriAdminCopyEmail" type="email"></label>
+          </div>
+          <div class="certificate-status">
+            Firma electrónica: <strong id="sriCertificateStatus">No configurada</strong>
+            <div class="certificate-install-form">
+              <input id="sriCertificateFile" type="file" accept=".p12,.pfx,application/x-pkcs12">
+              <input id="sriCertificatePassword" type="password" autocomplete="new-password" placeholder="Contraseña del certificado">
+              <button type="button" onclick="installSriCertificate()">Instalar firma</button>
+              <button type="button" onclick="removeSriCertificate()">Quitar firma</button>
+            </div>
+            <small>El archivo y su contraseña se cifran en el servidor y nunca se vuelven a mostrar.</small>
+          </div>
+          <button type="button" onclick="saveSriSettings()">Guardar configuración SRI</button>
+
+          <hr style="margin:20px 0;">
+          <h3>Registro de clientes en tablet</h3>
+          <p class="settings-note">Genera un enlace privado para que el cliente escriba sus propios datos desde la tablet. Regenerarlo invalida el enlace anterior.</p>
+          <div class="tablet-link-row">
+            <input id="clientIntakeLink" readonly placeholder="Genera un enlace para la tablet">
+            <button type="button" onclick="generateClientIntakeLink()">Generar enlace</button>
+            <button type="button" onclick="copyClientIntakeLink()">Copiar</button>
+            <button type="button" onclick="disableClientIntakeLink()">Desactivar</button>
+          </div>
+          <p>Estado: <strong id="clientIntakeStatus">No configurado</strong></p>
+        </div>
+      </section>
+    </main>
+
+    <!-- RIGHT PANEL: Inventario filters only for ahora -->
+
+    <aside class="right-panel">
+  <!-- INVENTARIO: filtros + importar/exportar -->
+  <div id="invFilters" class="filter-group">
+    <div class="filter-banner">FILTROS INVENTARIO</div>
+
+    <input
+      type="text"
+      id="invSearch"
+      placeholder="Buscar por código o nombre"
+      oninput="searchInventory()"
+    />
+
+    <button onclick="showLowStock()">Ver solo bajo stock</button>
+    <button onclick="showAllInventory()">Ver todo</button>
+
+    <div class="filter-banner" style="margin-top:16px;">IMPORTAR / EXPORTAR</div>
+    <input type="file" id="csvFile" accept=".csv" onchange="importCSV(event)" />
+    <button onclick="exportCSV()">📤 Exportar CSV</button>
+  </div>
+
+  <!-- === CLIENTES: filtros === -->
+<!-- CLIENTES -->
+<div id="filters-clients" class="filter-group hidden">
+  <div class="filter-banner">FILTROS CLIENTES</div>
+  <input
+    id="clientSearch"
+    type="text"
+    placeholder="Buscar por nombre o identificación"
+    oninput="searchClients()"
+  />
+</div>
+
+<div id="clients-import" class="filter-group hidden">
+  <div class="filter-banner">IMPORTAR / EXPORTAR</div>
+
+  <div id="clientImportAdminOnly">
+    <input type="file" id="clientCsvFile" accept=".csv" onchange="importClientsCSV(event)" />
+    <button type="button" onclick="downloadClientTemplate()">Descargar plantilla</button>
+  </div>
+
+  <button type="button" onclick="exportClientsCSV()">
+    Exportar clientes (CSV)
+  </button>
+</div>
+
+
+  <!-- VENTAS: SOLO para la pestaña Ventas -->
+  <div id="salesFilters" class="filter-group hidden">
+    <div class="filter-banner">FILTROS VENTAS</div>
+
+    <div class="sales-quick-filters">
+      <button onclick="setSalesQuickRange('today', this)">Hoy</button>
+      <button onclick="setSalesQuickRange('yesterday', this)">Ayer</button>
+      <button onclick="setSalesQuickRange('week', this)">Últimos 7 días</button>
+      <button onclick="setSalesQuickRange('month', this)">Este mes</button>
+    </div>
+
+    <div class="ventas-date-group">
+      <label>
+        Desde:
+        <input type="date" id="fromDate" />
+      </label>
+      <label>
+        Hasta:
+        <input type="date" id="toDate" />
+      </label>
+    </div>
+
+    <button onclick="applyCustomSalesFilter()">Seleccionar fechas</button>
+    <button onclick="clearSalesFilter()">Todas las ventas</button>
+    <button onclick="exportSales()">Exportar ventas (CSV)</button>
+  </div>
+
+  <!-- HISTORIAL DE ATENCIÓN: filtros y exportación -->
+  <div id="restaurantHistoryFilters" class="filter-group hidden">
+    <div class="filter-banner">FILTROS HISTORIAL</div>
+
+    <div class="restaurant-history-side-filters">
+      <label>
+        Desde:
+        <input id="restaurantHistoryFrom" type="date" />
+      </label>
+      <label>
+        Hasta:
+        <input id="restaurantHistoryTo" type="date" />
+      </label>
+      <label>
+        Mesero:
+        <select id="restaurantHistoryServer"><option value="">Todos</option></select>
+      </label>
+    </div>
+
+    <button type="button" onclick="applyRestaurantHistoryFilters()">Seleccionar fechas</button>
+    <button type="button" onclick="clearRestaurantHistoryFilters()">Todas las atenciones</button>
+
+    <div class="filter-banner" style="margin-top:16px;">EXPORTAR</div>
+    <button type="button" onclick="exportRestaurantHistory()">Exportar historial (CSV)</button>
+  </div>
+
+  <div id="restaurantMenuTools" class="filter-group hidden">
+    <div class="filter-banner">IMPORTAR MENÚ</div>
+    <p class="settings-note">Hoja CSV: código, nombre, categoría, precio, cantidad, disponibilidad y opciones.</p>
+    <input id="menuCsvFile" type="file" accept=".csv,text/csv" onchange="importRestaurantMenu(event)">
+    <button type="button" onclick="downloadMenuTemplate()">Descargar plantilla</button>
+    <button type="button" onclick="exportRestaurantMenu()">Exportar menú (CSV)</button>
+  </div>
+
+  <div id="kitchenPerformanceFilters" class="filter-group hidden">
+    <div class="filter-banner">RENDIMIENTO COCINA</div>
+    <div class="sales-quick-filters">
+      <button type="button" onclick="setKitchenPerformanceRange('today', this)">Hoy</button>
+      <button type="button" onclick="setKitchenPerformanceRange('week', this)">Últimos 7 días</button>
+      <button type="button" onclick="setKitchenPerformanceRange('month', this)">Este mes</button>
+      <button type="button" onclick="clearKitchenPerformanceFilters()">Todo</button>
+    </div>
+    <div class="restaurant-history-side-filters">
+      <label>Desde: <input id="kitchenPerformanceFrom" type="date"></label>
+      <label>Hasta: <input id="kitchenPerformanceTo" type="date"></label>
+    </div>
+    <button type="button" onclick="applyKitchenPerformanceFilters()">Seleccionar fechas</button>
+    <div class="filter-banner" style="margin-top:16px;">EXPORTAR</div>
+    <button type="button" onclick="exportKitchenPerformance()">Exportar reporte (CSV)</button>
+  </div>
+</aside>
+
+<div id="productModifierModal" class="modifier-modal hidden" role="dialog" aria-modal="true" aria-labelledby="modifierProductName">
+  <div class="modifier-window">
+    <div class="modifier-window-heading">
+      <div><h2 id="modifierProductName">Personalizar producto</h2><p id="modifierProductPrice"></p></div>
+      <button type="button" class="modifier-close" aria-label="Cerrar" onclick="closeProductModifierModal()">×</button>
+    </div>
+    <div id="modifierGroups"></div>
+    <p id="modifierValidation" class="modifier-validation hidden"></p>
+    <div class="modifier-total"><span>Total por unidad</span><strong>$<span id="modifierUnitTotal">0.00</span></strong></div>
+    <div class="modifier-actions">
+      <button type="button" onclick="closeProductModifierModal()">Cancelar</button>
+      <button type="button" class="primary-button" onclick="confirmProductModifiers()">Agregar al pedido</button>
+    </div>
+  </div>
+</div>
+
+<div id="splitBillModal" class="modifier-modal hidden" role="dialog" aria-modal="true" aria-labelledby="splitBillTitle">
+  <div class="modifier-window split-bill-window">
+    <div class="modifier-window-heading">
+      <div><h2 id="splitBillTitle">Dividir cuenta</h2><p>Elige cuánto se pagará ahora. El resto seguirá en la mesa.</p></div>
+      <button type="button" class="modifier-close" aria-label="Cerrar" onclick="closeSplitBillModal()">×</button>
+    </div>
+    <div class="table-scroll"><table class="split-bill-table"><thead><tr><th>Producto</th><th>En cuenta</th><th>Pagar ahora</th><th>Total</th></tr></thead><tbody id="splitBillBody"></tbody></table></div>
+    <div class="modifier-total"><span>Total de este pago</span><strong>$<span id="splitBillTotal">0.00</span></strong></div>
+    <div class="modifier-actions">
+      <button type="button" onclick="closeSplitBillModal()">Cancelar</button>
+      <button type="button" class="primary-button" onclick="confirmSplitBill()">Continuar al pago</button>
+    </div>
+  </div>
+</div>
+
+<section id="thermalReceipt" class="thermal-receipt print-only" aria-hidden="true"></section>
+
+<script src="js/dialogs.js"></script>
+<script src="js/mesas.js"></script>
+<script src="js/cocina.js"></script>
+<script src="js/rendimiento-cocina.js"></script>
+<script>
+const API = "";
+const company = localStorage.getItem("company");
+const userRole = localStorage.getItem("role") || "Usuario";
+let businessType = localStorage.getItem("businessType") || "SHOP";
+let enabledModules = ["inicio", "inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config"];
+
+function applyModuleVisibility() {
+  document.querySelectorAll("[data-module]").forEach(element => {
+    const roleAllowed = !element.hasAttribute("data-admin-only") || userRole === "Admin";
+    element.classList.toggle("hidden", !enabledModules.includes(element.dataset.module) || !roleAllowed);
+  });
+  const restaurantGroup = document.getElementById("restaurantNavGroup");
+  const hasRestaurantModules = ["mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"].some(module => enabledModules.includes(module));
+  if (restaurantGroup) {
+    restaurantGroup.classList.toggle("hidden", !hasRestaurantModules);
+    if (businessType === "RESTAURANT") {
+      const firstModule = document.getElementById("nav-inicio");
+      if (firstModule && restaurantGroup.nextElementSibling !== firstModule) firstModule.parentElement.insertBefore(restaurantGroup, firstModule);
+    }
+  }
+}
+
+function toggleRestaurantMenu(forceOpen) {
+  const items = document.getElementById("restaurantNavItems");
+  const button = document.getElementById("nav-restaurante");
+  const arrow = document.getElementById("restaurantNavArrow");
+  if (!items || !button || !arrow) return;
+  const open = typeof forceOpen === "boolean" ? forceOpen : items.classList.contains("hidden");
+  items.classList.toggle("hidden", !open);
+  button.setAttribute("aria-expanded", String(open));
+  arrow.textContent = open ? "⌄" : "›";
+}
+
+async function loadStoreContext() {
+  try {
+    const res = await fetch(`${API}/store/context`, { headers: authHeaders() });
+    if (!res.ok) return;
+    const context = await res.json();
+    businessType = context.businessType || "SHOP";
+    enabledModules = Array.isArray(context.enabledModules) ? context.enabledModules : enabledModules;
+    localStorage.setItem("businessType", businessType);
+    applyModuleVisibility();
+    renderRestaurantQuickMenu();
+  } catch (err) {
+    console.error("No se pudo cargar el tipo de negocio:", err);
+  }
+}
+
+
+if (!company) {
+  alert("Por favor inicia sesión.");
+  location.href = "index.html";
+}
+
+// Mostrar nombre de tienda al cargar
+window.addEventListener("DOMContentLoaded", () => {
+  applyModuleVisibility();
+  showTab("inicio");
+  loadStoreContext();
+  initializeRestaurantTables();
+  initializeRestaurantServers();
+  initializeKitchen();
+  const label = document.getElementById("storeNameLabel");
+  if (label) {
+    label.textContent = company;
+  }
+  
+    const deleteBtn = document.getElementById("btnDelete");
+  if (deleteBtn && userRole !== "Admin") {
+    deleteBtn.disabled = true;
+    deleteBtn.title = "Solo un administrador puede eliminar productos";
+  }
+  const saleDeleteActions = document.getElementById("saleDeleteActions");
+  if (saleDeleteActions && userRole !== "Admin") {
+    saleDeleteActions.style.display = "none";
+  }
+  const sriAdminSettings = document.getElementById("sriAdminSettings");
+  if (sriAdminSettings) sriAdminSettings.style.display = userRole === "Admin" ? "block" : "none";
+  const storeUserAdminSettings = document.getElementById("storeUserAdminSettings");
+  if (storeUserAdminSettings) storeUserAdminSettings.style.display = userRole === "Admin" ? "block" : "none";
+  if (userRole === "Admin") {
+    loadSriSettings();
+    loadClientIntakeStatus();
+    loadStoreUsers();
+  }
+  const cashRegisterAdminHistory = document.getElementById("cashRegisterAdminHistory");
+  if (cashRegisterAdminHistory) cashRegisterAdminHistory.classList.toggle("hidden", userRole !== "Admin");
+  const clientImportAdminOnly = document.getElementById("clientImportAdminOnly");
+  if (clientImportAdminOnly) clientImportAdminOnly.style.display = userRole === "Admin" ? "block" : "none";
+  ["menuProductAvailableLabel", "menuProductModifiersLabel"].forEach(id => {
+    document.getElementById(id)?.classList.toggle("hidden", userRole !== "Admin");
+  });
+  renderCart();
+  updatePaymentFields();
+  window.addEventListener("resize", applyCartColumnWidths);
+});
+
+let selectedProduct = null;
+let allProducts = [];
+let filteredProducts = [];
+let currentPage = 1;
+const pageSize = 100;
+
+let cart = [];
+const CART_COLUMN_DEFAULTS = [
+  { id: "code", label: "Código", width: 90 },
+  { id: "name", label: "Nombre", width: 150 },
+  { id: "quantity", label: "Cant.", width: 105 },
+  { id: "price", label: "Precio", width: 85 },
+  { id: "discount", label: "Desc. %", width: 170 },
+  { id: "total", label: "Total", width: 105 },
+  { id: "note", label: "Nota", width: 175 },
+  { id: "actions", label: "Acciones", width: 90 }
+];
+let cartColumnLayout = loadCartColumnLayout();
+let draggedCartColumn = null;
+let allSales = [];
+let selectedSale = null;
+let allClients = [];
+let invoiceType = "CONSUMIDOR_FINAL";
+let selectedInvoiceClient = null;
+let tabletClientPolling = null;
+let tabletClaimInProgress = false;
+let sriCertificateValidated = false;
+let filteredSales = [];
+let storeUsers = [];
+let selectedStoreUser = null;
+let currentStoreUserId = null;
+let storeUserLimit = 0;
+let activeRestaurantOrder = null;
+let restaurantOrderDirty = false;
+let restaurantFullCart = [];
+let restaurantSplitMode = false;
+let selectedMenuProduct = null;
+let quickMenuCategory = "Todas";
+let pendingModifierProduct = null;
+let currentCashRegister = null;
+let cashRegisterHistory = [];
+
+
+// --- NUEVO showTab para layout + filtros ---
+
+function showTab(tabId) {
+  // ocultar todas las secciones
+  document.querySelectorAll(".tab-section").forEach(sec => {
+    sec.classList.add("hidden");
+  });
+  const sec = document.getElementById(tabId);
+  if (sec) sec.classList.remove("hidden");
+
+  // marcar botón de navegación activo
+  ["inicio", "inventario", "pos", "caja", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
+    const btn = document.getElementById(`nav-${id}`);
+    if (btn) btn.classList.toggle("active", id === tabId);
+  });
+  const restaurantTabs = ["mesas", "meseros", "menu", "historial-mesas", "cocina", "rendimiento-cocina", "reloj"];
+  const restaurantButton = document.getElementById("nav-restaurante");
+  if (restaurantButton) restaurantButton.classList.toggle("active", restaurantTabs.includes(tabId));
+  if (restaurantTabs.includes(tabId)) toggleRestaurantMenu(true);
+
+  // cargar datos según pestaña
+  if (tabId === "inicio") loadDashboardSummary();
+  if (tabId === "ventas")   loadSales();
+  if (tabId === "caja") loadCashRegister();
+  if (tabId === "clientes") loadClients();
+  if (tabId === "usuarios" && userRole === "Admin") loadStoreUsers();
+  if (tabId === "mesas") loadRestaurantTables();
+  if (tabId === "meseros") loadRestaurantServers();
+  if (tabId === "historial-mesas") loadRestaurantTableHistory();
+  if (tabId === "menu") loadProducts();
+  if (tabId === "cocina") loadKitchenOrders();
+  if (tabId === "rendimiento-cocina" && userRole === "Admin") loadKitchenPerformance();
+
+  // actualizar panel derecho
+  updateRightPanel(tabId);
+}
+
+
+function updateRightPanel(tabId) {
+  const invFilters    = document.getElementById("invFilters");        // inventario
+  const salesFilters  = document.getElementById("salesFilters");      // ventas
+  const clientFilters = document.getElementById("filters-clients");   // clientes filtros
+  const clientImport  = document.getElementById("clients-import");    // clientes importar/exportar
+  const historyFilters = document.getElementById("restaurantHistoryFilters");
+  const menuTools = document.getElementById("restaurantMenuTools");
+  const kitchenPerformanceFilters = document.getElementById("kitchenPerformanceFilters");
+
+  const showInv     = (tabId === "inventario");
+  const showSales   = (tabId === "ventas");
+  const showClients = (tabId === "clientes");
+  const showHistory = (tabId === "historial-mesas");
+  const showMenu = (tabId === "menu" && userRole === "Admin");
+  const showKitchenPerformance = (tabId === "rendimiento-cocina" && userRole === "Admin");
+
+  if (invFilters) {
+    invFilters.classList.toggle("hidden", !showInv);
+  }
+
+  if (salesFilters) {
+    salesFilters.classList.toggle("hidden", !showSales);
+  }
+
+  if (clientFilters) {
+    clientFilters.classList.toggle("hidden", !showClients);
+  }
+
+  if (clientImport) {
+    clientImport.classList.toggle("hidden", !showClients);
+  }
+
+  if (historyFilters) {
+    historyFilters.classList.toggle("hidden", !showHistory);
+  }
+  if (menuTools) menuTools.classList.toggle("hidden", !showMenu);
+  if (kitchenPerformanceFilters) kitchenPerformanceFilters.classList.toggle("hidden", !showKitchenPerformance);
+}
+
+// ------- INICIO -------
+
+function homeMoney(value) {
+  return Number(value || 0).toFixed(2);
+}
+
+async function loadDashboardSummary() {
+  const dateLabel = document.getElementById("homeDateLabel");
+  if (dateLabel) dateLabel.textContent = "Actualizando resumen...";
+  try {
+    const res = await fetch(`${API}/dashboard/summary?threshold=${encodeURIComponent(getThreshold())}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "No se pudo cargar el resumen.");
+    const today = data.today || {};
+    const payments = today.payments || {};
+    document.getElementById("homeSalesTotal").textContent = homeMoney(today.total);
+    document.getElementById("homeTransactions").textContent = Number(today.transactions || 0);
+    document.getElementById("homeAverage").textContent = homeMoney(today.average);
+    document.getElementById("homeUnits").textContent = Number(today.units || 0);
+    document.getElementById("homeDiscount").textContent = homeMoney(today.discount);
+    document.getElementById("homeComplimentary").textContent = Number(today.complimentary || 0);
+    document.getElementById("homeCashPayments").textContent = homeMoney(payments.Efectivo);
+    document.getElementById("homeCardPayments").textContent = homeMoney(payments.Tarjeta);
+    document.getElementById("homeTransferPayments").textContent = homeMoney(payments.Transferencia);
+    document.getElementById("homeOtherPayments").textContent = homeMoney(payments.Otros);
+    document.getElementById("homeOtherPaymentsRow").classList.toggle("hidden", !Number(payments.Otros || 0));
+
+    const parsedDate = new Date(`${data.date}T12:00:00`);
+    dateLabel.textContent = Number.isNaN(parsedDate.getTime())
+      ? data.date
+      : parsedDate.toLocaleDateString("es-EC", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
+    const status = document.getElementById("homeCashStatus");
+    const registerOpen = Boolean(data.cashRegister?.open);
+    status.textContent = registerOpen ? "Caja abierta" : "Caja cerrada";
+    status.className = `cash-register-status ${registerOpen ? "open" : "closed"}`;
+
+    const comparison = document.getElementById("homeComparison");
+    const difference = Number(data.comparison?.difference || 0);
+    const percentage = data.comparison?.percentage;
+    comparison.className = `home-comparison ${difference > 0 ? "positive" : difference < 0 ? "negative" : "neutral"}`;
+    if (percentage === null || percentage === undefined) {
+      document.getElementById("homeComparisonText").textContent = Number(today.total || 0) > 0
+        ? `Ayer no hubo ventas. Hoy llevas $${homeMoney(today.total)}.`
+        : "Ayer y hoy todavía no tienen ventas.";
+    } else if (difference === 0) {
+      document.getElementById("homeComparisonText").textContent = `Igual que ayer: $${homeMoney(today.total)}.`;
+    } else {
+      document.getElementById("homeComparisonText").textContent = `${difference > 0 ? "↑" : "↓"} ${Math.abs(Number(percentage)).toFixed(1)}% (${difference > 0 ? "+" : "-"}$${homeMoney(Math.abs(difference))}) frente a ayer.`;
+    }
+
+    const lowStock = Array.isArray(data.lowStock) ? data.lowStock : [];
+    document.getElementById("homeLowStockSummary").textContent = data.lowStockCount
+      ? `${data.lowStockCount} producto(s) con ${data.threshold} unidades o menos.`
+      : `Todo está por encima del umbral de ${data.threshold} unidades.`;
+    const lowStockBody = document.getElementById("homeLowStockBody");
+    lowStockBody.innerHTML = "";
+    lowStock.forEach(product => {
+      const row = document.createElement("tr");
+      row.innerHTML = "<td></td><td></td><td></td>";
+      row.children[0].textContent = product.name || "Producto";
+      row.children[1].textContent = product.code || "—";
+      row.children[2].textContent = Number(product.quantity || 0);
+      lowStockBody.appendChild(row);
+    });
+    if (!lowStock.length) lowStockBody.innerHTML = '<tr><td colspan="3" class="empty-table">No hay alertas de stock.</td></tr>';
+
+    const restaurantSection = document.getElementById("homeRestaurantSummary");
+    restaurantSection.classList.toggle("hidden", !data.restaurant);
+    if (data.restaurant) {
+      document.getElementById("homeOpenTables").textContent = Number(data.restaurant.openTables || 0);
+      document.getElementById("homeActiveOrders").textContent = Number(data.restaurant.activeOrders || 0);
+      document.getElementById("homePreparationTime").textContent = Number(data.restaurant.averagePreparationMinutes || 0).toFixed(1);
+    }
+  } catch (err) {
+    console.error("Error cargando el resumen:", err);
+    if (dateLabel) dateLabel.textContent = "No se pudo cargar el resumen. Vuelve a entrar a Inicio para intentarlo nuevamente.";
+  }
+}
+
+// ------- CAJA -------
+
+function cashMoney(value) {
+  return Number(value || 0).toFixed(2);
+}
+
+function cashDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+async function loadCashRegister() {
+  const res = await fetch(`${API}/cash-register/current`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cargar la caja.");
+  currentCashRegister = data.open ? data : null;
+  renderCashRegister();
+  if (userRole === "Admin") await loadCashRegisterHistory();
+}
+
+function renderCashRegister() {
+  const isOpen = Boolean(currentCashRegister?.open);
+  document.getElementById("cashRegisterClosed").classList.toggle("hidden", isOpen);
+  document.getElementById("cashRegisterOpen").classList.toggle("hidden", !isOpen);
+  const status = document.getElementById("cashRegisterStatus");
+  status.textContent = isOpen ? "Abierta" : "Cerrada";
+  status.className = `cash-register-status ${isOpen ? "open" : "closed"}`;
+  if (!isOpen) return;
+
+  const session = currentCashRegister.session || {};
+  const totals = currentCashRegister.totals || {};
+  document.getElementById("cashRegisterOpenedBy").textContent = session.openedByName || "—";
+  document.getElementById("cashRegisterOpenedAt").textContent = cashDateTime(session.openedAt);
+  document.getElementById("cashRegisterOpening").textContent = cashMoney(session.openingAmount);
+  document.getElementById("cashRegisterCashSales").textContent = cashMoney(totals.cashSales);
+  document.getElementById("cashRegisterCardSales").textContent = cashMoney(totals.cardSales);
+  document.getElementById("cashRegisterTransferSales").textContent = cashMoney(totals.transferSales);
+  document.getElementById("cashRegisterMovementsTotal").textContent = `+$${cashMoney(totals.cashIn)} / -$${cashMoney(totals.cashOut)}`;
+  document.getElementById("cashRegisterExpected").textContent = cashMoney(totals.expectedAmount);
+  document.getElementById("cashRegisterCountedAmount").value = "";
+  updateCashRegisterDifference();
+
+  const tbody = document.getElementById("cashMovementsBody");
+  tbody.innerHTML = "";
+  (currentCashRegister.movements || []).forEach(item => {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td></td><td></td><td></td><td></td><td></td>";
+    row.children[0].textContent = cashDateTime(item.createdAt);
+    row.children[1].textContent = item.type === "RETIRO" ? "Retiro" : "Entrada";
+    row.children[2].textContent = `${item.type === "RETIRO" ? "-" : "+"}$${cashMoney(item.amount)}`;
+    row.children[3].textContent = item.reason || "—";
+    row.children[4].textContent = item.recordedByName || "—";
+    tbody.appendChild(row);
+  });
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="5" class="empty-table">No hay movimientos manuales en este turno.</td></tr>';
+}
+
+async function openCashRegister() {
+  const input = document.getElementById("cashRegisterOpeningAmount");
+  const openingAmount = Number(input.value);
+  if (!Number.isFinite(openingAmount) || openingAmount < 0) return alert("Ingresa un fondo inicial válido.");
+  if (!await appConfirm(`¿Abrir la caja con $${openingAmount.toFixed(2)}?`)) return;
+  const res = await fetch(`${API}/cash-register/open`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ openingAmount })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo abrir la caja.");
+  currentCashRegister = data;
+  input.value = "0";
+  renderCashRegister();
+}
+
+async function addCashMovement() {
+  const type = document.getElementById("cashMovementType").value;
+  const amountInput = document.getElementById("cashMovementAmount");
+  const reasonInput = document.getElementById("cashMovementReason");
+  const amount = Number(amountInput.value);
+  const reason = reasonInput.value.trim();
+  if (!Number.isFinite(amount) || amount <= 0 || !reason) return alert("Ingresa un valor mayor a cero y escribe el motivo.");
+  if (!await appConfirm(`¿Registrar ${type === "RETIRO" ? "un retiro" : "una entrada"} de $${amount.toFixed(2)}?`)) return;
+  const res = await fetch(`${API}/cash-register/movements`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ type, amount, reason })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo registrar el movimiento.");
+  currentCashRegister = data;
+  amountInput.value = "";
+  reasonInput.value = "";
+  renderCashRegister();
+}
+
+function updateCashRegisterDifference() {
+  const element = document.getElementById("cashRegisterDifference");
+  if (!element) return;
+  const raw = document.getElementById("cashRegisterCountedAmount").value;
+  const expected = Number(currentCashRegister?.totals?.expectedAmount || 0);
+  const difference = raw === "" ? 0 : Number(raw) - expected;
+  element.textContent = `${difference > 0 ? "+" : difference < 0 ? "-" : ""}$${Math.abs(difference).toFixed(2)}`;
+  element.classList.toggle("cash-register-positive", difference > 0);
+  element.classList.toggle("cash-register-negative", difference < 0);
+}
+
+async function closeCashRegister() {
+  const raw = document.getElementById("cashRegisterCountedAmount").value;
+  const countedAmount = Number(raw);
+  if (raw === "" || !Number.isFinite(countedAmount) || countedAmount < 0) return alert("Ingresa el efectivo contado en caja.");
+  const expected = Number(currentCashRegister?.totals?.expectedAmount || 0);
+  const difference = countedAmount - expected;
+  const detail = `Esperado: $${expected.toFixed(2)}\nContado: $${countedAmount.toFixed(2)}\nDiferencia: ${difference >= 0 ? "+" : "-"}$${Math.abs(difference).toFixed(2)}`;
+  if (!await appConfirm(`${detail}\n\n¿Cerrar esta caja?`)) return;
+  const res = await fetch(`${API}/cash-register/close`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ countedAmount })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cerrar la caja.");
+  currentCashRegister = null;
+  renderCashRegister();
+  if (userRole === "Admin") await loadCashRegisterHistory();
+  alert(`Caja cerrada.\n${detail}`);
+}
+
+async function loadCashRegisterHistory() {
+  const res = await fetch(`${API}/cash-register/history`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cargar el historial de cierres.");
+  cashRegisterHistory = Array.isArray(data) ? data : [];
+  const tbody = document.getElementById("cashRegisterHistoryBody");
+  tbody.innerHTML = "";
+  cashRegisterHistory.forEach(item => {
+    const difference = Number(item.difference || 0);
+    const row = document.createElement("tr");
+    row.innerHTML = "<td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>";
+    row.children[0].textContent = cashDateTime(item.openedAt);
+    row.children[1].textContent = cashDateTime(item.closedAt);
+    row.children[2].textContent = `${item.openedByName || "—"} / ${item.closedByName || "—"}`;
+    row.children[3].textContent = `$${cashMoney(item.cashSales)}`;
+    row.children[4].textContent = `$${cashMoney(item.cardSales)}`;
+    row.children[5].textContent = `$${cashMoney(item.transferSales)}`;
+    row.children[6].textContent = `$${cashMoney(item.expectedAmount)}`;
+    row.children[7].textContent = `$${cashMoney(item.countedAmount)}`;
+    row.children[8].textContent = `${difference > 0 ? "+" : difference < 0 ? "-" : ""}$${Math.abs(difference).toFixed(2)}`;
+    row.children[8].className = difference > 0 ? "cash-register-positive" : difference < 0 ? "cash-register-negative" : "";
+    tbody.appendChild(row);
+  });
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="9" class="empty-table">Todavía no hay cajas cerradas.</td></tr>';
+}
+
+function exportCashRegisterHistory() {
+  if (!cashRegisterHistory.length) return alert("No hay cierres para exportar.");
+  const rows = [["apertura", "cierre", "abrio", "cerro", "fondo_inicial", "ventas_efectivo", "ventas_tarjeta", "ventas_transferencia", "entradas", "retiros", "efectivo_esperado", "efectivo_contado", "diferencia"]];
+  cashRegisterHistory.forEach(item => rows.push([
+    item.openedAt, item.closedAt, item.openedByName, item.closedByName,
+    cashMoney(item.openingAmount), cashMoney(item.cashSales), cashMoney(item.cardSales), cashMoney(item.transferSales),
+    cashMoney(item.cashIn), cashMoney(item.cashOut), cashMoney(item.expectedAmount), cashMoney(item.countedAmount), cashMoney(item.difference)
+  ]));
+  const cell = value => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const blob = new Blob([rows.map(row => row.map(cell).join(",")).join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "cierres-caja.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+
+// ------- STOCK BAJO (UMBRAL) -------
+
+function getThreshold() {
+  const key = `lowThreshold_${company}`;
+  const val = localStorage.getItem(key);
+  return val ? Number(val) : 5; // valor por defecto
+}
+
+function saveThreshold() {
+  const input = document.getElementById("lowThreshold");
+  const value = Number(input.value || 0);
+  const key = `lowThreshold_${company}`;
+  localStorage.setItem(key, value);
+  loadProducts();
+}
+
+function applyLowStockHighlight() {
+  const threshold = getThreshold();
+  const rows = document.querySelectorAll("#tableBody tr");
+  rows.forEach(row => {
+    const qty = Number(row.children[2].innerText || 0);
+    if (qty <= threshold) {
+      row.style.backgroundColor = "#ffe0e0"; // fondo rojo claro
+    } else {
+      row.style.backgroundColor = "";
+    }
+  });
+}
+
+function showLowStock() {
+  const threshold = getThreshold(); // ya la tienes
+  // filtrar los productos en memoria
+  filteredProducts = allProducts.filter(p => Number(p.quantity) <= threshold);
+  currentPage = 1;        // empezar desde la primera página del filtro
+  renderInventoryTable(); // vuelve a dibujar usando filteredProducts
+}
+
+function showAllInventory() {
+  filteredProducts = [];   // sin filtro => usa allProducts
+  currentPage = 1;
+  renderInventoryTable();
+  renderRestaurantQuickMenu();
+  renderMenuManagement();
+}
+
+
+// ------- INVENTARIO CRUD -------
+
+async function loadProducts() {
+  const res = await fetch(`${API}/products/${company}`, { cache: "no-store" });
+  const data = await res.json();
+
+  if (!Array.isArray(data)) {
+    console.error("Error cargando productos:", data);
+    return;
+  }
+
+  allProducts = data;
+  filteredProducts = data.slice();   // copia
+  currentPage = 1;
+
+  const thrInput = document.getElementById("lowThreshold");
+  if (thrInput) thrInput.value = getThreshold();
+
+  renderInventoryTable();
+  renderRestaurantQuickMenu();
+  renderMenuManagement();
+}
+
+function renderInventoryTable() {
+  const tbody = document.getElementById("tableBody");
+  tbody.innerHTML = "";
+
+  const source = filteredProducts.length ? filteredProducts : allProducts;
+  const totalPages = Math.max(1, Math.ceil(source.length / pageSize));
+
+  if (currentPage > totalPages) currentPage = totalPages;
+
+  const start = (currentPage - 1) * pageSize;
+  const items = source.slice(start, start + pageSize);
+
+  items.forEach(p => {
+    tbody.innerHTML += `
+      <tr data-id="${p.id}" onclick="selectRow(this, ${p.id})">
+        <td>${p.code}</td>
+        <td>${p.name}</td>
+        <td>${p.quantity}</td>
+        <td>$${p.price}</td>
+      </tr>
+    `;
+  });
+
+  const pageInfo = document.getElementById("pageInfo");
+  if (pageInfo) pageInfo.textContent = `${currentPage} / ${totalPages}`;
+
+  const prevBtn = document.querySelector(".pagination button:nth-child(1)");
+  const nextBtn = document.querySelector(".pagination button:nth-child(3)");
+  if (prevBtn) prevBtn.disabled = currentPage <= 1;
+  if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+
+  applyLowStockHighlight();
+
+  // Ocultar botón Eliminar para rol "Usuario"
+  const deleteBtn = document.getElementById("btnDelete");
+  if (deleteBtn) {
+    deleteBtn.style.display =
+      (userRole === "Usuario") ? "none" : "inline-block";
+  }
+  // Ambos roles pueden editar; Usuario solo puede cambiar código y nombre.
+  const editBtn = document.getElementById("btnEdit");
+  if (editBtn) {
+    editBtn.style.display = "inline-block";
+  }
+}
+
+async function saveProduct() {
+  const id = document.getElementById("productId").value;
+
+  const payload = {
+    code: document.getElementById("code").value.trim(),
+    name: document.getElementById("name").value.trim(),
+    quantity: Number(document.getElementById("qty").value || 0),
+    price: Number(document.getElementById("price").value || 0)
+  };
+
+  if (!payload.code) {
+    alert("El código es obligatorio.");
+    return;
+  }
+
+  let url, method;
+
+  if (id) {
+    url = `${API}/products/${company}/${id}`;
+    method = "PUT";
+  } else {
+    url = `${API}/products/${company}`;
+    method = "POST";
+  }
+
+  const res = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders()
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    alert(data.error || "Error al guardar producto.");
+    return;
+  }
+
+  clearForm();
+  loadProducts();
+}
+
+function editProduct(p) {
+  document.getElementById("productId").value = p.id;
+  document.getElementById("code").value = p.code || "";
+  document.getElementById("name").value = p.name || "";
+  document.getElementById("qty").value = p.quantity;
+  document.getElementById("price").value = p.price;
+  document.getElementById("qty").disabled = userRole !== "Admin";
+  document.getElementById("price").disabled = userRole !== "Admin";
+}
+
+async function deleteProduct(id) {
+  if (!id) return;
+  await fetch(`${API}/products/${company}/${id}`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  loadProducts();
+}
+
+function selectRow(rowEl, id) {
+  selectedProduct = allProducts.find(p => p.id === id) || null;
+
+  const rows = document.querySelectorAll("#tableBody tr");
+  rows.forEach(r => r.classList.remove("selected-row"));
+  rowEl.classList.add("selected-row");
+}
+
+function editSelected() {
+  if (!selectedProduct) {
+    alert("Selecciona un producto de la tabla primero.");
+    return;
+  }
+  editProduct(selectedProduct);
+  showTab("inventario");
+}
+
+async function deleteSelected() {
+  // Bloqueo adicional por seguridad
+  if (userRole !== "Admin") {
+    alert("No tienes permiso para eliminar productos.");
+    return;
+  }
+
+  if (!selectedProduct) {
+    alert("Selecciona un producto de la tabla primero.");
+    return;
+  }
+
+  if (!await appConfirm("¿Eliminar este producto?")) return;
+
+  await fetch(`${API}/products/${company}/${selectedProduct.id}`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+
+  selectedProduct = null;
+  loadProducts();
+}
+
+function clearForm() {
+  document.getElementById("productId").value = "";
+  document.getElementById("code").value = "";
+  document.getElementById("name").value = "";
+  document.getElementById("qty").value = "";
+  document.getElementById("price").value = "";
+  document.getElementById("qty").disabled = false;
+  document.getElementById("price").disabled = false;
+}
+
+function searchInventory() {
+  const input = document.getElementById("invSearch");
+  const q = (input.value || "").trim().toLowerCase();
+
+  if (!q) {
+    filteredProducts = allProducts.slice();
+  } else {
+    filteredProducts = allProducts.filter(p => {
+      const code = String(p.code || "").toLowerCase();
+      const name = String(p.name || "").toLowerCase();
+      return code.includes(q) || name.includes(q);
+    });
+  }
+
+  currentPage = 1;
+  renderInventoryTable();
+}
+
+function nextPage() {
+  const source = filteredProducts.length ? filteredProducts : allProducts;
+  const totalPages = Math.max(1, Math.ceil(source.length / pageSize));
+  if (currentPage < totalPages) {
+    currentPage++;
+    renderInventoryTable();
+  }
+}
+
+function prevPage() {
+  if (currentPage > 1) {
+    currentPage--;
+    renderInventoryTable();
+  }
+}
+
+
+// ------- CLIENTES -------
+
+let filteredClients = [];
+let currentClientPage = 1;
+const clientPageSize = 100;
+
+let selectedClientId = null;   // fila seleccionada en la tabla
+let editingClientId = null;    // si no es null, estamos editando
+
+async function loadClients() {
+  try {
+    const res = await fetch(`${API}/clients/${company}`);
+    const data = await res.json();
+
+    if (!Array.isArray(data)) {
+      console.error("Error cargando clientes:", data);
+      return;
+    }
+
+    allClients = data;
+    filteredClients = allClients;
+    currentClientPage = 1;
+    renderClientsTable();
+  } catch (err) {
+    console.error("Error en loadClients:", err);
+  }
+}
+
+function renderClientsTable() {
+  const tbody = document.getElementById("clientsBody");
+  const pageInfo = document.getElementById("clientPageInfo");
+  const prevBtn = document.getElementById("clientPrev");
+  const nextBtn = document.getElementById("clientNext");
+
+  if (!tbody) return;
+
+  tbody.innerHTML = "";
+
+  const source = filteredClients.length ? filteredClients : allClients;
+  const totalPages = Math.max(1, Math.ceil(source.length / clientPageSize));
+  if (currentClientPage > totalPages) currentClientPage = totalPages;
+
+  const start = (currentClientPage - 1) * clientPageSize;
+  const items = source.slice(start, start + clientPageSize);
+
+  items.forEach(c => {
+    tbody.innerHTML += `
+      <tr onclick="selectClientRow(${c.id}, this)">
+        <td>${c.idType || ""}</td>
+        <td>${c.idNumber || ""}</td>
+        <td>${c.razonSocial || ""}</td>
+        <td>${c.nombreComercial || ""}</td>
+        <td>${c.ciudad || ""}</td>
+        <td>${c.email || ""}</td>
+        <td>${c.telefono || ""}</td>
+        <td>${c.celular || ""}</td>
+      </tr>
+    `;
+  });
+
+  if (pageInfo) {
+    pageInfo.textContent = `${currentClientPage} / ${totalPages}`;
+  }
+  if (prevBtn) prevBtn.disabled = currentClientPage <= 1;
+  if (nextBtn) nextBtn.disabled = currentClientPage >= totalPages;
+}
+
+function clientPrevPage() {
+  if (currentClientPage > 1) {
+    currentClientPage--;
+    renderClientsTable();
+  }
+}
+
+function clientNextPage() {
+  const source = filteredClients.length ? filteredClients : allClients;
+  const totalPages = Math.max(1, Math.ceil(source.length / clientPageSize));
+  if (currentClientPage < totalPages) {
+    currentClientPage++;
+    renderClientsTable();
+  }
+}
+
+function selectClientRow(id, tr) {
+  selectedClientId = id;
+
+  // quitar selección previa
+  document.querySelectorAll("#clientsBody tr").forEach(row => {
+    row.classList.remove("selected-row");
+  });
+
+  if (tr) tr.classList.add("selected-row");
+}
+
+function clearClientForm() {
+  editingClientId = null;
+  selectedClientId = null;
+
+  const fields = [
+    "clientType",        // dropdown: Cédula / RUC
+    "clientIdNumber",    // identificación
+    "clientRazonSocial", // razón social
+    "clientNombreCom",   // nombre comercial
+    "clientCiudad",
+    "clientDireccion",
+    "clientEmail",
+    "clientTelefono",
+    "clientCelular"
+  ];
+
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+
+  // limpiar selección en la tabla
+  document.querySelectorAll("#clientsBody tr").forEach(row => {
+    row.classList.remove("selected-row");
+  });
+}
+
+async function saveClient() {
+  const idType        = document.getElementById("clientType")?.value || "Cedula";
+  const idNumber      = document.getElementById("clientIdNumber")?.value.trim() || "";
+  const razonSocial   = document.getElementById("clientRazonSocial")?.value.trim() || "";
+  const nombreComercial = document.getElementById("clientNombreCom")?.value.trim() || "";
+  const ciudad        = document.getElementById("clientCiudad")?.value.trim() || "";
+  const direccion     = document.getElementById("clientDireccion")?.value.trim() || "";
+  const email         = document.getElementById("clientEmail")?.value.trim() || "";
+  const telefono      = document.getElementById("clientTelefono")?.value.trim() || "";
+  const celular       = document.getElementById("clientCelular")?.value.trim() || "";
+
+  if (!idNumber || !razonSocial) {
+    alert("Identificación y Razón social son obligatorias.");
+    return;
+  }
+
+  const payload = {
+    idType,
+    idNumber,
+    razonSocial,
+    nombreComercial,
+    ciudad,
+    direccion,
+    email,
+    telefono,
+    celular
+  };
+
+  const isEdit = !!editingClientId;
+  const url = isEdit
+    ? `${API}/clients/${company}/${editingClientId}`
+    : `${API}/clients/${company}`;
+  const method = isEdit ? "PUT" : "POST";
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      alert(data.error || "Error al guardar cliente.");
+      return;
+    }
+
+    // IMPORTANTE: NO cambiamos de pestaña, solo recargamos lista
+    clearClientForm();
+    await loadClients();
+  } catch (err) {
+    console.error("Error en saveClient:", err);
+    alert("No se pudo guardar el cliente.");
+  }
+}
+
+function startEditClient() {
+  if (!selectedClientId) {
+    alert("Selecciona un cliente en la tabla.");
+    return;
+  }
+
+  const c = allClients.find(x => x.id === selectedClientId);
+  if (!c) return;
+
+  editingClientId = c.id;
+
+  const setVal = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value || "";
+  };
+
+  setVal("clientType", c.idType);
+  setVal("clientIdNumber", c.idNumber);
+  setVal("clientRazonSocial", c.razonSocial);
+  setVal("clientNombreCom", c.nombreComercial);
+  setVal("clientCiudad", c.ciudad);
+  setVal("clientDireccion", c.direccion);
+  setVal("clientEmail", c.email);
+  setVal("clientTelefono", c.telefono);
+  setVal("clientCelular", c.celular);
+}
+
+async function deleteSelectedClient() {
+  if (!selectedClientId) {
+    alert("Selecciona un cliente en la tabla.");
+    return;
+  }
+
+  if (!await appConfirm("¿Seguro que deseas eliminar este cliente?")) return;
+
+  try {
+    const res = await fetch(`${API}/clients/${company}/${selectedClientId}`, {
+      method: "DELETE"
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || "Error al eliminar cliente.");
+      return;
+    }
+
+    selectedClientId = null;
+    editingClientId = null;
+    await loadClients();
+  } catch (err) {
+    console.error("Error al eliminar cliente:", err);
+    alert("No se pudo eliminar el cliente.");
+  }
+}
+
+function searchClients() {
+  const q = document.getElementById("clientSearch")?.value.trim().toLowerCase() || "";
+  if (!q) {
+    filteredClients = allClients;
+  } else {
+    filteredClients = allClients.filter(c => {
+      const texto = [
+        c.idType,
+        c.idNumber,
+        c.razonSocial,
+        c.nombreComercial,
+        c.ciudad,
+        c.email,
+        c.telefono,
+        c.celular
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return texto.includes(q);
+    });
+  }
+  currentClientPage = 1;
+  renderClientsTable();
+}
+
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [], field = "", quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"' && quoted && text[index + 1] === '"') { field += '"'; index += 1; }
+    else if (char === '"') quoted = !quoted;
+    else if (char === ',' && !quoted) { row.push(field); field = ""; }
+    else if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && text[index + 1] === '\n') index += 1;
+      row.push(field); field = "";
+      if (row.some(value => value.trim())) rows.push(row);
+      row = [];
+    } else field += char;
+  }
+  row.push(field);
+  if (row.some(value => value.trim())) rows.push(row);
+  return rows;
+}
+
+function normalizeCsvHeader(value) {
+  return String(value || "").trim().toLowerCase().normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+}
+
+async function importClientsCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (userRole !== "Admin") { event.target.value = ""; return alert("Solo un administrador puede importar clientes."); }
+  const rows = parseCsvRows(await file.text());
+  if (rows.length < 2) { event.target.value = ""; return alert("El CSV no contiene filas para importar."); }
+  const headers = rows[0].map(normalizeCsvHeader);
+  const aliases = {
+    idType: ["tipo", "tipodeidentificacion", "idtype"],
+    idNumber: ["identificacion", "numerodeidentificacion", "cedula", "ruc", "idnumber"],
+    razonSocial: ["razonsocial", "nombre", "nombrecompleto"],
+    nombreComercial: ["nombrecomercial"], ciudad: ["ciudad"], direccion: ["direccion"],
+    email: ["email", "correo", "correoelectronico"], telefono: ["telefono"], celular: ["celular", "movil"]
+  };
+  const column = key => aliases[key].map(alias => headers.indexOf(alias)).find(index => index >= 0) ?? -1;
+  if (column("idNumber") < 0 || column("razonSocial") < 0) {
+    event.target.value = "";
+    return alert("El CSV necesita las columnas Identificacion y RazonSocial.");
+  }
+  const clients = rows.slice(1).map(values => {
+    const result = {};
+    Object.keys(aliases).forEach(key => { const index = column(key); result[key] = index >= 0 ? values[index]?.trim() || "" : ""; });
+    result.idType = result.idType || (result.idNumber.length === 13 ? "RUC" : "Cedula");
+    return result;
+  });
+  const res = await fetch(`${API}/clients/import/${company}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ clients })
+  });
+  const data = await res.json();
+  event.target.value = "";
+  if (!res.ok) return alert(data.error || "No se pudo importar el archivo.");
+  await loadClients();
+  alert(`Importación terminada.\nNuevos: ${data.inserted}\nActualizados: ${data.updated}\nOmitidos: ${data.skipped}`);
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = "\uFEFF" + rows.map(row => row.map(csvCell).join(",")).join("\r\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  link.download = filename; link.click(); URL.revokeObjectURL(link.href);
+}
+
+function downloadClientTemplate() {
+  downloadCsv("plantilla-clientes.csv", [["Tipo", "Identificacion", "RazonSocial", "NombreComercial", "Ciudad", "Direccion", "Email", "Telefono", "Celular"]]);
+}
+
+function exportClientsCSV() {
+  const rows = [["Tipo", "Identificacion", "RazonSocial", "NombreComercial", "Ciudad", "Direccion", "Email", "Telefono", "Celular"]];
+  allClients.forEach(client => rows.push([client.idType, client.idNumber, client.razonSocial, client.nombreComercial, client.ciudad, client.direccion, client.email, client.telefono, client.celular]));
+  downloadCsv("clientes.csv", rows);
+}
+
+
+// ------- CAMBIO DE CONTRASEÑA -------
+
+async function changePassword() {
+  const username = localStorage.getItem("username");
+  if (!username) {
+    alert("No se encontró el usuario en sesión.");
+    return;
+  }
+
+  const current = document.getElementById("currentPass").value.trim();
+  const newPass = document.getElementById("newPass").value.trim();
+  const newPass2 = document.getElementById("newPass2").value.trim();
+
+  if (!current || !newPass || !newPass2) {
+    alert("Completa todos los campos de contraseña.");
+    return;
+  }
+
+  if (newPass !== newPass2) {
+    alert("La nueva contraseña no coincide.");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API}/auth/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username,
+        oldPassword: current,
+        newPassword: newPass
+      })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.error || "Error al cambiar contraseña.");
+      return;
+    }
+
+    alert("Contraseña actualizada correctamente.");
+    document.getElementById("currentPass").value = "";
+    document.getElementById("newPass").value = "";
+    document.getElementById("newPass2").value = "";
+  } catch (err) {
+    console.error(err);
+    alert("No se pudo conectar con el servidor.");
+  }
+}
+
+const sriFieldMap = {
+  environment: "sriEnvironment", ruc: "sriRuc", legalName: "sriLegalName",
+  commercialName: "sriCommercialName", mainAddress: "sriMainAddress",
+  establishmentAddress: "sriEstablishmentAddress", establishmentCode: "sriEstablishmentCode",
+  emissionPoint: "sriEmissionPoint", nextSequence: "sriNextSequence",
+  accountingRequired: "sriAccountingRequired", specialTaxpayerNumber: "sriSpecialTaxpayerNumber",
+  taxRegime: "sriTaxRegime", senderEmail: "sriSenderEmail", adminCopyEmail: "sriAdminCopyEmail"
+};
+
+async function loadSriSettings() {
+  if (userRole !== "Admin") return;
+  const res = await fetch(`${API}/settings/sri/${company}`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cargar la configuración SRI.");
+  Object.entries(sriFieldMap).forEach(([key, id]) => {
+    const input = document.getElementById(id);
+    if (input && data[key] != null) input.value = data[key];
+  });
+  sriCertificateValidated = Boolean(data.certificateValidated);
+  document.getElementById("sriCertificateStatus").textContent = data.certificateValidated
+    ? "Validada" : data.certificateConfigured ? "Instalada, pendiente de validación" : "No configurada";
+}
+
+async function saveSriSettings() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede configurar el SRI.");
+  const payload = {};
+  Object.entries(sriFieldMap).forEach(([key, id]) => payload[key] = document.getElementById(id).value.trim());
+  payload.nextSequence = Number(payload.nextSequence) || 1;
+  if (!/^\d{13}$/.test(payload.ruc)) return alert("El RUC debe contener 13 dígitos.");
+  if (!payload.legalName || !payload.mainAddress) return alert("Razón social y dirección matriz son obligatorias.");
+  if (payload.environment === "PRODUCTION" && !sriCertificateValidated) return alert("No puedes activar Producción sin validar la firma electrónica con el SRI.");
+  const res = await fetch(`${API}/settings/sri/${company}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo guardar la configuración SRI.");
+  alert("Configuración SRI guardada en ambiente de " + (data.environment === "TEST" ? "Pruebas." : "Producción."));
+}
+
+async function installSriCertificate() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede instalar la firma.");
+  const file = document.getElementById("sriCertificateFile").files[0];
+  const passwordInput = document.getElementById("sriCertificatePassword");
+  const password = passwordInput.value;
+  if (!file || !password) return alert("Selecciona el archivo .p12/.pfx e ingresa su contraseña.");
+  if (file.size > 5 * 1024 * 1024) return alert("El certificado debe pesar menos de 5 MB.");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  const res = await fetch(`${API}/settings/sri/${company}/certificate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ filename: file.name, certificateBase64: btoa(binary), password })
+  });
+  passwordInput.value = "";
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo instalar la firma.");
+  sriCertificateValidated = false;
+  document.getElementById("sriEnvironment").value = "TEST";
+  document.getElementById("sriCertificateStatus").textContent = "Instalada, pendiente de validación";
+  alert("Firma instalada y cifrada. El siguiente paso es validarla en el ambiente de pruebas del SRI.");
+}
+
+async function removeSriCertificate() {
+  if (!await appConfirm("¿Quitar la firma electrónica instalada?")) return;
+  const res = await fetch(`${API}/settings/sri/${company}/certificate`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo quitar la firma.");
+  sriCertificateValidated = false;
+  document.getElementById("sriCertificateStatus").textContent = "No configurada";
+  document.getElementById("sriEnvironment").value = "TEST";
+  document.getElementById("sriCertificateFile").value = "";
+  alert("Firma electrónica eliminada.");
+}
+
+async function loadClientIntakeStatus() {
+  const res = await fetch(`${API}/settings/client-intake/${company}`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return;
+  document.getElementById("clientIntakeStatus").textContent = data.active ? "Activo" : "No configurado";
+}
+
+async function generateClientIntakeLink() {
+  const confirmed = await appConfirm("Generar un nuevo enlace invalidará cualquier enlace anterior. ¿Continuar?");
+  if (!confirmed) return;
+  const res = await fetch(`${API}/settings/client-intake/${company}/token`, {
+    method: "POST", headers: authHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo generar el enlace.");
+  const url = `${location.origin}/client-intake.html?token=${encodeURIComponent(data.token)}`;
+  document.getElementById("clientIntakeLink").value = url;
+  document.getElementById("clientIntakeStatus").textContent = "Activo";
+  alert("Enlace generado. Ábrelo en la tablet y guárdalo como favorito.");
+}
+
+async function copyClientIntakeLink() {
+  const input = document.getElementById("clientIntakeLink");
+  if (!input.value) return alert("Primero genera un enlace.");
+  await navigator.clipboard.writeText(input.value);
+  alert("Enlace copiado.");
+}
+
+async function disableClientIntakeLink() {
+  if (!await appConfirm("¿Desactivar el enlace de registro de la tablet?")) return;
+  const res = await fetch(`${API}/settings/client-intake/${company}/token`, {
+    method: "DELETE", headers: authHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo desactivar el enlace.");
+  document.getElementById("clientIntakeLink").value = "";
+  document.getElementById("clientIntakeStatus").textContent = "No configurado";
+  alert("Enlace desactivado.");
+}
+
+// ------- CSV EXPORT -------
+
+function exportCSV() {
+  // si hay filtro activo, exportamos el filtro; si no, todo el inventario
+  const source = (filteredProducts && filteredProducts.length)
+    ? filteredProducts
+    : allProducts;
+
+  const rows = [["codigo","nombre","cantidad","precio"]];
+
+  source.forEach(p => {
+    rows.push([
+      p.code ?? "",
+      p.name ?? "",
+      String(p.quantity ?? ""),
+      String(p.price ?? "")
+    ]);
+  });
+
+  const csv = rows.map(r => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `inventario_${company}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ------- CSV IMPORT -------
+
+function importCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const text = reader.result;
+    const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+    if (lines.length <= 1) return;
+
+    const dataLines = lines.slice(1); // saltar cabecera
+
+    for (const line of dataLines) {
+      const [code, name, quantity, price] = line.split(",");
+      if (!code) continue;
+
+      try {
+        await fetch(`${API}/products/import/${company}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code: code.trim(),
+            name: (name || "").trim(),
+            quantity: Number(quantity) || 0,
+            price: Number(price) || 0
+          })
+        });
+      } catch (err) {
+        console.error("Error importando línea:", line, err);
+      }
+    }
+
+    document.getElementById("csvFile").value = "";
+    loadProducts();
+  };
+  reader.readAsText(file);
+}
+
+function menuCategoryOf(product) {
+  return String(product?.menuCategory || "General").trim() || "General";
+}
+
+function productModifierGroups(product) {
+  if (Array.isArray(product?.modifierGroups)) return product.modifierGroups;
+  try {
+    const parsed = JSON.parse(product?.modifierGroups || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseModifierDefinitions(value) {
+  return String(value || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean).map((line, groupIndex) => {
+    const separator = line.indexOf(":");
+    if (separator < 1) throw new Error(`Falta “:” en: ${line}`);
+    let name = line.slice(0, separator).trim();
+    const required = name.includes("*");
+    const multiple = name.includes("+");
+    name = name.replace(/[+*]/g, "").trim();
+    const options = line.slice(separator + 1).split("|").map((raw, optionIndex) => {
+      const text = raw.trim();
+      const priceMatch = text.match(/\s\+(\d+(?:[.,]\d{1,2})?)$/);
+      return {
+        name: (priceMatch ? text.slice(0, priceMatch.index) : text).trim(),
+        priceDelta: priceMatch ? Number(priceMatch[1].replace(",", ".")) : 0,
+        sortOrder: optionIndex
+      };
+    }).filter(option => option.name);
+    if (!name || !options.length) throw new Error(`Agrega un nombre y opciones en: ${line}`);
+    return { name, required, multiple, sortOrder: groupIndex, options };
+  });
+}
+
+function formatModifierDefinitions(product) {
+  return productModifierGroups(product).map(group => {
+    const marker = `${group.required ? "*" : ""}${group.multiple ? "+" : ""}`;
+    const options = (group.options || []).map(option => `${option.name}${Number(option.priceDelta || 0) ? ` +${Number(option.priceDelta).toFixed(2)}` : ""}`).join(" | ");
+    return `${group.name}${marker}: ${options}`;
+  }).join("\n");
+}
+
+function modifierSelectionLabel(selections) {
+  return (Array.isArray(selections) ? selections : []).flatMap(selection =>
+    (selection.options || []).map(option => `${selection.group}: ${option.name}`)
+  ).join(" · ");
+}
+
+function renderRestaurantQuickMenu() {
+  const panel = document.getElementById("restaurantQuickMenu");
+  const categoriesBody = document.getElementById("quickMenuCategories");
+  const productsBody = document.getElementById("quickMenuProducts");
+  if (!panel || !categoriesBody || !productsBody) return;
+  const restaurantMode = businessType === "RESTAURANT" && enabledModules.includes("menu");
+  panel.classList.toggle("hidden", !restaurantMode);
+  if (!restaurantMode) return;
+
+  const categories = ["Todas", ...new Set(allProducts.map(menuCategoryOf).sort((a, b) => a.localeCompare(b)))]
+  if (!categories.includes(quickMenuCategory)) quickMenuCategory = "Todas";
+  categoriesBody.innerHTML = "";
+  categories.forEach(category => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = category;
+    button.classList.toggle("active", category === quickMenuCategory);
+    button.onclick = () => { quickMenuCategory = category; renderRestaurantQuickMenu(); };
+    categoriesBody.appendChild(button);
+  });
+
+  productsBody.innerHTML = "";
+  allProducts
+    .filter(product => Number(product.quantity || 0) > 0 && Number(product.available ?? 1) === 1 && (quickMenuCategory === "Todas" || menuCategoryOf(product) === quickMenuCategory))
+    .sort((a, b) => menuCategoryOf(a).localeCompare(menuCategoryOf(b)) || String(a.name).localeCompare(String(b.name)))
+    .forEach(product => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "quick-menu-product";
+      const name = document.createElement("strong");
+      const detail = document.createElement("span");
+      name.textContent = product.name;
+      detail.textContent = `$${Number(product.price).toFixed(2)} · ${Number(product.quantity)} disponibles`;
+      button.append(name, detail);
+      button.onclick = () => configureAndAddProduct(product);
+      productsBody.appendChild(button);
+    });
+  if (!productsBody.children.length) productsBody.innerHTML = '<p class="restaurant-empty">No hay productos disponibles en esta categoría.</p>';
+}
+
+function renderMenuManagement() {
+  const tbody = document.getElementById("menuBody");
+  if (!tbody) return;
+  const search = String(document.getElementById("menuSearch")?.value || "").trim().toLowerCase();
+  const products = allProducts
+    .filter(product => !search || `${product.code || ""} ${product.name || ""} ${menuCategoryOf(product)}`.toLowerCase().includes(search))
+    .sort((a, b) => menuCategoryOf(a).localeCompare(menuCategoryOf(b)) || String(a.name).localeCompare(String(b.name)));
+  selectedMenuProduct = selectedMenuProduct
+    ? products.find(product => String(product.id) === String(selectedMenuProduct.id)) || null
+    : null;
+  tbody.innerHTML = "";
+  products.forEach(product => {
+      const row = document.createElement("tr");
+      row.innerHTML = "<td></td><td></td><td></td><td></td><td></td><td></td><td></td>";
+      row.children[0].textContent = product.code;
+      row.children[1].textContent = product.name;
+      row.children[2].textContent = menuCategoryOf(product);
+      row.children[3].textContent = `$${Number(product.price).toFixed(2)}`;
+      row.children[4].textContent = Number(product.quantity || 0);
+      row.children[5].textContent = productModifierGroups(product).length || "—";
+      row.children[6].innerHTML = Number(product.available ?? 1) === 1
+        ? '<span class="availability-status available">Disponible</span>'
+        : '<span class="availability-status sold-out">Agotado</span>';
+      row.classList.toggle("menu-product-sold-out", Number(product.available ?? 1) !== 1);
+      row.classList.toggle("selected-row", String(selectedMenuProduct?.id) === String(product.id));
+      row.onclick = () => {
+        selectedMenuProduct = product;
+        tbody.querySelectorAll("tr").forEach(item => item.classList.remove("selected-row"));
+        row.classList.add("selected-row");
+        updateMenuProductActions();
+      };
+      tbody.appendChild(row);
+    });
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="7" class="empty-table">No hay productos con esa búsqueda.</td></tr>';
+  updateMenuProductActions();
+}
+
+function updateMenuProductActions() {
+  const editButton = document.getElementById("btnEditMenuProduct");
+  const availabilityButton = document.getElementById("btnToggleMenuAvailability");
+  const deleteButton = document.getElementById("btnDeleteMenuProduct");
+  if (editButton) editButton.disabled = !selectedMenuProduct;
+  if (availabilityButton) {
+    availabilityButton.classList.toggle("hidden", userRole !== "Admin");
+    availabilityButton.disabled = userRole !== "Admin" || !selectedMenuProduct;
+    availabilityButton.textContent = Number(selectedMenuProduct?.available ?? 1) === 1 ? "Marcar agotado" : "Marcar disponible";
+  }
+  if (deleteButton) {
+    deleteButton.classList.toggle("hidden", userRole !== "Admin");
+    deleteButton.disabled = userRole !== "Admin" || !selectedMenuProduct;
+  }
+}
+
+function clearMenuProductForm() {
+  ["menuProductId", "menuProductCode", "menuProductName", "menuProductCategory", "menuProductPrice", "menuProductQuantity", "menuProductModifiers"]
+    .forEach(id => {
+      const input = document.getElementById(id);
+      if (input) input.value = "";
+    });
+  ["menuProductCategory", "menuProductPrice", "menuProductQuantity", "menuProductAvailable", "menuProductModifiers"].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.disabled = false;
+  });
+  document.getElementById("menuProductPermissionNote")?.classList.add("hidden");
+  document.getElementById("menuProductAvailable").checked = true;
+}
+
+function editSelectedMenuProduct() {
+  if (!selectedMenuProduct) return alert("Selecciona un producto primero.");
+  document.getElementById("menuProductId").value = selectedMenuProduct.id;
+  document.getElementById("menuProductCode").value = selectedMenuProduct.code || "";
+  document.getElementById("menuProductName").value = selectedMenuProduct.name || "";
+  document.getElementById("menuProductCategory").value = menuCategoryOf(selectedMenuProduct);
+  document.getElementById("menuProductPrice").value = Number(selectedMenuProduct.price || 0).toFixed(2);
+  document.getElementById("menuProductQuantity").value = Number(selectedMenuProduct.quantity || 0);
+  document.getElementById("menuProductAvailable").checked = Number(selectedMenuProduct.available ?? 1) === 1;
+  document.getElementById("menuProductModifiers").value = formatModifierDefinitions(selectedMenuProduct);
+  const restricted = userRole !== "Admin";
+  ["menuProductCategory", "menuProductPrice", "menuProductQuantity", "menuProductAvailable", "menuProductModifiers"].forEach(id => {
+    document.getElementById(id).disabled = restricted;
+  });
+  document.getElementById("menuProductPermissionNote")?.classList.toggle("hidden", !restricted);
+  document.getElementById("menuProductCode")?.focus();
+}
+
+async function saveMenuProduct() {
+  const id = document.getElementById("menuProductId").value;
+  const priceValue = document.getElementById("menuProductPrice").value;
+  const quantityValue = document.getElementById("menuProductQuantity").value;
+  let modifierGroups = [];
+  if (userRole === "Admin") {
+    try { modifierGroups = parseModifierDefinitions(document.getElementById("menuProductModifiers").value); }
+    catch (err) { return alert(err.message); }
+  }
+  const payload = {
+    code: document.getElementById("menuProductCode").value.trim(),
+    name: document.getElementById("menuProductName").value.trim(),
+    menuCategory: document.getElementById("menuProductCategory").value.trim() || "General",
+    price: Number(priceValue),
+    quantity: Number(quantityValue),
+    available: document.getElementById("menuProductAvailable").checked,
+    modifierGroups
+  };
+  if (!payload.code || !payload.name) return alert("Completa el código y el nombre del producto.");
+  if (priceValue === "" || quantityValue === "" || !Number.isFinite(payload.price) || payload.price < 0 || !Number.isInteger(payload.quantity) || payload.quantity < 0) {
+    return alert("Ingresa un precio y una cantidad válidos.");
+  }
+  const res = await fetch(id ? `${API}/restaurant/menu/${id}` : `${API}/restaurant/menu`, {
+    method: id ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo guardar el producto.");
+  selectedMenuProduct = null;
+  clearMenuProductForm();
+  await loadProducts();
+}
+
+async function deleteSelectedMenuProduct() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede eliminar productos.");
+  if (!selectedMenuProduct) return alert("Selecciona un producto primero.");
+  if (!await appConfirm(`¿Eliminar ${selectedMenuProduct.name} del menú y del inventario?`)) return;
+  const res = await fetch(`${API}/restaurant/menu/${selectedMenuProduct.id}`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo eliminar el producto.");
+  selectedMenuProduct = null;
+  clearMenuProductForm();
+  await loadProducts();
+}
+
+function downloadCsvFile(filename, rows) {
+  const csv = "\uFEFF" + rows.map(row => row.map(csvCell).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url);
+}
+
+function downloadMenuTemplate() {
+  downloadCsvFile("plantilla_menu.csv", [["codigo", "nombre", "categoria", "precio", "cantidad", "disponible", "opciones"], ["HAMB01", "Hamburguesa clásica", "Platos fuertes", "8.50", "50", "SI", "Término*: Poco cocida | 3/4 | Bien cocida; Extras+: Queso +1.00 | Tocino +1.50"]]);
+}
+
+function exportRestaurantMenu() {
+  if (!allProducts.length) return alert("No hay productos para exportar.");
+  downloadCsvFile(`menu_${company}.csv`, [["codigo", "nombre", "categoria", "precio", "cantidad", "disponible", "opciones"], ...allProducts.map(product => [product.code, product.name, menuCategoryOf(product), Number(product.price).toFixed(2), product.quantity, Number(product.available ?? 1) === 1 ? "SI" : "NO", formatModifierDefinitions(product).replace(/\n/g, "; ")])]);
+}
+
+async function importRestaurantMenu(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (userRole !== "Admin") { event.target.value = ""; return alert("Solo un administrador puede importar el menú."); }
+  const rows = parseCsvRows(await file.text());
+  const headers = (rows.shift() || []).map(normalizeCsvHeader);
+  const column = aliases => aliases.map(alias => headers.indexOf(alias)).find(index => index >= 0) ?? -1;
+  const columns = {
+    code: column(["codigo", "code"]), name: column(["nombre", "producto", "name"]),
+    menuCategory: column(["categoria", "category"]), price: column(["precio", "price"]),
+    quantity: column(["cantidad", "stock", "quantity"]),
+    available: column(["disponible", "available"]), modifiers: column(["opciones", "modificadores", "modifiers"])
+  };
+  if (columns.code < 0 || columns.name < 0 || columns.price < 0) {
+    event.target.value = "";
+    return alert("El archivo necesita las columnas código, nombre y precio.");
+  }
+  let items;
+  try {
+    items = rows.map(values => ({
+      code: values[columns.code]?.trim(), name: values[columns.name]?.trim(),
+      menuCategory: columns.menuCategory >= 0 ? values[columns.menuCategory]?.trim() : "General",
+      price: Number(values[columns.price]), quantity: columns.quantity >= 0 ? Number(values[columns.quantity]) : 0,
+      available: columns.available < 0 || !/^(no|false|0|agotado)$/i.test(values[columns.available]?.trim() || ""),
+      modifierGroups: columns.modifiers >= 0 ? parseModifierDefinitions((values[columns.modifiers] || "").replace(/;\s*/g, "\n")) : []
+    })).filter(item => item.code || item.name);
+  } catch (err) {
+    event.target.value = "";
+    return alert(`Revisa las opciones del menú: ${err.message}`);
+  }
+  const res = await fetch(`${API}/restaurant/menu/import`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ items })
+  });
+  const data = await res.json();
+  event.target.value = "";
+  if (!res.ok) return alert(data.error || "No se pudo importar el menú.");
+  await loadProducts();
+  alert(`Menú importado.\nNuevos: ${data.inserted}\nActualizados: ${data.updated}`);
+}
+
+// ------- POS / CARRITO -------
+
+function configureAndAddProduct(product) {
+  if (businessType === "RESTAURANT" && Number(product.available ?? 1) !== 1) {
+    alert(`${product.name} está marcado como agotado.`);
+    return;
+  }
+  const groups = productModifierGroups(product);
+  if (!groups.length) return addToCart(product, []);
+  pendingModifierProduct = product;
+  document.getElementById("modifierProductName").textContent = product.name;
+  document.getElementById("modifierProductPrice").textContent = `Precio base: $${Number(product.price).toFixed(2)}`;
+  const body = document.getElementById("modifierGroups");
+  body.innerHTML = "";
+  groups.forEach((group, groupIndex) => {
+    const fieldset = document.createElement("fieldset");
+    fieldset.className = "modifier-group";
+    const legend = document.createElement("legend");
+    legend.textContent = `${group.name}${group.required ? " · obligatorio" : " · opcional"}${group.multiple ? " · puedes elegir varios" : ""}`;
+    fieldset.appendChild(legend);
+    (group.options || []).forEach(option => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = group.multiple ? "checkbox" : "radio";
+      input.name = `modifier-group-${groupIndex}`;
+      input.value = option.name;
+      input.dataset.group = group.name;
+      input.dataset.priceDelta = Number(option.priceDelta || 0);
+      input.addEventListener("change", updateModifierUnitTotal);
+      const text = document.createElement("span");
+      text.textContent = `${option.name}${Number(option.priceDelta || 0) ? ` (+$${Number(option.priceDelta).toFixed(2)})` : ""}`;
+      label.append(input, text);
+      fieldset.appendChild(label);
+    });
+    body.appendChild(fieldset);
+  });
+  document.getElementById("modifierValidation").classList.add("hidden");
+  document.getElementById("productModifierModal").classList.remove("hidden");
+  updateModifierUnitTotal();
+}
+
+function updateModifierUnitTotal() {
+  const extra = [...document.querySelectorAll("#modifierGroups input:checked")]
+    .reduce((sum, input) => sum + Number(input.dataset.priceDelta || 0), 0);
+  document.getElementById("modifierUnitTotal").textContent = (Number(pendingModifierProduct?.price || 0) + extra).toFixed(2);
+}
+
+function closeProductModifierModal() {
+  pendingModifierProduct = null;
+  document.getElementById("productModifierModal").classList.add("hidden");
+}
+
+function confirmProductModifiers() {
+  if (!pendingModifierProduct) return;
+  const groups = productModifierGroups(pendingModifierProduct);
+  const selections = groups.map((group, groupIndex) => ({
+    group: group.name,
+    options: [...document.querySelectorAll(`input[name="modifier-group-${groupIndex}"]:checked`)].map(input => ({
+      name: input.value,
+      priceDelta: Number(input.dataset.priceDelta || 0)
+    }))
+  })).filter(selection => selection.options.length);
+  const missing = groups.find(group => group.required && !selections.some(selection => selection.group === group.name));
+  if (missing) {
+    const validation = document.getElementById("modifierValidation");
+    validation.textContent = `Selecciona una opción para ${missing.name}.`;
+    validation.classList.remove("hidden");
+    return;
+  }
+  const product = pendingModifierProduct;
+  closeProductModifierModal();
+  addToCart(product, selections);
+}
+
+function setInvoiceType(type) {
+  invoiceType = type === "FACTURA" ? "FACTURA" : "CONSUMIDOR_FINAL";
+  document.getElementById("btnConsumerFinal").classList.toggle("active", invoiceType === "CONSUMIDOR_FINAL");
+  document.getElementById("btnInvoice").classList.toggle("active", invoiceType === "FACTURA");
+  document.getElementById("invoiceClientPanel").classList.toggle("hidden", invoiceType !== "FACTURA");
+  if (invoiceType === "FACTURA") {
+    loadClients();
+    startTabletClientPolling();
+  } else {
+    stopTabletClientPolling();
+    selectedInvoiceClient = null;
+    const selected = document.getElementById("selectedInvoiceClient");
+    if (selected) selected.classList.add("hidden");
+  }
+}
+
+function startTabletClientPolling() {
+  stopTabletClientPolling();
+  const status = document.getElementById("tabletClientStatus");
+  if (status) status.textContent = selectedInvoiceClient ? "Cliente seleccionado." : "Esperando datos desde la tablet...";
+  if (selectedInvoiceClient) return;
+  claimTabletClient();
+  tabletClientPolling = setInterval(claimTabletClient, 2500);
+}
+
+function stopTabletClientPolling() {
+  if (tabletClientPolling) clearInterval(tabletClientPolling);
+  tabletClientPolling = null;
+}
+
+async function claimTabletClient() {
+  if (invoiceType !== "FACTURA" || selectedInvoiceClient || tabletClaimInProgress) return;
+  tabletClaimInProgress = true;
+  try {
+    const res = await fetch(`${API}/client-intake/claim/${company}`, {
+      method: "POST",
+      headers: authHeaders()
+    });
+    const data = await res.json();
+    if (res.ok && data.client) {
+      allClients = allClients.filter(client => client.id !== data.client.id);
+      allClients.push(data.client);
+      selectInvoiceClient(data.client);
+      alert(`Cliente recibido desde la tablet:\n${data.client.razonSocial}`);
+    }
+  } catch (err) {
+    console.error("Error esperando cliente de tablet:", err);
+  } finally {
+    tabletClaimInProgress = false;
+  }
+}
+
+function searchInvoiceClients() {
+  const query = document.getElementById("invoiceClientSearch").value.trim().toLowerCase();
+  const results = document.getElementById("invoiceClientResults");
+  results.innerHTML = "";
+  if (!query) return;
+  allClients
+    .filter(client => [client.idNumber, client.razonSocial, client.nombreComercial]
+      .some(value => String(value || "").toLowerCase().includes(query)))
+    .slice(0, 8)
+    .forEach(client => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "invoice-client-result";
+      button.textContent = `${client.razonSocial} — ${client.idNumber}`;
+      button.onclick = () => selectInvoiceClient(client);
+      results.appendChild(button);
+    });
+  if (!results.children.length) results.innerHTML = '<p class="settings-note">Cliente no encontrado. Usa "Agregar nuevo cliente".</p>';
+}
+
+function selectInvoiceClient(client) {
+  selectedInvoiceClient = client;
+  stopTabletClientPolling();
+  const selected = document.getElementById("selectedInvoiceClient");
+  selected.classList.remove("hidden");
+  selected.innerHTML = `<strong>${client.razonSocial}</strong><br>${client.idType}: ${client.idNumber}<br>${client.direccion || "Sin dirección"}<br>${client.email || "Sin correo"}`;
+  document.getElementById("invoiceClientResults").innerHTML = "";
+  document.getElementById("invoiceClientSearch").value = "";
+  const status = document.getElementById("tabletClientStatus");
+  if (status) status.textContent = "Cliente seleccionado para esta factura.";
+}
+
+function toggleQuickClientForm(show) {
+  document.getElementById("quickClientForm").classList.toggle("hidden", !show);
+}
+
+async function saveQuickClient() {
+  const payload = {
+    idType: document.getElementById("quickClientIdType").value,
+    idNumber: document.getElementById("quickClientIdNumber").value.trim(),
+    razonSocial: document.getElementById("quickClientName").value.trim(),
+    direccion: document.getElementById("quickClientAddress").value.trim(),
+    email: document.getElementById("quickClientEmail").value.trim(),
+    telefono: document.getElementById("quickClientPhone").value.trim(),
+    nombreComercial: "", ciudad: "", celular: ""
+  };
+  if (!payload.idNumber || !payload.razonSocial) {
+    alert("Identificación y nombre son obligatorios.");
+    return;
+  }
+  const res = await fetch(`${API}/clients/${company}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo crear el cliente.");
+  const client = { ...payload, id: data.id };
+  allClients.push(client);
+  selectInvoiceClient(client);
+  toggleQuickClientForm(false);
+}
+
+function addToCartByCode() {
+  const codeInput = document.getElementById("posCode");
+  const code = codeInput.value.trim();
+  if (!code) return;
+
+  const product = allProducts.find(p => String(p.code) === code);
+  if (!product) {
+    alert("Producto no encontrado");
+    return;
+  }
+
+  configureAndAddProduct(product);
+  codeInput.value = "";
+}
+
+function addToCart(product, selectedModifiers = []) {
+  if (restaurantSplitMode) {
+    alert("Termina o cancela la cuenta dividida antes de agregar productos.");
+    return;
+  }
+  const modifierKey = JSON.stringify(selectedModifiers.map(selection => ({
+    group: selection.group,
+    options: (selection.options || []).map(option => option.name).sort()
+  })));
+  const existing = cart.find(item => item.id === product.id && item.modifierKey === modifierKey);
+  if (existing) {
+    existing.quantity += 1;
+  } else {
+    const modifierExtra = selectedModifiers.flatMap(selection => selection.options || []).reduce((sum, option) => sum + Number(option.priceDelta || 0), 0);
+    cart.push({
+      id: product.id,
+      code: product.code,
+      name: product.name,
+      basePrice: Number(product.price),
+      price: Number(product.price) + modifierExtra,
+      quantity: 1,
+      discountPercent: 0,
+      discountReason: "",
+      selectedModifiers,
+      modifierKey,
+      note: ""
+    });
+  }
+  if (activeRestaurantOrder) restaurantOrderDirty = true;
+  renderCart();
+}
+
+function escapeCartValue(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function cartColumnStorageKey() {
+  return `cartColumns_${company || "default"}`;
+}
+
+function loadCartColumnLayout() {
+  let stored = [];
+  try {
+    stored = JSON.parse(localStorage.getItem(cartColumnStorageKey()) || "[]");
+  } catch (err) {
+    stored = [];
+  }
+  const storedById = new Map(
+    (Array.isArray(stored) ? stored : [])
+      .filter(item => item && CART_COLUMN_DEFAULTS.some(column => column.id === item.id))
+      .map(item => [item.id, item])
+  );
+  const orderedIds = (Array.isArray(stored) ? stored : [])
+    .map(item => item?.id)
+    .filter((id, index, ids) => CART_COLUMN_DEFAULTS.some(column => column.id === id) && ids.indexOf(id) === index);
+  CART_COLUMN_DEFAULTS.forEach(column => {
+    if (!orderedIds.includes(column.id)) orderedIds.push(column.id);
+  });
+  return orderedIds.map(id => {
+    const base = CART_COLUMN_DEFAULTS.find(column => column.id === id);
+    const savedWidth = Number(storedById.get(id)?.width);
+    return { ...base, width: Number.isFinite(savedWidth) ? Math.min(420, Math.max(72, savedWidth)) : base.width };
+  });
+}
+
+function saveCartColumnLayout() {
+  localStorage.setItem(cartColumnStorageKey(), JSON.stringify(
+    cartColumnLayout.map(({ id, width }) => ({ id, width }))
+  ));
+}
+
+function visibleCartColumns() {
+  return cartColumnLayout.filter(column => column.id !== "note" || activeRestaurantOrder);
+}
+
+function applyCartColumnWidths() {
+  const table = document.getElementById("cartTable");
+  const wrapper = table?.closest(".cart-table-scroll");
+  if (!table || !wrapper) return;
+  const columns = visibleCartColumns();
+  columns.forEach(column => {
+    const col = table.querySelector(`col[data-cart-column="${column.id}"]`);
+    if (col) col.style.width = `${column.width}px`;
+  });
+  const totalWidth = columns.reduce((sum, column) => sum + column.width, 0);
+  table.style.width = `${Math.max(totalWidth, wrapper.clientWidth)}px`;
+}
+
+function startCartColumnResize(event, columnId) {
+  event.preventDefault();
+  event.stopPropagation();
+  const column = cartColumnLayout.find(item => item.id === columnId);
+  if (!column) return;
+  const startX = event.clientX;
+  const startWidth = column.width;
+  document.body.classList.add("resizing-cart-column");
+
+  const resize = moveEvent => {
+    column.width = Math.min(420, Math.max(72, startWidth + moveEvent.clientX - startX));
+    applyCartColumnWidths();
+  };
+  const finish = () => {
+    document.removeEventListener("pointermove", resize);
+    document.removeEventListener("pointerup", finish);
+    document.body.classList.remove("resizing-cart-column");
+    saveCartColumnLayout();
+  };
+  document.addEventListener("pointermove", resize);
+  document.addEventListener("pointerup", finish, { once: true });
+}
+
+function renderCartHeader() {
+  const head = document.getElementById("cartHead");
+  const colgroup = document.getElementById("cartColgroup");
+  if (!head || !colgroup) return;
+  const columns = visibleCartColumns();
+  colgroup.innerHTML = columns.map(column =>
+    `<col data-cart-column="${column.id}" style="width:${column.width}px">`
+  ).join("");
+  head.innerHTML = `<tr>${columns.map(column => `
+    <th draggable="true" data-cart-column="${column.id}" title="Arrastra para cambiar el orden">
+      <span>${column.label}</span>
+      <span class="cart-column-resizer" role="separator" aria-label="Cambiar ancho de ${column.label}" title="Arrastra para cambiar el ancho"></span>
+    </th>`).join("")}</tr>`;
+
+  head.querySelectorAll("th[data-cart-column]").forEach(header => {
+    header.addEventListener("dragstart", event => {
+      if (event.target.closest(".cart-column-resizer")) {
+        event.preventDefault();
+        return;
+      }
+      draggedCartColumn = header.dataset.cartColumn;
+      header.classList.add("cart-column-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", draggedCartColumn);
+    });
+    header.addEventListener("dragover", event => {
+      event.preventDefault();
+      if (draggedCartColumn && draggedCartColumn !== header.dataset.cartColumn) {
+        header.classList.add("cart-column-drop-target");
+      }
+    });
+    header.addEventListener("dragleave", () => header.classList.remove("cart-column-drop-target"));
+    header.addEventListener("drop", event => {
+      event.preventDefault();
+      const sourceId = draggedCartColumn || event.dataTransfer.getData("text/plain");
+      const targetId = header.dataset.cartColumn;
+      if (!sourceId || sourceId === targetId) return;
+      const sourceIndex = cartColumnLayout.findIndex(column => column.id === sourceId);
+      const targetIndex = cartColumnLayout.findIndex(column => column.id === targetId);
+      if (sourceIndex < 0 || targetIndex < 0) return;
+      const [moved] = cartColumnLayout.splice(sourceIndex, 1);
+      cartColumnLayout.splice(targetIndex, 0, moved);
+      saveCartColumnLayout();
+      draggedCartColumn = null;
+      renderCart();
+    });
+    header.addEventListener("dragend", () => {
+      draggedCartColumn = null;
+      head.querySelectorAll("th").forEach(item => item.classList.remove("cart-column-dragging", "cart-column-drop-target"));
+    });
+  });
+  head.querySelectorAll(".cart-column-resizer").forEach(resizer => {
+    resizer.addEventListener("pointerdown", event =>
+      startCartColumnResize(event, resizer.closest("th").dataset.cartColumn)
+    );
+  });
+  applyCartColumnWidths();
+}
+
+function renderRestaurantOrderContext() {
+  const panel = document.getElementById("restaurantOrderContext");
+  panel?.classList.toggle("hidden", !activeRestaurantOrder);
+  if (!activeRestaurantOrder) return;
+  document.getElementById("restaurantOrderTitle").textContent = `Pedido · ${activeRestaurantOrder.tableName}`;
+  document.getElementById("restaurantOrderDetail").textContent =
+    `${activeRestaurantOrder.guests} cliente${Number(activeRestaurantOrder.guests) === 1 ? "" : "s"} · ${activeRestaurantOrder.serverName}${restaurantSplitMode ? " · Pago parcial" : ""}`;
+  const splitButton = document.getElementById("btnSplitRestaurantBill");
+  if (splitButton) splitButton.textContent = restaurantSplitMode ? "Cancelar división" : "Dividir cuenta";
+}
+
+function roundMoneyValue(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function splitLineTotal(item, quantity) {
+  const gross = roundMoneyValue(Number(item.price || 0) * Number(quantity || 0));
+  const discount = roundMoneyValue(gross * Number(item.discountPercent || 0) / 100);
+  return roundMoneyValue(gross - discount);
+}
+
+async function openSplitBillModal() {
+  if (!activeRestaurantOrder || !cart.length) return alert("Esta mesa todavía no tiene productos para dividir.");
+  if (restaurantSplitMode) {
+    cart = restaurantFullCart.map(item => ({ ...item, selectedModifiers: JSON.parse(JSON.stringify(item.selectedModifiers || [])) }));
+    restaurantSplitMode = false;
+    renderRestaurantOrderContext();
+    renderCart();
+    return;
+  }
+  if (restaurantOrderDirty && !await saveRestaurantOrder(true)) return;
+  restaurantFullCart = cart.map(item => ({ ...item, selectedModifiers: JSON.parse(JSON.stringify(item.selectedModifiers || [])) }));
+  const tbody = document.getElementById("splitBillBody");
+  tbody.innerHTML = "";
+  restaurantFullCart.forEach((item, index) => {
+    const row = document.createElement("tr");
+    const modifiers = modifierSelectionLabel(item.selectedModifiers);
+    row.innerHTML = `<td>${escapeCartValue(item.name)}${modifiers ? `<small class="cart-modifier-summary">${escapeCartValue(modifiers)}</small>` : ""}</td><td>${item.quantity}</td><td><input type="number" min="0" max="${item.quantity}" step="1" value="0" data-split-index="${index}" oninput="updateSplitBillTotal()"></td><td>$0.00</td>`;
+    tbody.appendChild(row);
+  });
+  updateSplitBillTotal();
+  document.getElementById("splitBillModal").classList.remove("hidden");
+}
+
+function updateSplitBillTotal() {
+  let total = 0;
+  document.querySelectorAll("#splitBillBody input[data-split-index]").forEach(input => {
+    const index = Number(input.dataset.splitIndex);
+    const item = restaurantFullCart[index];
+    const quantity = Math.min(Number(item?.quantity || 0), Math.max(0, Math.floor(Number(input.value) || 0)));
+    const lineTotal = splitLineTotal(item, quantity);
+    total += lineTotal;
+    input.closest("tr").lastElementChild.textContent = `$${lineTotal.toFixed(2)}`;
+  });
+  document.getElementById("splitBillTotal").textContent = total.toFixed(2);
+}
+
+function closeSplitBillModal() {
+  document.getElementById("splitBillModal").classList.add("hidden");
+}
+
+function confirmSplitBill() {
+  const selected = [];
+  document.querySelectorAll("#splitBillBody input[data-split-index]").forEach(input => {
+    const item = restaurantFullCart[Number(input.dataset.splitIndex)];
+    const quantity = Math.min(Number(item?.quantity || 0), Math.max(0, Math.floor(Number(input.value) || 0)));
+    if (item && quantity > 0) selected.push({ ...item, quantity, selectedModifiers: JSON.parse(JSON.stringify(item.selectedModifiers || [])) });
+  });
+  if (!selected.length) return alert("Selecciona al menos un producto o una unidad para cobrar.");
+  cart = selected;
+  restaurantSplitMode = true;
+  closeSplitBillModal();
+  renderRestaurantOrderContext();
+  renderCart();
+  updatePaymentFields();
+}
+
+async function activateRestaurantOrder(order) {
+  if (cart.length && String(activeRestaurantOrder?.id || "") !== String(order.id)) {
+    const replace = await appConfirm("El carrito actual será reemplazado por el pedido de la mesa. ¿Continuar?");
+    if (!replace) return;
+  }
+  activeRestaurantOrder = order;
+  restaurantOrderDirty = false;
+  restaurantSplitMode = false;
+  cart = (order.items || []).map(item => {
+    const selectedModifiers = Array.isArray(item.selectedModifiers) ? item.selectedModifiers : [];
+    const modifierKey = JSON.stringify(selectedModifiers.map(selection => ({ group: selection.group, options: (selection.options || []).map(option => option.name).sort() })));
+    const modifierExtra = selectedModifiers.flatMap(selection => selection.options || []).reduce((sum, option) => sum + Number(option.priceDelta || 0), 0);
+    return {
+      id: Number(item.productId),
+      orderItemId: Number(item.id),
+      code: item.code,
+      name: item.name,
+      basePrice: Number(item.price) - modifierExtra,
+      price: Number(item.price),
+      quantity: Number(item.quantity),
+      discountPercent: Number(item.discountPercent || 0),
+      discountReason: item.discountReason || "",
+      selectedModifiers,
+      modifierKey,
+      note: item.note || ""
+    };
+  });
+  restaurantFullCart = cart.map(item => ({ ...item, selectedModifiers: JSON.parse(JSON.stringify(item.selectedModifiers || [])) }));
+  renderRestaurantOrderContext();
+  renderCart();
+  showTab("pos");
+  document.getElementById("posCode")?.focus();
+}
+
+async function saveRestaurantOrder(silent = false) {
+  if (!activeRestaurantOrder) return true;
+  if (restaurantSplitMode) {
+    if (!silent) alert("Primero termina o cancela el pago dividido.");
+    return false;
+  }
+  if (!validateCartDiscounts()) return false;
+  const button = document.getElementById("btnSaveRestaurantOrder");
+  if (button) button.disabled = true;
+  try {
+    const res = await fetch(`${API}/restaurant/table-sessions/${activeRestaurantOrder.tableSessionId}/order`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ items: cart })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "No se pudo guardar el pedido.");
+    activeRestaurantOrder = { ...activeRestaurantOrder, ...data };
+    restaurantOrderDirty = false;
+    if (!silent) alert("Pedido enviado a Cocina.");
+    return true;
+  } catch (err) {
+    alert(err.message);
+    return false;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function returnToRestaurantTables() {
+  if (activeRestaurantOrder && restaurantOrderDirty && !await saveRestaurantOrder(true)) return;
+  activeRestaurantOrder = null;
+  restaurantOrderDirty = false;
+  restaurantSplitMode = false;
+  restaurantFullCart = [];
+  cart = [];
+  renderRestaurantOrderContext();
+  renderCart();
+  showTab("mesas");
+  await loadRestaurantTables();
+}
+
+function renderCart() {
+  const tbody = document.getElementById("cartBody");
+  renderCartHeader();
+  tbody.innerHTML = "";
+  const columns = visibleCartColumns();
+  cart.forEach((item, index) => {
+    const gross = item.price * item.quantity;
+    const discountPercent = Number(item.discountPercent || 0);
+    const lineTotal = gross * (1 - discountPercent / 100);
+    const discountReason = item.discountReason || "";
+    const modifierLabel = modifierSelectionLabel(item.selectedModifiers);
+    const reasonControl = discountPercent > 0
+      ? `<select class="cart-discount-reason" onchange="updateCartDiscountReason(${index}, this.value)">
+          <option value=""${discountReason ? "" : " selected"}>Motivo...</option>
+          <option value="Promoción"${discountReason === "Promoción" ? " selected" : ""}>Promoción</option>
+          <option value="Cortesía"${discountReason === "Cortesía" ? " selected" : ""}>Cortesía</option>
+          <option value="Error de cocina"${discountReason === "Error de cocina" ? " selected" : ""}>Error de cocina</option>
+        </select>`
+      : "";
+    const cells = {
+      code: `<td>${escapeCartValue(item.code)}</td>`,
+      name: `<td>${escapeCartValue(item.name)}${modifierLabel ? `<small class="cart-modifier-summary">${escapeCartValue(modifierLabel)}</small>` : ""}</td>`,
+      quantity: `<td>
+          <input type="number" min="1" value="${item.quantity}"
+                 onchange="updateCartQuantity(${index}, this.value)">
+        </td>`,
+      price: `<td>$${item.price.toFixed(2)}</td>`,
+      discount: `<td><div class="cart-discount-control"><input type="number" min="0" max="100" step="1" value="${discountPercent}" onchange="updateCartDiscount(${index}, this.value)"><span>%</span>${reasonControl}</div></td>`,
+      total: `<td>${discountPercent > 0 ? `<small class="cart-original-total">Antes $${gross.toFixed(2)}</small>` : ""}$${lineTotal.toFixed(2)}</td>`,
+      note: `<td><input class="restaurant-item-note" maxlength="200" value="${escapeCartValue(item.note)}" placeholder="Ej. sin azúcar" oninput="updateCartNote(${index}, this.value)"></td>`,
+      actions: `<td><button onclick="removeFromCart(${index})">Quitar</button></td>`
+    };
+    tbody.innerHTML += `<tr>${columns.map(column => cells[column.id]).join("")}</tr>`;
+  });
+  applyCartColumnWidths();
+  updateTotal();
+}
+
+function updateCartDiscount(index, value) {
+  if (!cart[index]) return;
+  const discount = Number(value);
+  if (!Number.isFinite(discount) || discount < 0 || discount > 100) {
+    alert("El descuento debe estar entre 0% y 100%.");
+    renderCart();
+    return;
+  }
+  cart[index].discountPercent = discount;
+  if (discount === 0) cart[index].discountReason = "";
+  if (activeRestaurantOrder && !restaurantSplitMode) restaurantOrderDirty = true;
+  renderCart();
+}
+
+function updateCartDiscountReason(index, value) {
+  if (!cart[index]) return;
+  cart[index].discountReason = String(value || "");
+  if (activeRestaurantOrder && !restaurantSplitMode) restaurantOrderDirty = true;
+}
+
+function validateCartDiscounts() {
+  const missingReason = cart.find(item => Number(item.discountPercent || 0) === 100 && !String(item.discountReason || "").trim());
+  if (!missingReason) return true;
+  alert(`Selecciona el motivo para entregar ${missingReason.name} gratis.`);
+  return false;
+}
+
+function updateCartQuantity(index, newQty) {
+  const qty = Number(newQty);
+  if (!qty || qty <= 0) return;
+  cart[index].quantity = qty;
+  if (activeRestaurantOrder && !restaurantSplitMode) restaurantOrderDirty = true;
+  renderCart();
+}
+
+function updateCartNote(index, note) {
+  if (!cart[index]) return;
+  cart[index].note = String(note || "").slice(0, 200);
+  if (activeRestaurantOrder && !restaurantSplitMode) restaurantOrderDirty = true;
+}
+
+function removeFromCart(index) {
+  cart.splice(index, 1);
+  if (activeRestaurantOrder && !restaurantSplitMode) restaurantOrderDirty = true;
+  renderCart();
+}
+
+function updateTotal() {
+  const lines = cart.map(item => {
+    const gross = roundMoneyValue(item.price * item.quantity);
+    const discount = roundMoneyValue(gross * Number(item.discountPercent || 0) / 100);
+    return { gross, discount, total: roundMoneyValue(gross - discount) };
+  });
+  const grossTotal = roundMoneyValue(lines.reduce((sum, line) => sum + line.gross, 0));
+  const discount = roundMoneyValue(lines.reduce((sum, line) => sum + line.discount, 0));
+  const total = roundMoneyValue(lines.reduce((sum, line) => sum + line.total, 0));
+  const subtotal = total / 1.15;
+  const tax = total - subtotal;
+  document.getElementById("cartGrossTotal").innerText = grossTotal.toFixed(2);
+  document.getElementById("cartDiscount").innerText = discount.toFixed(2);
+  document.getElementById("cartSubtotal").innerText = subtotal.toFixed(2);
+  document.getElementById("cartTax").innerText = tax.toFixed(2);
+  document.getElementById("cartTotal").innerText = total.toFixed(2);
+  updateChange();
+  updateMixedPaymentTotal();
+}
+
+function updatePaymentFields() {
+  const type = document.getElementById("paymentType")?.value || "Efectivo";
+  document.getElementById("cashReceivedPanel")?.classList.toggle("hidden", type !== "Efectivo");
+  document.getElementById("mixedPaymentPanel")?.classList.toggle("hidden", type !== "Mixto");
+  updateChange();
+  updateMixedPaymentTotal();
+}
+
+function updateMixedPaymentTotal() {
+  const target = document.getElementById("mixedPaymentRemaining");
+  const label = document.getElementById("mixedPaymentRemainingLabel");
+  if (!target) return;
+  const total = Number(document.getElementById("cartTotal")?.innerText || 0);
+  const assigned = ["mixedCash", "mixedCard", "mixedTransfer"]
+    .reduce((sum, id) => sum + Math.max(0, Number(document.getElementById(id)?.value) || 0), 0);
+  const remaining = Math.round((total - assigned) * 100) / 100;
+  target.textContent = Math.abs(remaining).toFixed(2);
+  target.parentElement.classList.toggle("payment-over", remaining < 0);
+  target.parentElement.classList.toggle("payment-complete", Math.abs(remaining) < 0.01);
+  if (label) label.textContent = remaining < 0 ? "Exceso asignado:" : Math.abs(remaining) < 0.01 ? "Pago completo:" : "Falta por asignar:";
+}
+
+function paymentPayload(total) {
+  const paymentType = document.getElementById("paymentType").value || "Efectivo";
+  if (paymentType !== "Mixto") return { paymentType, payments: [] };
+  const payments = [
+    { paymentType: "Efectivo", amount: Math.max(0, Number(document.getElementById("mixedCash").value) || 0) },
+    { paymentType: "Tarjeta", amount: Math.max(0, Number(document.getElementById("mixedCard").value) || 0) },
+    { paymentType: "Transferencia", amount: Math.max(0, Number(document.getElementById("mixedTransfer").value) || 0) }
+  ].filter(item => item.amount > 0).map(item => ({ ...item, amount: Math.round(item.amount * 100) / 100 }));
+  const assigned = Math.round(payments.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+  if (payments.length < 2) throw new Error("El pago mixto debe usar al menos dos formas de pago.");
+  if (Math.abs(assigned - total) > 0.009) throw new Error(`Los pagos deben sumar exactamente $${total.toFixed(2)}.`);
+  return { paymentType, payments };
+}
+
+function updateChange() {
+  const total = Number(document.getElementById("cartTotal").innerText || 0);
+  const cash = Number(document.getElementById("cashReceived").value || 0);
+  const change = cash - total;
+  document.getElementById("changeDue").innerText =
+    change > 0 ? change.toFixed(2) : "0.00";
+}
+
+function renderThermalReceipt(data) {
+  const invoice = data.invoice || {};
+  const issuer = data.issuer || {};
+  const date = invoice.date ? new Date(invoice.date) : new Date();
+  const documentLabel = invoice.invoiceType === "FACTURA" ? "FACTURA ELECTRÓNICA" : "COMPROBANTE ELECTRÓNICO";
+  const statusLabel = data.environment === "TEST"
+    ? "AMBIENTE DE PRUEBAS · SIN VALIDEZ TRIBUTARIA"
+    : data.authorized ? "AUTORIZADO POR EL SRI" : "PENDIENTE DE AUTORIZACIÓN SRI · SIN VALIDEZ TRIBUTARIA";
+  const modifierHtml = selections => (Array.isArray(selections) ? selections : []).flatMap(selection =>
+    (selection.options || []).map(option => `<small>${escapeCartValue(selection.group)}: ${escapeCartValue(option.name)}</small>`)
+  ).join("");
+  const rows = (data.lines || []).map(line => `
+    <tr><td colspan="3"><strong>${escapeCartValue(line.name)}</strong>${modifierHtml(line.selectedModifiers)}</td></tr>
+    <tr><td>${Number(line.quantity)} × $${Number(line.price).toFixed(2)}</td><td>${Number(line.discountAmount || 0) ? `Desc. $${Number(line.discountAmount).toFixed(2)}` : ""}</td><td>$${Number(line.total).toFixed(2)}</td></tr>
+  `).join("");
+  const accessKey = invoice.accessKey || invoice.authorizationNumber || "";
+  const payments = Array.isArray(data.payments) && data.payments.length
+    ? data.payments
+    : [{ paymentType: invoice.paymentType || "—", amount: Number(invoice.total || 0) }];
+  const paymentHtml = payments.length > 1
+    ? `<div><strong>Formas de pago:</strong></div>${payments.map(payment => `<div>${escapeCartValue(payment.paymentType)}: $${Number(payment.amount || 0).toFixed(2)}</div>`).join("")}`
+    : `<div>Forma de pago: ${escapeCartValue(payments[0].paymentType)}</div>`;
+  document.getElementById("thermalReceipt").innerHTML = `
+    <header class="receipt-center">
+      <h1>${escapeCartValue(issuer.commercialName || issuer.legalName || company)}</h1>
+      ${issuer.commercialName && issuer.legalName ? `<div>${escapeCartValue(issuer.legalName)}</div>` : ""}
+      <div>RUC: ${escapeCartValue(issuer.ruc || "NO CONFIGURADO")}</div>
+      ${issuer.mainAddress ? `<div>Matriz: ${escapeCartValue(issuer.mainAddress)}</div>` : ""}
+      ${issuer.establishmentAddress ? `<div>Establecimiento: ${escapeCartValue(issuer.establishmentAddress)}</div>` : ""}
+      ${issuer.taxRegime ? `<div>${escapeCartValue(issuer.taxRegime)}</div>` : ""}
+      ${issuer.specialTaxpayerNumber ? `<div>Contribuyente especial: ${escapeCartValue(issuer.specialTaxpayerNumber)}</div>` : ""}
+      <div>Obligado a llevar contabilidad: ${escapeCartValue(issuer.accountingRequired || "NO")}</div>
+    </header>
+    <div class="receipt-separator"></div>
+    <section class="receipt-center">
+      <strong>${documentLabel}</strong>
+      <div>No. ${escapeCartValue(invoice.invoiceNumber || "—")}</div>
+      <div class="receipt-status">${statusLabel}</div>
+    </section>
+    <div class="receipt-separator"></div>
+    <section>
+      <div>Fecha: ${date.toLocaleDateString("es-EC")} ${date.toLocaleTimeString("es-EC")}</div>
+      <div>Cliente: ${escapeCartValue(invoice.buyerName || "CONSUMIDOR FINAL")}</div>
+      <div>Identificación: ${escapeCartValue(invoice.buyerIdNumber || "9999999999999")}</div>
+      ${invoice.buyerAddress ? `<div>Dirección: ${escapeCartValue(invoice.buyerAddress)}</div>` : ""}
+      ${invoice.buyerEmail ? `<div>Correo: ${escapeCartValue(invoice.buyerEmail)}</div>` : ""}
+      <div>Cajero: ${escapeCartValue(invoice.issuedByName || "—")}</div>
+      ${data.restaurant ? `<div>Mesa: ${escapeCartValue(data.restaurant.tableName)} · Mesero: ${escapeCartValue(data.restaurant.serverName || "Sin asignar")}</div>` : ""}
+    </section>
+    <div class="receipt-separator"></div>
+    <table class="receipt-items"><tbody>${rows}</tbody></table>
+    <div class="receipt-separator"></div>
+    <section class="receipt-totals">
+      <div><span>Subtotal 15%</span><strong>$${Number(invoice.subtotal || 0).toFixed(2)}</strong></div>
+      <div><span>Subtotal 0%</span><strong>$0.00</strong></div>
+      <div><span>Subtotal no objeto IVA</span><strong>$0.00</strong></div>
+      <div><span>Subtotal exento IVA</span><strong>$0.00</strong></div>
+      <div><span>Subtotal sin impuestos</span><strong>$${Number(invoice.subtotal || 0).toFixed(2)}</strong></div>
+      <div><span>Descuento</span><strong>$${Number(invoice.discountAmount || 0).toFixed(2)}</strong></div>
+      <div><span>ICE</span><strong>$0.00</strong></div>
+      <div><span>IVA 15%</span><strong>$${Number(invoice.taxAmount || 0).toFixed(2)}</strong></div>
+      <div class="receipt-grand-total"><span>VALOR A PAGAR</span><strong>$${Number(invoice.total || 0).toFixed(2)}</strong></div>
+    </section>
+    <div class="receipt-separator"></div>
+    <section>
+      ${paymentHtml}
+      ${invoice.paymentType === "Efectivo" ? `<div>Recibido: $${Number(invoice.cashReceived || 0).toFixed(2)} · Cambio: $${Number(invoice.changeDue || 0).toFixed(2)}</div>` : ""}
+      ${accessKey ? `<div class="receipt-access-key">${invoice.authorizationNumber ? `<strong>NÚMERO DE AUTORIZACIÓN</strong><br>${escapeCartValue(invoice.authorizationNumber)}<br>` : ""}${invoice.authorizedAt ? `Fecha autorización: ${escapeCartValue(invoice.authorizedAt)}<br>` : ""}<strong>CLAVE DE ACCESO</strong><br>${escapeCartValue(invoice.accessKey || invoice.authorizationNumber)}</div>` : `<div class="receipt-warning">La clave de acceso aparecerá cuando el SRI autorice el comprobante.</div>`}
+    </section>
+    <div class="receipt-separator"></div>
+    <footer class="receipt-center">Gracias por su compra<br><small>Representación impresa del comprobante electrónico (RIDE) únicamente cuando conste como autorizado por el SRI.</small></footer>
+  `;
+}
+
+async function printSaleReceipt(invoiceId) {
+  if (!invoiceId) return alert("No se encontró el comprobante para imprimir.");
+  const previousTitle = document.title;
+  try {
+    const res = await fetch(`${API}/invoices/${invoiceId}/receipt`, { headers: authHeaders(), cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "No se pudo preparar el recibo.");
+      return false;
+    }
+    renderThermalReceipt(data);
+    document.title = `Recibo_${data.invoice?.invoiceNumber || invoiceId}`;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    window.print();
+    return true;
+  } catch {
+    alert("La venta fue registrada, pero no se pudo abrir el recibo. Puedes imprimirlo desde Ventas.");
+    return false;
+  } finally {
+    document.title = previousTitle;
+  }
+}
+
+async function printSelectedSaleReceipt() {
+  if (!selectedSale?.invoiceId) return alert("Selecciona una fila de la venta primero.");
+  await printSaleReceipt(selectedSale.invoiceId);
+}
+
+async function finishSale() {
+  if (!cart.length) {
+    alert("No hay productos en el carrito.");
+    return;
+  }
+  if (!validateCartDiscounts()) return;
+
+  const total = Number(document.getElementById("cartTotal").innerText || 0);
+  const cash = Number(document.getElementById("cashReceived").value || 0);
+  let payment;
+  try {
+    payment = paymentPayload(total);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  const paymentType = payment.paymentType;
+
+  if (invoiceType === "FACTURA" && !selectedInvoiceClient) {
+    alert("Selecciona o agrega un cliente para emitir la factura.");
+    return;
+  }
+
+  if (paymentType === "Efectivo" && cash < total) {
+    alert("Efectivo insuficiente.");
+    return;
+  }
+
+  const paymentSummary = payment.payments.length
+    ? `\nFormas de pago:\n${payment.payments.map(item => `${item.paymentType}: $${item.amount.toFixed(2)}`).join("\n")}`
+    : `\nForma de pago: ${paymentType}`;
+  const confirmed = await appConfirm(
+    `${invoiceType === "FACTURA" ? selectedInvoiceClient.razonSocial : "CONSUMIDOR FINAL"}\n` +
+    `Precio antes de descuento: $${document.getElementById("cartGrossTotal").innerText}\n` +
+    `Valor descontado: $${document.getElementById("cartDiscount").innerText}\n` +
+    `Subtotal: $${document.getElementById("cartSubtotal").innerText}\n` +
+    `IVA 15%: $${document.getElementById("cartTax").innerText}\n` +
+    `Total: $${total.toFixed(2)}${paymentSummary}\n\n¿Emitir comprobante?`
+  );
+  if (!confirmed) return;
+
+  // No reenviar un pedido sin cambios: hacerlo reiniciaría sus tiempos de Cocina
+  // justo antes de cobrar y lo quitaría del reporte de rendimiento.
+  if (activeRestaurantOrder && !restaurantSplitMode && restaurantOrderDirty && !await saveRestaurantOrder(true)) return;
+
+  const completedRestaurantOrder = activeRestaurantOrder;
+
+  const res = await fetch(`${API}/sales/${company}`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json", ...authHeaders()},
+    body: JSON.stringify({
+      items: cart,
+      total,
+      cash,
+      paymentType,
+      payments: payment.payments,
+      invoiceType,
+      clientId: selectedInvoiceClient?.id || null,
+      restaurantOrderId: completedRestaurantOrder?.id || null
+    })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo registrar la factura.");
+
+  await printSaleReceipt(data.invoiceId);
+
+  cart = [];
+  activeRestaurantOrder = null;
+  restaurantOrderDirty = false;
+  restaurantSplitMode = false;
+  restaurantFullCart = [];
+  renderRestaurantOrderContext();
+  renderCart();
+  document.getElementById("cashReceived").value = "";
+  ["mixedCash", "mixedCard", "mixedTransfer"].forEach(id => { document.getElementById(id).value = "0"; });
+  document.getElementById("paymentType").value = "Efectivo";
+  updatePaymentFields();
+  await Promise.all([loadProducts(), loadCashRegister()]); // actualizar inventario y caja
+  selectedInvoiceClient = null;
+  setInvoiceType("CONSUMIDOR_FINAL");
+  const restaurantMessage = completedRestaurantOrder
+    ? data.tableClosed
+      ? "\nMesa liberada automáticamente."
+      : `\nPago parcial registrado. Quedan ${data.remainingItems} producto(s) en la cuenta.`
+    : "";
+  alert(`Venta registrada.\nComprobante: ${data.invoiceNumber}\nEstado SRI: ${data.status}${restaurantMessage}`);
+  if (completedRestaurantOrder) {
+    showTab("mesas");
+    await loadRestaurantTables();
+  }
+}
+
+// ------- VENTAS (LISTADO) -------
+
+async function loadSales(preserveFilter = false) {
+  const res = await fetch(`${API}/sales/${company}`, { headers: authHeaders() });
+  const data = await res.json();
+
+  if (!Array.isArray(data)) {
+    console.error("Error cargando ventas:", data);
+    return;
+  }
+
+  allSales = data;
+  resetSaleSelection();
+
+  if (preserveFilter) {
+    filterSalesByDate();
+    return;
+  }
+  const todayButton = document.querySelector(".sales-quick-filters button");
+  setSalesQuickRange("today", todayButton);
+}
+
+function renderSalesTable(list) {
+  const tbody = document.getElementById("salesBody");
+  tbody.innerHTML = "";
+  list.forEach(s => {
+    const fecha = s.date ? new Date(s.date).toLocaleString() : "";
+    const tipo = s.paymentType || "Efectivo";
+    const discountPercent = Number(s.discountPercent || 0);
+    const discountAmount = Number(s.discountAmount || 0);
+    const returnedQuantity = Number(s.returnedQuantity || 0);
+    const returnedAmount = Number(s.returnedAmount || 0);
+    const currentTotal = Math.max(0, Number(s.total || 0) - returnedAmount);
+    const statusLabels = {
+      COMPLETADA: "Completada",
+      DEVOLUCION_PARCIAL: "Devolución parcial",
+      DEVUELTA: "Devuelta",
+      ANULADA: "Anulada"
+    };
+    const discountDetail = returnedQuantity > 0
+      ? `${escapeCartValue(s.adjustmentReason || "Devolución")}${s.adjustmentByName ? `<br><small>${escapeCartValue(s.adjustmentByName)}</small>` : ""}`
+      : discountPercent > 0
+      ? `${escapeCartValue(s.discountReason || "Descuento")}${s.grantedByName ? `<br><small>${escapeCartValue(s.grantedByName)}</small>` : ""}`
+      : "—";
+    tbody.innerHTML += `
+      <tr class="sale-row-${String(s.saleStatus || "COMPLETADA").toLowerCase()}" onclick="selectSaleRow(this, ${s.id})">
+        <td>${fecha}</td>
+        <td>${escapeCartValue(s.invoiceNumber || "—")}</td>
+        <td>${s.code}</td>
+        <td>${s.name}</td>
+        <td>${s.quantity}</td>
+        <td>${returnedQuantity || "—"}</td>
+        <td>$${Number(s.price).toFixed(2)}</td>
+        <td>$${Number(s.total).toFixed(2)}</td>
+        <td>$${currentTotal.toFixed(2)}</td>
+        <td><span class="sale-status sale-status-${String(s.saleStatus || "COMPLETADA").toLowerCase()}">${statusLabels[s.saleStatus] || "Completada"}</span></td>
+        <td>${discountDetail}</td>
+        <td>${tipo}</td>
+      </tr>
+    `;
+  });
+}
+
+async function loadStoreUsers() {
+  if (userRole !== "Admin") return;
+  const res = await fetch(`${API}/store/users`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudieron cargar los usuarios.");
+  storeUsers = data.users || [];
+  currentStoreUserId = data.currentUserId;
+  storeUserLimit = data.userLimit;
+  selectedStoreUser = null;
+  document.getElementById("storeUserLicenseStatus").textContent = `${storeUsers.length} de ${storeUserLimit} usuarios disponibles en tu licencia.`;
+  renderStoreUsers();
+}
+
+function renderStoreUsers() {
+  const tbody = document.getElementById("storeUsersBody");
+  if (!tbody) return;
+  const search = document.getElementById("storeUserSearch").value.trim().toLowerCase();
+  selectedStoreUser = null;
+  tbody.innerHTML = "";
+  storeUsers.filter(user => !search || `${user.fullName || ""} ${user.username}`.toLowerCase().includes(search)).forEach(user => {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td></td><td></td><td></td><td></td>";
+    row.children[0].textContent = user.fullName || "—";
+    row.children[1].textContent = user.username;
+    row.children[2].textContent = user.role;
+    row.children[3].textContent = user.mustChangePassword ? "Pendiente de crear contraseña" : "Activo";
+    row.onclick = () => {
+      selectedStoreUser = user;
+      tbody.querySelectorAll("tr").forEach(item => item.classList.remove("selected-row"));
+      row.classList.add("selected-row");
+    };
+    tbody.appendChild(row);
+  });
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="4" class="empty-table">No hay usuarios con esa búsqueda.</td></tr>';
+}
+
+async function createStoreUser() {
+  const payload = {
+    fullName: document.getElementById("storeUserName").value.trim(),
+    username: document.getElementById("storeUserEmail").value.trim(),
+    password: document.getElementById("storeUserTemporaryPassword").value,
+    role: document.getElementById("storeUserRole").value
+  };
+  const res = await fetch(`${API}/store/users`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo crear el usuario.");
+  ["storeUserName", "storeUserEmail", "storeUserTemporaryPassword"].forEach(id => document.getElementById(id).value = "");
+  await loadStoreUsers();
+  alert("Usuario creado. Envíale su correo y contraseña temporal.");
+}
+
+async function setSelectedStoreUserTemporaryPassword() {
+  if (!selectedStoreUser) return alert("Selecciona un usuario de la tabla primero.");
+  const password = await appPrompt(`Escribe una contraseña temporal para ${selectedStoreUser.username}:`, "", { inputType: "password" });
+  if (password === null) return;
+  const res = await fetch(`${API}/store/users/${selectedStoreUser.id}/temporary-password`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo asignar la contraseña temporal.");
+  await loadStoreUsers();
+  alert("Contraseña temporal asignada. El usuario deberá crear una nueva al iniciar sesión.");
+}
+
+async function changeSelectedStoreUserRole() {
+  if (!selectedStoreUser) return alert("Selecciona un usuario de la tabla primero.");
+  const isCurrentUser = selectedStoreUser.id === currentStoreUserId;
+  const role = selectedStoreUser.role === "Admin" ? "Usuario" : "Admin";
+  if (!await appConfirm(`¿Cambiar a ${selectedStoreUser.fullName || selectedStoreUser.username} al rol ${role}?`)) return;
+  const res = await fetch(`${API}/store/users/${selectedStoreUser.id}/role`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ role }) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cambiar el rol.");
+  if (isCurrentUser) localStorage.setItem("role", role);
+  if (isCurrentUser && role === "Usuario") return location.reload();
+  await loadStoreUsers();
+}
+
+async function deleteSelectedStoreUser() {
+  if (!selectedStoreUser) return alert("Selecciona un usuario de la tabla primero.");
+  if (selectedStoreUser.id === currentStoreUserId) return alert("No puedes eliminar tu propia cuenta.");
+  if (!await appConfirm(`¿Eliminar a ${selectedStoreUser.fullName || selectedStoreUser.username}?`)) return;
+  const res = await fetch(`${API}/store/users/${selectedStoreUser.id}`, { method: "DELETE", headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo eliminar el usuario.");
+  await loadStoreUsers();
+}
+
+function authHeaders() {
+  const token = localStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function selectSaleRow(row, id) {
+  selectedSale = allSales.find(sale => sale.id === id) || null;
+  document.querySelectorAll("#salesBody tr").forEach(item => item.classList.remove("selected-row"));
+  row.classList.add("selected-row");
+  document.getElementById("btnPrintSaleReceipt").disabled = !selectedSale?.invoiceId;
+}
+
+function resetSaleSelection() {
+  selectedSale = null;
+  const printButton = document.getElementById("btnPrintSaleReceipt");
+  if (printButton) printButton.disabled = true;
+}
+
+async function toggleSelectedMenuAvailability() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede cambiar la disponibilidad.");
+  if (!selectedMenuProduct) return alert("Selecciona un producto primero.");
+  const available = Number(selectedMenuProduct.available ?? 1) !== 1;
+  const res = await fetch(`${API}/restaurant/menu/${selectedMenuProduct.id}/availability`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ available })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cambiar la disponibilidad.");
+  selectedMenuProduct = null;
+  await loadProducts();
+}
+
+async function returnSelectedSale() {
+  if (userRole !== "Admin") {
+    alert("Solo un administrador puede registrar devoluciones.");
+    return;
+  }
+  if (!selectedSale) return alert("Selecciona un producto vendido primero.");
+  const remaining = Number(selectedSale.quantity || 0) - Number(selectedSale.returnedQuantity || 0);
+  if (remaining <= 0 || selectedSale.saleStatus === "ANULADA") return alert("Este producto ya no tiene unidades disponibles para devolver.");
+  const rawQuantity = await appPrompt(`Cantidad a devolver (máximo ${remaining}):`, String(remaining), { inputType: "number" });
+  if (rawQuantity === null) return;
+  const quantity = Number(rawQuantity);
+  if (!Number.isInteger(quantity) || quantity <= 0 || quantity > remaining) return alert(`Ingresa una cantidad entera entre 1 y ${remaining}.`);
+  const reason = await appPrompt("Motivo de la devolución:", "");
+  if (reason === null) return;
+  if (reason.trim().length < 3) return alert("Escribe el motivo de la devolución.");
+  if (!await appConfirm(`¿Devolver ${quantity} unidad(es) de ${selectedSale.name}?\n\nEl inventario se repondrá y la venta conservará su historial.`)) return;
+  const res = await fetch(`${API}/sales/${company}/${selectedSale.id}/return`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ quantity, reason: reason.trim() })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo registrar la devolución.");
+  await Promise.all([loadSales(true), loadProducts(), loadCashRegister()]);
+  alert(`Devolución registrada por $${Number(data.amount || 0).toFixed(2)}.`);
+}
+
+async function cancelSelectedSale() {
+  if (userRole !== "Admin") {
+    alert("Solo un administrador puede anular ventas.");
+    return;
+  }
+  if (!selectedSale) return alert("Selecciona una fila de la venta primero.");
+  if (selectedSale.saleStatus === "ANULADA") return alert("Esta venta ya fue anulada.");
+  const reason = await appPrompt("Motivo de la anulación completa:", "");
+  if (reason === null) return;
+  if (reason.trim().length < 3) return alert("Escribe el motivo de la anulación.");
+  const reference = selectedSale.invoiceNumber && selectedSale.invoiceNumber !== "—" ? ` ${selectedSale.invoiceNumber}` : " seleccionada";
+  if (!await appConfirm(`¿Anular completamente la venta${reference}?\n\nSe repondrán al inventario todas las unidades que todavía no hayan sido devueltas. La venta no se borrará.`)) return;
+  const res = await fetch(`${API}/sales/${company}/${selectedSale.id}/cancel`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: reason.trim() })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo anular la venta.");
+  await Promise.all([loadSales(true), loadProducts(), loadCashRegister()]);
+  alert(`Venta anulada. Valor registrado: $${Number(data.amount || 0).toFixed(2)}.`);
+}
+
+function filterSalesByDate() {
+  if (!Array.isArray(allSales) || !allSales.length) {
+    filteredSales = [];
+    renderSalesTable([]);
+    renderSalesReport([], "Sin datos");
+    return;
+  }
+
+  const fromVal = document.getElementById("fromDate").value;
+  const toVal = document.getElementById("toDate").value;
+
+  let fromDate = fromVal ? new Date(fromVal + "T00:00:00") : null;
+  let toDate = toVal ? new Date(toVal + "T23:59:59") : null;
+
+  let filtered = allSales;
+
+  if (fromDate || toDate) {
+    filtered = allSales.filter(s => {
+      if (!s.date) return false;
+      const d = new Date(s.date);
+      if (isNaN(d)) return false;
+      if (fromDate && d < fromDate) return false;
+      if (toDate && d > toDate) return false;
+      return true;
+    });
+  }
+
+  let label = "Todo";
+  if (fromVal || toVal) {
+    const fromText = fromVal || "...";
+    const toText = toVal || "...";
+    label = `${fromText} → ${toText}`;
+  }
+
+  filteredSales = filtered;
+  renderSalesTable(filtered);
+  renderSalesReport(filtered, label);
+}
+
+function salesDateValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function setSalesQuickRange(range, button) {
+  const end = new Date();
+  const start = new Date(end);
+  if (range === "yesterday") {
+    start.setDate(start.getDate() - 1);
+    end.setDate(end.getDate() - 1);
+  } else if (range === "week") {
+    start.setDate(start.getDate() - 6);
+  } else if (range === "month") {
+    start.setDate(1);
+  }
+  document.getElementById("fromDate").value = salesDateValue(start);
+  document.getElementById("toDate").value = salesDateValue(end);
+  document.querySelectorAll(".sales-quick-filters button").forEach(item => item.classList.toggle("active", item === button));
+  filterSalesByDate();
+}
+
+function applyCustomSalesFilter() {
+  document.querySelectorAll(".sales-quick-filters button").forEach(item => item.classList.remove("active"));
+  filterSalesByDate();
+}
+
+function renderSalesReport(list, label) {
+  const currentUnits = sale => Math.max(0, Number(sale.quantity || 0) - Number(sale.returnedQuantity || 0));
+  const currentTotal = sale => Math.max(0, Number(sale.total || 0) - Number(sale.returnedAmount || 0));
+  const total = list.reduce((sum, sale) => sum + currentTotal(sale), 0);
+  const discount = list.reduce((sum, sale) => {
+    const ratio = Number(sale.quantity || 0) ? currentUnits(sale) / Number(sale.quantity) : 0;
+    return sum + Number(sale.discountAmount || 0) * ratio;
+  }, 0);
+  const complimentary = list.reduce((sum, sale) => sum + (Number(sale.discountPercent || 0) === 100 ? currentUnits(sale) : 0), 0);
+  const units = list.reduce((sum, sale) => sum + currentUnits(sale), 0);
+  const activeSales = list.filter(sale => currentUnits(sale) > 0);
+  const transactionIds = new Set(activeSales.map(sale => sale.invoiceId ? `invoice-${sale.invoiceId}` : `line-${sale.id}`));
+  const transactionCount = transactionIds.size;
+  document.getElementById("summaryLabel").textContent = label;
+  document.getElementById("summaryTotal").textContent = total.toFixed(2);
+  document.getElementById("summaryDiscount").textContent = discount.toFixed(2);
+  document.getElementById("summaryComplimentary").textContent = complimentary;
+  document.getElementById("summaryTransactions").textContent = transactionCount;
+  document.getElementById("summaryUnits").textContent = units;
+  document.getElementById("summaryAverage").textContent = (transactionCount ? total / transactionCount : 0).toFixed(2);
+
+  const products = new Map();
+  list.forEach(sale => {
+    const activeUnits = currentUnits(sale);
+    if (!activeUnits) return;
+    const key = `${sale.code || ""}::${sale.name || "Producto"}`;
+    const item = products.get(key) || { name: sale.name || sale.code || "Producto", units: 0, total: 0 };
+    item.units += activeUnits;
+    item.total += currentTotal(sale);
+    products.set(key, item);
+  });
+  const topBody = document.getElementById("topProductsBody");
+  topBody.innerHTML = "";
+  [...products.values()].sort((a, b) => b.units - a.units || b.total - a.total).slice(0, 5).forEach(item => {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td></td><td></td><td></td>";
+    row.children[0].textContent = item.name;
+    row.children[1].textContent = item.units;
+    row.children[2].textContent = `$${item.total.toFixed(2)}`;
+    topBody.appendChild(row);
+  });
+  if (!topBody.children.length) topBody.innerHTML = '<tr><td colspan="3" class="empty-table">No hay productos en este rango.</td></tr>';
+
+  const payments = new Map();
+  list.forEach(sale => {
+    if (!currentUnits(sale)) return;
+    const breakdown = Array.isArray(sale.payments) ? sale.payments.filter(item => Number(item.amount) > 0) : [];
+    const breakdownTotal = breakdown.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    if (breakdown.length > 1 && breakdownTotal > 0) {
+      breakdown.forEach(item => {
+        const amount = currentTotal(sale) * Number(item.amount) / breakdownTotal;
+        payments.set(item.paymentType, (payments.get(item.paymentType) || 0) + amount);
+      });
+      return;
+    }
+    const type = sale.paymentType || "Efectivo";
+    payments.set(type, (payments.get(type) || 0) + currentTotal(sale));
+  });
+  const paymentSummary = document.getElementById("paymentSummary");
+  paymentSummary.innerHTML = "";
+  [...payments.entries()].sort((a, b) => b[1] - a[1]).forEach(([type, amount]) => {
+    const row = document.createElement("div");
+    const labelSpan = document.createElement("span");
+    const amountStrong = document.createElement("strong");
+    labelSpan.textContent = type;
+    amountStrong.textContent = `$${amount.toFixed(2)}`;
+    row.append(labelSpan, amountStrong);
+    paymentSummary.appendChild(row);
+  });
+  if (!paymentSummary.children.length) paymentSummary.innerHTML = '<p class="empty-table">No hay pagos en este rango.</p>';
+}
+
+function clearSalesFilter() {
+  const fromInput = document.getElementById("fromDate");
+  const toInput = document.getElementById("toDate");
+  if (fromInput) fromInput.value = "";
+  if (toInput) toInput.value = "";
+
+  filteredSales = allSales;
+  document.querySelectorAll(".sales-quick-filters button").forEach(item => item.classList.remove("active"));
+  renderSalesTable(allSales);
+  renderSalesReport(allSales, "Todo");
+}
+
+function exportSales() {
+  const list = Array.isArray(filteredSales) ? filteredSales : allSales;
+
+  if (!list || !list.length) {
+    alert("No hay ventas para exportar.");
+    return;
+  }
+
+  const rows = [["fecha","hora","factura","codigo","nombre","cantidad_vendida","cantidad_devuelta","cantidad_neta","precio_unitario","total_original","valor_devuelto","total_neto_actual","estado","motivo_ajuste","realizado_por","tipo_pago"]];
+
+  list.forEach(s => {
+    let fecha = "";
+    let hora = "";
+    if (s.date) {
+      const d = new Date(s.date);
+      if (!isNaN(d)) {
+        fecha = d.toLocaleDateString();
+        hora  = d.toLocaleTimeString();
+      }
+    }
+    const tipo = s.paymentType || "Efectivo";
+
+    rows.push([
+      fecha,
+      hora,
+      s.invoiceNumber || "",
+      s.code,
+      s.name,
+      s.quantity,
+      Number(s.returnedQuantity || 0),
+      Math.max(0, Number(s.quantity || 0) - Number(s.returnedQuantity || 0)),
+      Number(s.price).toFixed(2),
+      Number(s.total).toFixed(2),
+      Number(s.returnedAmount || 0).toFixed(2),
+      Math.max(0, Number(s.total || 0) - Number(s.returnedAmount || 0)).toFixed(2),
+      s.saleStatus || "COMPLETADA",
+      s.adjustmentReason || s.discountReason || "",
+      s.adjustmentByName || s.grantedByName || "",
+      tipo
+    ]);
+  });
+
+  const salesCsvCell = value => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const csv = rows.map(r => r.map(salesCsvCell).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url;
+  a.download = "ventas.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function logout() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("company");
+  localStorage.removeItem("username");
+  localStorage.removeItem("role"); 
+  localStorage.removeItem("businessType");
+  location.href = "index.html";
+}
+
+// inicializar
+showTab("inventario");
+loadProducts();
+loadClients();
+</script>
+</body>
+</html>
