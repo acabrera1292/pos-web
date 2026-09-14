@@ -384,11 +384,11 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET || "posmaster";
 const BUSINESS_TYPES = Object.freeze({
   SHOP: Object.freeze({
     label: "Tienda",
-    modules: Object.freeze(["inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config"])
+    modules: Object.freeze(["inicio", "inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config"])
   }),
   RESTAURANT: Object.freeze({
     label: "Restaurante",
-    modules: Object.freeze(["inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"])
+    modules: Object.freeze(["inicio", "inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"])
   })
 });
 
@@ -1496,6 +1496,111 @@ app.get("/store/context", requireCompanyUser, async (req, res) => {
       businessType,
       businessTypeLabel: BUSINESS_TYPES[businessType].label,
       enabledModules: BUSINESS_TYPES[businessType].modules
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------- INICIO / RESUMEN DIARIO ----------
+
+function etDateWithOffset(days = 0) {
+  return new Date(Date.now() + days * 86400000).toLocaleDateString("sv-SE", { timeZone: "America/New_York" });
+}
+
+function summarizeDailySales(rows) {
+  const activeUnits = sale => Math.max(0, Number(sale.quantity || 0) - Number(sale.returnedQuantity || 0));
+  const activeTotal = sale => Math.max(0, Number(sale.total || 0) - Number(sale.returnedAmount || 0));
+  const activeRows = rows.filter(sale => activeUnits(sale) > 0);
+  const transactionIds = new Set(activeRows.map(sale => sale.invoiceId ? `invoice-${sale.invoiceId}` : `sale-${sale.id}`));
+  const payments = { Efectivo: 0, Tarjeta: 0, Transferencia: 0, Otros: 0 };
+  let total = 0;
+  let units = 0;
+  let discount = 0;
+  let complimentary = 0;
+  for (const sale of rows) {
+    const lineUnits = activeUnits(sale);
+    const lineTotal = activeTotal(sale);
+    const ratio = Number(sale.quantity || 0) ? lineUnits / Number(sale.quantity) : 0;
+    total = money(total + lineTotal);
+    units += lineUnits;
+    discount = money(discount + Number(sale.discountAmount || 0) * ratio);
+    if (Number(sale.discountPercent || 0) === 100) complimentary += lineUnits;
+    if (!lineUnits) continue;
+    const paymentType = ["Efectivo", "Tarjeta", "Transferencia"].includes(sale.paymentType) ? sale.paymentType : "Otros";
+    payments[paymentType] = money(payments[paymentType] + lineTotal);
+  }
+  const transactions = transactionIds.size;
+  return { total, transactions, average: money(transactions ? total / transactions : 0), units, discount, complimentary, payments };
+}
+
+app.get("/dashboard/summary", requireCompanyUser, async (req, res) => {
+  try {
+    const today = etDateWithOffset(0);
+    const yesterday = etDateWithOffset(-1);
+    const thresholdInput = Number(req.query.threshold);
+    const threshold = Number.isFinite(thresholdInput) && thresholdInput >= 0 ? Math.min(999999, thresholdInput) : 5;
+    const sales = await dataStore.all(
+      `SELECT s.*, COALESCE(a.returnedQuantity, 0) AS returnedQuantity,
+              COALESCE(a.returnedAmount, 0) AS returnedAmount
+       FROM sales s
+       LEFT JOIN (
+         SELECT saleId, SUM(quantity) AS returnedQuantity, SUM(amount) AS returnedAmount
+         FROM sale_adjustments GROUP BY saleId
+       ) a ON a.saleId = s.id
+       WHERE s.company = ? AND s.date >= ? AND s.date <= ?
+       ORDER BY s.date DESC, s.id DESC`,
+      [req.user.company, `${yesterday}T00:00:00`, `${today}T23:59:59`]
+    );
+    const todaySummary = summarizeDailySales(sales.filter(sale => String(sale.date || "").slice(0, 10) === today));
+    const yesterdaySummary = summarizeDailySales(sales.filter(sale => String(sale.date || "").slice(0, 10) === yesterday));
+    const difference = money(todaySummary.total - yesterdaySummary.total);
+    const percentage = yesterdaySummary.total > 0 ? Math.round((difference / yesterdaySummary.total) * 1000) / 10 : null;
+    const lowStock = await dataStore.all(
+      `SELECT id, code, name, quantity FROM products
+       WHERE company = ? AND quantity <= ? ORDER BY quantity ASC, name ASC LIMIT 8`,
+      [req.user.company, threshold]
+    );
+    const lowStockCount = await dbGet("SELECT COUNT(*) AS total FROM products WHERE company = ? AND quantity <= ?", [req.user.company, threshold]);
+    const register = await dbGet("SELECT id, openedAt, openedByName FROM cash_register_sessions WHERE company = ? AND status = 'OPEN' ORDER BY id DESC LIMIT 1", [req.user.company]);
+    const license = await dbGet("SELECT businessType FROM store_licenses WHERE company = ?", [req.user.company]);
+    const businessType = normalizeBusinessType(license?.businessType);
+    let restaurant = null;
+    if (businessType === "RESTAURANT") {
+      const openTables = await dbGet("SELECT COUNT(*) AS total FROM restaurant_table_sessions WHERE company = ? AND closedAt IS NULL", [req.user.company]);
+      const activeOrders = await dbGet(
+        `SELECT COUNT(*) AS total FROM restaurant_orders
+         WHERE company = ? AND status = 'OPEN' AND COALESCE(kitchenStatus, 'NEW') <> 'READY'`,
+        [req.user.company]
+      );
+      const readyOrders = await dataStore.all(
+        `SELECT kitchenReceivedAt, kitchenStartedAt, kitchenReadyAt FROM restaurant_orders
+         WHERE company = ? AND kitchenReadyAt >= ? AND kitchenReadyAt <= ?`,
+        [req.user.company, `${today}T00:00:00`, `${today}T23:59:59`]
+      );
+      const preparationTimes = readyOrders.map(order => {
+        const start = new Date(order.kitchenStartedAt || order.kitchenReceivedAt).getTime();
+        const end = new Date(order.kitchenReadyAt).getTime();
+        return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, (end - start) / 60000) : 0;
+      });
+      restaurant = {
+        openTables: Number(openTables?.total || 0),
+        activeOrders: Number(activeOrders?.total || 0),
+        averagePreparationMinutes: preparationTimes.length
+          ? Math.round((preparationTimes.reduce((sum, value) => sum + value, 0) / preparationTimes.length) * 10) / 10
+          : 0
+      };
+    }
+    res.json({
+      date: today,
+      today: todaySummary,
+      yesterday: yesterdaySummary,
+      comparison: { difference, percentage },
+      threshold,
+      lowStockCount: Number(lowStockCount?.total || 0),
+      lowStock,
+      cashRegister: register ? { open: true, ...register } : { open: false },
+      restaurant
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
