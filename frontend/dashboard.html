@@ -18,6 +18,9 @@
       <button id="nav-pos" data-module="pos" onclick="showTab('pos')">
         Punto de Venta
       </button>
+      <button id="nav-caja" data-module="caja" onclick="showTab('caja')">
+        Caja
+      </button>
       <div id="restaurantNavGroup" class="nav-group hidden">
         <button id="nav-restaurante" class="nav-group-toggle" type="button" aria-expanded="false" onclick="toggleRestaurantMenu()">
           <span>Restaurante</span><span id="restaurantNavArrow" class="nav-group-arrow">›</span>
@@ -94,6 +97,70 @@
   <button id="btnDelete" data-action="delete" onclick="deleteSelected()">Eliminar</button>
 </div>
 
+      </section>
+
+      <!-- TAB: CAJA -->
+      <section id="caja" class="tab-section app-card hidden">
+        <div class="cash-register-heading">
+          <div>
+            <h2>Caja</h2>
+            <p>Controla el efectivo y revisa las ventas de cada turno.</p>
+          </div>
+          <span id="cashRegisterStatus" class="cash-register-status closed">Cerrada</span>
+        </div>
+
+        <div id="cashRegisterClosed">
+          <div class="cash-register-empty">
+            <h3>Abrir caja</h3>
+            <p>Escribe cuánto efectivo hay al comenzar el turno.</p>
+            <label>Fondo inicial $ <input id="cashRegisterOpeningAmount" type="number" min="0" step="0.01" value="0"></label>
+            <button type="button" onclick="openCashRegister()">Abrir caja</button>
+          </div>
+        </div>
+
+        <div id="cashRegisterOpen" class="hidden">
+          <p class="cash-register-session-detail">Abierta por <strong id="cashRegisterOpenedBy">—</strong> · <span id="cashRegisterOpenedAt">—</span></p>
+          <div class="sales-kpis cash-register-kpis">
+            <article><span>Fondo inicial</span><strong>$<span id="cashRegisterOpening">0.00</span></strong></article>
+            <article><span>Ventas en efectivo</span><strong>$<span id="cashRegisterCashSales">0.00</span></strong></article>
+            <article><span>Tarjeta</span><strong>$<span id="cashRegisterCardSales">0.00</span></strong></article>
+            <article><span>Transferencia</span><strong>$<span id="cashRegisterTransferSales">0.00</span></strong></article>
+            <article><span>Entradas / Retiros</span><strong><span id="cashRegisterMovementsTotal">+$0.00 / -$0.00</span></strong></article>
+            <article class="cash-register-expected"><span>Efectivo esperado</span><strong>$<span id="cashRegisterExpected">0.00</span></strong></article>
+          </div>
+
+          <div class="cash-register-columns">
+            <section>
+              <h3>Movimiento de efectivo</h3>
+              <p class="settings-note">Registra dinero que entra o sale sin ser una venta.</p>
+              <div class="cash-register-movement-form">
+                <select id="cashMovementType"><option value="ENTRADA">Entrada</option><option value="RETIRO">Retiro</option></select>
+                <input id="cashMovementAmount" type="number" min="0.01" step="0.01" placeholder="Valor">
+                <input id="cashMovementReason" type="text" maxlength="150" placeholder="Motivo">
+                <button type="button" onclick="addCashMovement()">Registrar</button>
+              </div>
+              <div class="table-scroll cash-register-movements-table">
+                <table><thead><tr><th>Hora</th><th>Tipo</th><th>Valor</th><th>Motivo</th><th>Usuario</th></tr></thead><tbody id="cashMovementsBody"></tbody></table>
+              </div>
+            </section>
+
+            <section class="cash-register-close-card">
+              <h3>Cerrar caja</h3>
+              <p>Cuenta únicamente el efectivo que está físicamente en la caja.</p>
+              <label>Efectivo contado $ <input id="cashRegisterCountedAmount" type="number" min="0" step="0.01" oninput="updateCashRegisterDifference()"></label>
+              <div class="cash-register-difference-row"><span>Diferencia</span><strong id="cashRegisterDifference">$0.00</strong></div>
+              <button type="button" onclick="closeCashRegister()">Cerrar caja</button>
+            </section>
+          </div>
+        </div>
+
+        <div id="cashRegisterAdminHistory" class="hidden">
+          <h3 class="sales-detail-title">Historial de cierres</h3>
+          <div class="table-scroll">
+            <table><thead><tr><th>Apertura</th><th>Cierre</th><th>Abrió / Cerró</th><th>Efectivo</th><th>Tarjeta</th><th>Transferencia</th><th>Esperado</th><th>Contado</th><th>Diferencia</th></tr></thead><tbody id="cashRegisterHistoryBody"></tbody></table>
+          </div>
+          <button type="button" onclick="exportCashRegisterHistory()">Exportar cierres (CSV)</button>
+        </div>
       </section>
 
       <!-- TAB: PUNTO DE VENTA -->
@@ -702,7 +769,7 @@ const API = "";
 const company = localStorage.getItem("company");
 const userRole = localStorage.getItem("role") || "Usuario";
 let businessType = localStorage.getItem("businessType") || "SHOP";
-let enabledModules = ["inventario", "pos", "ventas", "clientes", "usuarios", "config"];
+let enabledModules = ["inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config"];
 
 function applyModuleVisibility() {
   document.querySelectorAll("[data-module]").forEach(element => {
@@ -776,6 +843,8 @@ window.addEventListener("DOMContentLoaded", () => {
     loadClientIntakeStatus();
     loadStoreUsers();
   }
+  const cashRegisterAdminHistory = document.getElementById("cashRegisterAdminHistory");
+  if (cashRegisterAdminHistory) cashRegisterAdminHistory.classList.toggle("hidden", userRole !== "Admin");
   const clientImportAdminOnly = document.getElementById("clientImportAdminOnly");
   if (clientImportAdminOnly) clientImportAdminOnly.style.display = userRole === "Admin" ? "block" : "none";
   renderCart();
@@ -820,6 +889,8 @@ let activeRestaurantOrder = null;
 let restaurantOrderDirty = false;
 let selectedMenuProduct = null;
 let quickMenuCategory = "Todas";
+let currentCashRegister = null;
+let cashRegisterHistory = [];
 
 
 // --- NUEVO showTab para layout + filtros ---
@@ -833,7 +904,7 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inventario", "pos", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
+  ["inventario", "pos", "caja", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
@@ -844,6 +915,7 @@ function showTab(tabId) {
 
   // cargar datos según pestaña
   if (tabId === "ventas")   loadSales();
+  if (tabId === "caja") loadCashRegister();
   if (tabId === "clientes") loadClients();
   if (tabId === "usuarios" && userRole === "Admin") loadStoreUsers();
   if (tabId === "mesas") loadRestaurantTables();
@@ -895,6 +967,180 @@ function updateRightPanel(tabId) {
   }
   if (menuTools) menuTools.classList.toggle("hidden", !showMenu);
   if (kitchenPerformanceFilters) kitchenPerformanceFilters.classList.toggle("hidden", !showKitchenPerformance);
+}
+
+// ------- CAJA -------
+
+function cashMoney(value) {
+  return Number(value || 0).toFixed(2);
+}
+
+function cashDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+async function loadCashRegister() {
+  const res = await fetch(`${API}/cash-register/current`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cargar la caja.");
+  currentCashRegister = data.open ? data : null;
+  renderCashRegister();
+  if (userRole === "Admin") await loadCashRegisterHistory();
+}
+
+function renderCashRegister() {
+  const isOpen = Boolean(currentCashRegister?.open);
+  document.getElementById("cashRegisterClosed").classList.toggle("hidden", isOpen);
+  document.getElementById("cashRegisterOpen").classList.toggle("hidden", !isOpen);
+  const status = document.getElementById("cashRegisterStatus");
+  status.textContent = isOpen ? "Abierta" : "Cerrada";
+  status.className = `cash-register-status ${isOpen ? "open" : "closed"}`;
+  if (!isOpen) return;
+
+  const session = currentCashRegister.session || {};
+  const totals = currentCashRegister.totals || {};
+  document.getElementById("cashRegisterOpenedBy").textContent = session.openedByName || "—";
+  document.getElementById("cashRegisterOpenedAt").textContent = cashDateTime(session.openedAt);
+  document.getElementById("cashRegisterOpening").textContent = cashMoney(session.openingAmount);
+  document.getElementById("cashRegisterCashSales").textContent = cashMoney(totals.cashSales);
+  document.getElementById("cashRegisterCardSales").textContent = cashMoney(totals.cardSales);
+  document.getElementById("cashRegisterTransferSales").textContent = cashMoney(totals.transferSales);
+  document.getElementById("cashRegisterMovementsTotal").textContent = `+$${cashMoney(totals.cashIn)} / -$${cashMoney(totals.cashOut)}`;
+  document.getElementById("cashRegisterExpected").textContent = cashMoney(totals.expectedAmount);
+  document.getElementById("cashRegisterCountedAmount").value = "";
+  updateCashRegisterDifference();
+
+  const tbody = document.getElementById("cashMovementsBody");
+  tbody.innerHTML = "";
+  (currentCashRegister.movements || []).forEach(item => {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td></td><td></td><td></td><td></td><td></td>";
+    row.children[0].textContent = cashDateTime(item.createdAt);
+    row.children[1].textContent = item.type === "RETIRO" ? "Retiro" : "Entrada";
+    row.children[2].textContent = `${item.type === "RETIRO" ? "-" : "+"}$${cashMoney(item.amount)}`;
+    row.children[3].textContent = item.reason || "—";
+    row.children[4].textContent = item.recordedByName || "—";
+    tbody.appendChild(row);
+  });
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="5" class="empty-table">No hay movimientos manuales en este turno.</td></tr>';
+}
+
+async function openCashRegister() {
+  const input = document.getElementById("cashRegisterOpeningAmount");
+  const openingAmount = Number(input.value);
+  if (!Number.isFinite(openingAmount) || openingAmount < 0) return alert("Ingresa un fondo inicial válido.");
+  if (!await appConfirm(`¿Abrir la caja con $${openingAmount.toFixed(2)}?`)) return;
+  const res = await fetch(`${API}/cash-register/open`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ openingAmount })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo abrir la caja.");
+  currentCashRegister = data;
+  input.value = "0";
+  renderCashRegister();
+}
+
+async function addCashMovement() {
+  const type = document.getElementById("cashMovementType").value;
+  const amountInput = document.getElementById("cashMovementAmount");
+  const reasonInput = document.getElementById("cashMovementReason");
+  const amount = Number(amountInput.value);
+  const reason = reasonInput.value.trim();
+  if (!Number.isFinite(amount) || amount <= 0 || !reason) return alert("Ingresa un valor mayor a cero y escribe el motivo.");
+  if (!await appConfirm(`¿Registrar ${type === "RETIRO" ? "un retiro" : "una entrada"} de $${amount.toFixed(2)}?`)) return;
+  const res = await fetch(`${API}/cash-register/movements`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ type, amount, reason })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo registrar el movimiento.");
+  currentCashRegister = data;
+  amountInput.value = "";
+  reasonInput.value = "";
+  renderCashRegister();
+}
+
+function updateCashRegisterDifference() {
+  const element = document.getElementById("cashRegisterDifference");
+  if (!element) return;
+  const raw = document.getElementById("cashRegisterCountedAmount").value;
+  const expected = Number(currentCashRegister?.totals?.expectedAmount || 0);
+  const difference = raw === "" ? 0 : Number(raw) - expected;
+  element.textContent = `${difference > 0 ? "+" : difference < 0 ? "-" : ""}$${Math.abs(difference).toFixed(2)}`;
+  element.classList.toggle("cash-register-positive", difference > 0);
+  element.classList.toggle("cash-register-negative", difference < 0);
+}
+
+async function closeCashRegister() {
+  const raw = document.getElementById("cashRegisterCountedAmount").value;
+  const countedAmount = Number(raw);
+  if (raw === "" || !Number.isFinite(countedAmount) || countedAmount < 0) return alert("Ingresa el efectivo contado en caja.");
+  const expected = Number(currentCashRegister?.totals?.expectedAmount || 0);
+  const difference = countedAmount - expected;
+  const detail = `Esperado: $${expected.toFixed(2)}\nContado: $${countedAmount.toFixed(2)}\nDiferencia: ${difference >= 0 ? "+" : "-"}$${Math.abs(difference).toFixed(2)}`;
+  if (!await appConfirm(`${detail}\n\n¿Cerrar esta caja?`)) return;
+  const res = await fetch(`${API}/cash-register/close`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ countedAmount })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cerrar la caja.");
+  currentCashRegister = null;
+  renderCashRegister();
+  if (userRole === "Admin") await loadCashRegisterHistory();
+  alert(`Caja cerrada.\n${detail}`);
+}
+
+async function loadCashRegisterHistory() {
+  const res = await fetch(`${API}/cash-register/history`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cargar el historial de cierres.");
+  cashRegisterHistory = Array.isArray(data) ? data : [];
+  const tbody = document.getElementById("cashRegisterHistoryBody");
+  tbody.innerHTML = "";
+  cashRegisterHistory.forEach(item => {
+    const difference = Number(item.difference || 0);
+    const row = document.createElement("tr");
+    row.innerHTML = "<td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>";
+    row.children[0].textContent = cashDateTime(item.openedAt);
+    row.children[1].textContent = cashDateTime(item.closedAt);
+    row.children[2].textContent = `${item.openedByName || "—"} / ${item.closedByName || "—"}`;
+    row.children[3].textContent = `$${cashMoney(item.cashSales)}`;
+    row.children[4].textContent = `$${cashMoney(item.cardSales)}`;
+    row.children[5].textContent = `$${cashMoney(item.transferSales)}`;
+    row.children[6].textContent = `$${cashMoney(item.expectedAmount)}`;
+    row.children[7].textContent = `$${cashMoney(item.countedAmount)}`;
+    row.children[8].textContent = `${difference > 0 ? "+" : difference < 0 ? "-" : ""}$${Math.abs(difference).toFixed(2)}`;
+    row.children[8].className = difference > 0 ? "cash-register-positive" : difference < 0 ? "cash-register-negative" : "";
+    tbody.appendChild(row);
+  });
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="9" class="empty-table">Todavía no hay cajas cerradas.</td></tr>';
+}
+
+function exportCashRegisterHistory() {
+  if (!cashRegisterHistory.length) return alert("No hay cierres para exportar.");
+  const rows = [["apertura", "cierre", "abrio", "cerro", "fondo_inicial", "ventas_efectivo", "ventas_tarjeta", "ventas_transferencia", "entradas", "retiros", "efectivo_esperado", "efectivo_contado", "diferencia"]];
+  cashRegisterHistory.forEach(item => rows.push([
+    item.openedAt, item.closedAt, item.openedByName, item.closedByName,
+    cashMoney(item.openingAmount), cashMoney(item.cashSales), cashMoney(item.cardSales), cashMoney(item.transferSales),
+    cashMoney(item.cashIn), cashMoney(item.cashOut), cashMoney(item.expectedAmount), cashMoney(item.countedAmount), cashMoney(item.difference)
+  ]));
+  const cell = value => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const blob = new Blob([rows.map(row => row.map(cell).join(",")).join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "cierres-caja.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 
@@ -2481,7 +2727,7 @@ async function finishSale() {
   renderCart();
   document.getElementById("cashReceived").value = "";
   updateChange();
-  await loadProducts(); // actualizar inventario
+  await Promise.all([loadProducts(), loadCashRegister()]); // actualizar inventario y caja
   selectedInvoiceClient = null;
   setInvoiceType("CONSUMIDOR_FINAL");
   alert(`Venta registrada.\nComprobante: ${data.invoiceNumber}\nEstado SRI: ${data.status}${data.tableClosed ? "\nMesa liberada automáticamente." : ""}`);
