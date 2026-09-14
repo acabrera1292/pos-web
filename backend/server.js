@@ -255,6 +255,10 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       tableSessionId INTEGER NOT NULL,
       tableId INTEGER NOT NULL,
       status TEXT DEFAULT 'OPEN',
+      kitchenStatus TEXT DEFAULT 'NEW',
+      kitchenReceivedAt TEXT,
+      kitchenStartedAt TEXT,
+      kitchenReadyAt TEXT,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
       paidAt TEXT,
@@ -1714,6 +1718,10 @@ if (!dataStore.postgres) {
   addColumnIfMissing("invoices", "discountAmount REAL DEFAULT 0");
   addColumnIfMissing("restaurant_order_items", "discountPercent REAL DEFAULT 0");
   addColumnIfMissing("restaurant_order_items", "discountReason TEXT DEFAULT ''");
+  addColumnIfMissing("restaurant_orders", "kitchenStatus TEXT DEFAULT 'NEW'");
+  addColumnIfMissing("restaurant_orders", "kitchenReceivedAt TEXT");
+  addColumnIfMissing("restaurant_orders", "kitchenStartedAt TEXT");
+  addColumnIfMissing("restaurant_orders", "kitchenReadyAt TEXT");
   addColumnIfMissing("sri_settings", "certificateValidated INTEGER DEFAULT 0");
   addColumnIfMissing("store_licenses", "businessType TEXT DEFAULT 'SHOP'");
 }
@@ -1917,7 +1925,24 @@ app.put("/restaurant/table-sessions/:sessionId/order", requireRestaurantStore, a
             item.quantity, item.product.price, item.discountPercent, item.discountReason, item.note]
         );
       }
-      await dbRun("UPDATE restaurant_orders SET updatedAt = ? WHERE id = ? AND company = ?", [getETLocalISO(), currentOrder.id, req.user.company]);
+      const now = getETLocalISO();
+      if (cleanItems.length) {
+        await dbRun(
+          `UPDATE restaurant_orders
+           SET kitchenStatus = 'NEW', kitchenReceivedAt = ?, kitchenStartedAt = NULL,
+               kitchenReadyAt = NULL, updatedAt = ?
+           WHERE id = ? AND company = ?`,
+          [now, now, currentOrder.id, req.user.company]
+        );
+      } else {
+        await dbRun(
+          `UPDATE restaurant_orders
+           SET kitchenStatus = 'NEW', kitchenReceivedAt = NULL, kitchenStartedAt = NULL,
+               kitchenReadyAt = NULL, updatedAt = ?
+           WHERE id = ? AND company = ?`,
+          [now, currentOrder.id, req.user.company]
+        );
+      }
       return dbGet("SELECT * FROM restaurant_orders WHERE id = ?", [currentOrder.id]);
     });
     res.json(await restaurantOrderResponse(order));
@@ -2028,7 +2053,7 @@ app.get("/restaurant/tables", requireRestaurantStore, async (req, res) => {
     const rows = await dataStore.all(
       `SELECT t.id, t.name, t.capacity, t.active,
               s.id AS sessionId, s.guests, s.status, s.openedAt,
-              s.serverUserId, s.serverName, o.id AS orderId,
+              s.serverUserId, s.serverName, o.id AS orderId, o.kitchenStatus,
               COALESCE((SELECT SUM(oi.quantity) FROM restaurant_order_items oi WHERE oi.orderId = o.id), 0) AS orderItemCount
        FROM restaurant_tables t
        LEFT JOIN restaurant_table_sessions s
@@ -2042,6 +2067,88 @@ app.get("/restaurant/tables", requireRestaurantStore, async (req, res) => {
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/restaurant/kitchen/orders", requireRestaurantStore, async (req, res) => {
+  try {
+    const rows = await dataStore.all(
+      `SELECT o.id AS orderId, o.tableSessionId, o.tableId, o.kitchenStatus,
+              o.kitchenReceivedAt, o.kitchenStartedAt, o.kitchenReadyAt,
+              t.name AS tableName, s.guests, s.serverName,
+              oi.id AS itemId, oi.productId, oi.code, oi.name, oi.quantity,
+              oi.note, oi.discountPercent, oi.discountReason
+       FROM restaurant_orders o
+       JOIN restaurant_table_sessions s ON s.id = o.tableSessionId AND s.closedAt IS NULL
+       JOIN restaurant_tables t ON t.id = o.tableId
+       JOIN restaurant_order_items oi ON oi.orderId = o.id
+       WHERE o.company = ? AND o.status = 'OPEN' AND o.kitchenReceivedAt IS NOT NULL
+       ORDER BY o.kitchenReceivedAt, o.id, oi.id`,
+      [req.user.company]
+    );
+    const grouped = new Map();
+    rows.forEach(row => {
+      if (!grouped.has(row.orderId)) {
+        grouped.set(row.orderId, {
+          id: row.orderId,
+          tableSessionId: row.tableSessionId,
+          tableId: row.tableId,
+          tableName: row.tableName,
+          guests: row.guests,
+          serverName: row.serverName,
+          kitchenStatus: row.kitchenStatus || "NEW",
+          kitchenReceivedAt: row.kitchenReceivedAt,
+          kitchenStartedAt: row.kitchenStartedAt,
+          kitchenReadyAt: row.kitchenReadyAt,
+          items: []
+        });
+      }
+      grouped.get(row.orderId).items.push({
+        id: row.itemId,
+        productId: row.productId,
+        code: row.code,
+        name: row.name,
+        quantity: row.quantity,
+        note: row.note || "",
+        discountPercent: Number(row.discountPercent || 0),
+        discountReason: row.discountReason || ""
+      });
+    });
+    res.json(Array.from(grouped.values()));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/restaurant/kitchen/orders/:id/status", requireRestaurantStore, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const action = String(req.body.status || "").toUpperCase();
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Pedido inválido." });
+    if (!['START', 'READY'].includes(action)) return res.status(400).json({ error: "Estado de cocina inválido." });
+    const order = await dbGet(
+      "SELECT * FROM restaurant_orders WHERE id = ? AND company = ? AND status = 'OPEN'",
+      [id, req.user.company]
+    );
+    if (!order || !order.kitchenReceivedAt) return res.status(404).json({ error: "Pedido activo no encontrado en cocina." });
+    const current = order.kitchenStatus || "NEW";
+    const now = getETLocalISO();
+    if (action === 'START') {
+      if (current !== 'NEW') return res.status(409).json({ error: "Este pedido ya fue iniciado." });
+      await dbRun(
+        "UPDATE restaurant_orders SET kitchenStatus = 'COOKING', kitchenStartedAt = ?, kitchenReadyAt = NULL, updatedAt = ? WHERE id = ? AND company = ?",
+        [now, now, id, req.user.company]
+      );
+    } else {
+      if (current !== 'COOKING') return res.status(409).json({ error: "Primero debes iniciar la preparación." });
+      await dbRun(
+        "UPDATE restaurant_orders SET kitchenStatus = 'READY', kitchenReadyAt = ?, updatedAt = ? WHERE id = ? AND company = ?",
+        [now, now, id, req.user.company]
+      );
+    }
+    res.json(await dbGet("SELECT * FROM restaurant_orders WHERE id = ? AND company = ?", [id, req.user.company]));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -2204,10 +2311,14 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS restaurant_tables (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, capacity INTEGER DEFAULT 4, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS restaurant_servers (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS restaurant_table_sessions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableId INTEGER NOT NULL, restaurantServerId INTEGER, serverUserId INTEGER NOT NULL, serverName TEXT NOT NULL, guests INTEGER NOT NULL, status TEXT DEFAULT 'OCCUPIED', openedAt TEXT NOT NULL, closedAt TEXT, durationMinutes INTEGER)`,
-    `CREATE TABLE IF NOT EXISTS restaurant_orders (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableSessionId INTEGER NOT NULL, tableId INTEGER NOT NULL, status TEXT DEFAULT 'OPEN', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, paidAt TEXT, invoiceId INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS restaurant_orders (id SERIAL PRIMARY KEY, company TEXT NOT NULL, tableSessionId INTEGER NOT NULL, tableId INTEGER NOT NULL, status TEXT DEFAULT 'OPEN', kitchenStatus TEXT DEFAULT 'NEW', kitchenReceivedAt TEXT, kitchenStartedAt TEXT, kitchenReadyAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, paidAt TEXT, invoiceId INTEGER)`,
     `CREATE TABLE IF NOT EXISTS restaurant_order_items (id SERIAL PRIMARY KEY, company TEXT NOT NULL, orderId INTEGER NOT NULL, productId INTEGER NOT NULL, code TEXT, name TEXT NOT NULL, quantity INTEGER NOT NULL, price DOUBLE PRECISION NOT NULL, discountPercent DOUBLE PRECISION DEFAULT 0, discountReason TEXT DEFAULT '', note TEXT DEFAULT '')`,
     `ALTER TABLE restaurant_order_items ADD COLUMN IF NOT EXISTS discountPercent DOUBLE PRECISION DEFAULT 0`,
     `ALTER TABLE restaurant_order_items ADD COLUMN IF NOT EXISTS discountReason TEXT DEFAULT ''`,
+    `ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS kitchenStatus TEXT DEFAULT 'NEW'`,
+    `ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS kitchenReceivedAt TEXT`,
+    `ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS kitchenStartedAt TEXT`,
+    `ALTER TABLE restaurant_orders ADD COLUMN IF NOT EXISTS kitchenReadyAt TEXT`,
     `ALTER TABLE restaurant_table_sessions ADD COLUMN IF NOT EXISTS restaurantServerId INTEGER`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_open_table_session ON restaurant_table_sessions(tableId) WHERE closedAt IS NULL`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_restaurant_order_session ON restaurant_orders(tableSessionId)`,
