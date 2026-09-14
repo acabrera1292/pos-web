@@ -923,6 +923,7 @@ tbody tr[style*="background-color"] {
 .restaurant-table-card.ordered { border-left: 7px solid #64748b; }
 .restaurant-table-card.cooking { border-left: 7px solid #b7791f; background: #fffbeb; }
 .restaurant-table-card.ready { border-left: 7px solid #4f7d59; background: #f0f7f1; }
+.restaurant-table-card.joined { border-left: 7px solid #64748b; background: #f1f5f9; }
 .restaurant-table-card.inactive { border-left: 7px solid #9ca3af; opacity: 0.7; }
 .restaurant-table-card strong { font-size: 18px; }
 .restaurant-table-status { font-weight: 700; }
@@ -956,6 +957,20 @@ tbody tr[style*="background-color"] {
   gap: 10px;
   align-items: end;
 }
+
+.restaurant-join-fields {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 12px;
+  border-top: 1px solid #d1d5db;
+}
+
+.restaurant-join-fields label { display: grid; gap: 5px; font-weight: 600; }
+.restaurant-join-fields select { min-width: 220px; }
 
 .restaurant-history {
   margin-top: 24px;
@@ -1600,6 +1615,41 @@ tbody td {
 .modifier-total { display: flex; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid #d1d5db; font-size: 17px; }
 .modifier-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 15px; }
 .modifier-actions button { margin: 0; }
+
+/* --------------------------------------------------
+   FASE 5: CUENTAS DIVIDIDAS, MESAS UNIDAS Y PAGO MIXTO
+-------------------------------------------------- */
+.mixed-payment-panel {
+  max-width: 720px;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.mixed-payment-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.mixed-payment-fields label { display: grid; gap: 5px; font-weight: 600; }
+.mixed-payment-fields input { width: 100%; box-sizing: border-box; }
+.mixed-payment-panel p { margin: 12px 0 0; }
+.mixed-payment-panel .payment-complete { color: #166534; }
+.mixed-payment-panel .payment-over { color: #991b1b; }
+.split-bill-window { width: min(760px, 100%); }
+.split-bill-table { width: 100%; }
+.split-bill-table input { width: 80px; }
+.split-bill-table td:last-child, .split-bill-table th:last-child { text-align: right; }
+
+@media (max-width: 700px) {
+  .mixed-payment-fields { grid-template-columns: 1fr; }
+  .restaurant-join-fields { align-items: stretch; flex-direction: column; }
+  .restaurant-join-fields select { min-width: 0; width: 100%; }
+}
 
 /* Recibo térmico POSINTMART PM-80E: rollo de 80 mm, área útil de 72 mm. */
 .print-only { display: none; }
