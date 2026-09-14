@@ -330,7 +330,13 @@
             <label>Categoría <input id="menuProductCategory" placeholder="Ej. Platos fuertes"></label>
             <label>Precio <input id="menuProductPrice" type="number" min="0" step="0.01" placeholder="0.00"></label>
             <label>Cantidad <input id="menuProductQuantity" type="number" min="0" step="1" placeholder="0"></label>
+            <label id="menuProductAvailableLabel" class="menu-availability-field"><span>Disponible para vender</span><input id="menuProductAvailable" type="checkbox" checked></label>
           </div>
+          <label id="menuProductModifiersLabel" class="menu-modifiers-editor">
+            <span>Opciones del producto (opcional)</span>
+            <textarea id="menuProductModifiers" rows="4" placeholder="Término*: Poco cocida | 3/4 | Bien cocida&#10;Acompañamiento*: Papas | Ensalada&#10;Extras+: Queso +1.00 | Tocino +1.50"></textarea>
+            <small>Una línea por grupo. <strong>*</strong> = obligatorio; <strong>+</strong> = permite varias opciones. Agrega un valor como “+1.50” para cobrar un extra.</small>
+          </label>
           <div class="restaurant-menu-form-actions">
             <button type="button" onclick="saveMenuProduct()">Guardar producto</button>
             <button type="button" onclick="clearMenuProductForm()">Cancelar</button>
@@ -338,9 +344,10 @@
           <p id="menuProductPermissionNote" class="settings-note hidden">Al editar, el rol Usuario solamente puede cambiar el código y el nombre.</p>
         </div>
         <input id="menuSearch" class="menu-search" placeholder="Buscar por código, nombre o categoría" oninput="renderMenuManagement()">
-        <div class="table-scroll"><table><thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Precio</th><th>Stock</th></tr></thead><tbody id="menuBody"></tbody></table></div>
+        <div class="table-scroll"><table><thead><tr><th>Código</th><th>Producto</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Opciones</th><th>Estado</th></tr></thead><tbody id="menuBody"></tbody></table></div>
         <div id="menuProductActions" class="inventory-actions">
           <button id="btnEditMenuProduct" type="button" onclick="editSelectedMenuProduct()" disabled>Editar</button>
+          <button id="btnToggleMenuAvailability" type="button" onclick="toggleSelectedMenuAvailability()" disabled>Marcar agotado</button>
           <button id="btnDeleteMenuProduct" class="danger-button" type="button" onclick="deleteSelectedMenuProduct()" disabled>Eliminar</button>
         </div>
       </section>
@@ -539,6 +546,7 @@
       </table>
     </div>
     <button onclick="loadSales(true)">Actualizar</button>
+    <button id="btnPrintSaleReceipt" onclick="printSelectedSaleReceipt()" disabled>Imprimir recibo</button>
     <span id="saleDeleteActions">
       <button id="btnReturnSale" onclick="returnSelectedSale()">Devolver producto</button>
       <button id="btnCancelSale" class="danger-button" onclick="cancelSelectedSale()">Anular venta</button>
@@ -799,7 +807,7 @@
 
   <div id="restaurantMenuTools" class="filter-group hidden">
     <div class="filter-banner">IMPORTAR MENÚ</div>
-    <p class="settings-note">Hoja CSV: código, nombre, categoría, precio y cantidad.</p>
+    <p class="settings-note">Hoja CSV: código, nombre, categoría, precio, cantidad, disponibilidad y opciones.</p>
     <input id="menuCsvFile" type="file" accept=".csv,text/csv" onchange="importRestaurantMenu(event)">
     <button type="button" onclick="downloadMenuTemplate()">Descargar plantilla</button>
     <button type="button" onclick="exportRestaurantMenu()">Exportar menú (CSV)</button>
@@ -822,6 +830,24 @@
     <button type="button" onclick="exportKitchenPerformance()">Exportar reporte (CSV)</button>
   </div>
 </aside>
+
+<div id="productModifierModal" class="modifier-modal hidden" role="dialog" aria-modal="true" aria-labelledby="modifierProductName">
+  <div class="modifier-window">
+    <div class="modifier-window-heading">
+      <div><h2 id="modifierProductName">Personalizar producto</h2><p id="modifierProductPrice"></p></div>
+      <button type="button" class="modifier-close" aria-label="Cerrar" onclick="closeProductModifierModal()">×</button>
+    </div>
+    <div id="modifierGroups"></div>
+    <p id="modifierValidation" class="modifier-validation hidden"></p>
+    <div class="modifier-total"><span>Total por unidad</span><strong>$<span id="modifierUnitTotal">0.00</span></strong></div>
+    <div class="modifier-actions">
+      <button type="button" onclick="closeProductModifierModal()">Cancelar</button>
+      <button type="button" class="primary-button" onclick="confirmProductModifiers()">Agregar al pedido</button>
+    </div>
+  </div>
+</div>
+
+<section id="thermalReceipt" class="thermal-receipt print-only" aria-hidden="true"></section>
 
 <script src="js/dialogs.js"></script>
 <script src="js/mesas.js"></script>
@@ -917,6 +943,9 @@ window.addEventListener("DOMContentLoaded", () => {
   if (cashRegisterAdminHistory) cashRegisterAdminHistory.classList.toggle("hidden", userRole !== "Admin");
   const clientImportAdminOnly = document.getElementById("clientImportAdminOnly");
   if (clientImportAdminOnly) clientImportAdminOnly.style.display = userRole === "Admin" ? "block" : "none";
+  ["menuProductAvailableLabel", "menuProductModifiersLabel"].forEach(id => {
+    document.getElementById(id)?.classList.toggle("hidden", userRole !== "Admin");
+  });
   renderCart();
   window.addEventListener("resize", applyCartColumnWidths);
 });
@@ -957,6 +986,7 @@ let activeRestaurantOrder = null;
 let restaurantOrderDirty = false;
 let selectedMenuProduct = null;
 let quickMenuCategory = "Todas";
+let pendingModifierProduct = null;
 let currentCashRegister = null;
 let cashRegisterHistory = [];
 
@@ -2149,6 +2179,52 @@ function menuCategoryOf(product) {
   return String(product?.menuCategory || "General").trim() || "General";
 }
 
+function productModifierGroups(product) {
+  if (Array.isArray(product?.modifierGroups)) return product.modifierGroups;
+  try {
+    const parsed = JSON.parse(product?.modifierGroups || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseModifierDefinitions(value) {
+  return String(value || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean).map((line, groupIndex) => {
+    const separator = line.indexOf(":");
+    if (separator < 1) throw new Error(`Falta “:” en: ${line}`);
+    let name = line.slice(0, separator).trim();
+    const required = name.includes("*");
+    const multiple = name.includes("+");
+    name = name.replace(/[+*]/g, "").trim();
+    const options = line.slice(separator + 1).split("|").map((raw, optionIndex) => {
+      const text = raw.trim();
+      const priceMatch = text.match(/\s\+(\d+(?:[.,]\d{1,2})?)$/);
+      return {
+        name: (priceMatch ? text.slice(0, priceMatch.index) : text).trim(),
+        priceDelta: priceMatch ? Number(priceMatch[1].replace(",", ".")) : 0,
+        sortOrder: optionIndex
+      };
+    }).filter(option => option.name);
+    if (!name || !options.length) throw new Error(`Agrega un nombre y opciones en: ${line}`);
+    return { name, required, multiple, sortOrder: groupIndex, options };
+  });
+}
+
+function formatModifierDefinitions(product) {
+  return productModifierGroups(product).map(group => {
+    const marker = `${group.required ? "*" : ""}${group.multiple ? "+" : ""}`;
+    const options = (group.options || []).map(option => `${option.name}${Number(option.priceDelta || 0) ? ` +${Number(option.priceDelta).toFixed(2)}` : ""}`).join(" | ");
+    return `${group.name}${marker}: ${options}`;
+  }).join("\n");
+}
+
+function modifierSelectionLabel(selections) {
+  return (Array.isArray(selections) ? selections : []).flatMap(selection =>
+    (selection.options || []).map(option => `${selection.group}: ${option.name}`)
+  ).join(" · ");
+}
+
 function renderRestaurantQuickMenu() {
   const panel = document.getElementById("restaurantQuickMenu");
   const categoriesBody = document.getElementById("quickMenuCategories");
@@ -2172,7 +2248,7 @@ function renderRestaurantQuickMenu() {
 
   productsBody.innerHTML = "";
   allProducts
-    .filter(product => Number(product.quantity || 0) > 0 && (quickMenuCategory === "Todas" || menuCategoryOf(product) === quickMenuCategory))
+    .filter(product => Number(product.quantity || 0) > 0 && Number(product.available ?? 1) === 1 && (quickMenuCategory === "Todas" || menuCategoryOf(product) === quickMenuCategory))
     .sort((a, b) => menuCategoryOf(a).localeCompare(menuCategoryOf(b)) || String(a.name).localeCompare(String(b.name)))
     .forEach(product => {
       const button = document.createElement("button");
@@ -2183,7 +2259,7 @@ function renderRestaurantQuickMenu() {
       name.textContent = product.name;
       detail.textContent = `$${Number(product.price).toFixed(2)} · ${Number(product.quantity)} disponibles`;
       button.append(name, detail);
-      button.onclick = () => addToCart(product);
+      button.onclick = () => configureAndAddProduct(product);
       productsBody.appendChild(button);
     });
   if (!productsBody.children.length) productsBody.innerHTML = '<p class="restaurant-empty">No hay productos disponibles en esta categoría.</p>';
@@ -2202,12 +2278,17 @@ function renderMenuManagement() {
   tbody.innerHTML = "";
   products.forEach(product => {
       const row = document.createElement("tr");
-      row.innerHTML = "<td></td><td></td><td></td><td></td><td></td>";
+      row.innerHTML = "<td></td><td></td><td></td><td></td><td></td><td></td><td></td>";
       row.children[0].textContent = product.code;
       row.children[1].textContent = product.name;
       row.children[2].textContent = menuCategoryOf(product);
       row.children[3].textContent = `$${Number(product.price).toFixed(2)}`;
       row.children[4].textContent = Number(product.quantity || 0);
+      row.children[5].textContent = productModifierGroups(product).length || "—";
+      row.children[6].innerHTML = Number(product.available ?? 1) === 1
+        ? '<span class="availability-status available">Disponible</span>'
+        : '<span class="availability-status sold-out">Agotado</span>';
+      row.classList.toggle("menu-product-sold-out", Number(product.available ?? 1) !== 1);
       row.classList.toggle("selected-row", String(selectedMenuProduct?.id) === String(product.id));
       row.onclick = () => {
         selectedMenuProduct = product;
@@ -2217,14 +2298,20 @@ function renderMenuManagement() {
       };
       tbody.appendChild(row);
     });
-  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="5" class="empty-table">No hay productos con esa búsqueda.</td></tr>';
+  if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="7" class="empty-table">No hay productos con esa búsqueda.</td></tr>';
   updateMenuProductActions();
 }
 
 function updateMenuProductActions() {
   const editButton = document.getElementById("btnEditMenuProduct");
+  const availabilityButton = document.getElementById("btnToggleMenuAvailability");
   const deleteButton = document.getElementById("btnDeleteMenuProduct");
   if (editButton) editButton.disabled = !selectedMenuProduct;
+  if (availabilityButton) {
+    availabilityButton.classList.toggle("hidden", userRole !== "Admin");
+    availabilityButton.disabled = userRole !== "Admin" || !selectedMenuProduct;
+    availabilityButton.textContent = Number(selectedMenuProduct?.available ?? 1) === 1 ? "Marcar agotado" : "Marcar disponible";
+  }
   if (deleteButton) {
     deleteButton.classList.toggle("hidden", userRole !== "Admin");
     deleteButton.disabled = userRole !== "Admin" || !selectedMenuProduct;
@@ -2232,16 +2319,17 @@ function updateMenuProductActions() {
 }
 
 function clearMenuProductForm() {
-  ["menuProductId", "menuProductCode", "menuProductName", "menuProductCategory", "menuProductPrice", "menuProductQuantity"]
+  ["menuProductId", "menuProductCode", "menuProductName", "menuProductCategory", "menuProductPrice", "menuProductQuantity", "menuProductModifiers"]
     .forEach(id => {
       const input = document.getElementById(id);
       if (input) input.value = "";
     });
-  ["menuProductCategory", "menuProductPrice", "menuProductQuantity"].forEach(id => {
+  ["menuProductCategory", "menuProductPrice", "menuProductQuantity", "menuProductAvailable", "menuProductModifiers"].forEach(id => {
     const input = document.getElementById(id);
     if (input) input.disabled = false;
   });
   document.getElementById("menuProductPermissionNote")?.classList.add("hidden");
+  document.getElementById("menuProductAvailable").checked = true;
 }
 
 function editSelectedMenuProduct() {
@@ -2252,8 +2340,10 @@ function editSelectedMenuProduct() {
   document.getElementById("menuProductCategory").value = menuCategoryOf(selectedMenuProduct);
   document.getElementById("menuProductPrice").value = Number(selectedMenuProduct.price || 0).toFixed(2);
   document.getElementById("menuProductQuantity").value = Number(selectedMenuProduct.quantity || 0);
+  document.getElementById("menuProductAvailable").checked = Number(selectedMenuProduct.available ?? 1) === 1;
+  document.getElementById("menuProductModifiers").value = formatModifierDefinitions(selectedMenuProduct);
   const restricted = userRole !== "Admin";
-  ["menuProductCategory", "menuProductPrice", "menuProductQuantity"].forEach(id => {
+  ["menuProductCategory", "menuProductPrice", "menuProductQuantity", "menuProductAvailable", "menuProductModifiers"].forEach(id => {
     document.getElementById(id).disabled = restricted;
   });
   document.getElementById("menuProductPermissionNote")?.classList.toggle("hidden", !restricted);
@@ -2264,12 +2354,19 @@ async function saveMenuProduct() {
   const id = document.getElementById("menuProductId").value;
   const priceValue = document.getElementById("menuProductPrice").value;
   const quantityValue = document.getElementById("menuProductQuantity").value;
+  let modifierGroups = [];
+  if (userRole === "Admin") {
+    try { modifierGroups = parseModifierDefinitions(document.getElementById("menuProductModifiers").value); }
+    catch (err) { return alert(err.message); }
+  }
   const payload = {
     code: document.getElementById("menuProductCode").value.trim(),
     name: document.getElementById("menuProductName").value.trim(),
     menuCategory: document.getElementById("menuProductCategory").value.trim() || "General",
     price: Number(priceValue),
-    quantity: Number(quantityValue)
+    quantity: Number(quantityValue),
+    available: document.getElementById("menuProductAvailable").checked,
+    modifierGroups
   };
   if (!payload.code || !payload.name) return alert("Completa el código y el nombre del producto.");
   if (priceValue === "" || quantityValue === "" || !Number.isFinite(payload.price) || payload.price < 0 || !Number.isInteger(payload.quantity) || payload.quantity < 0) {
@@ -2310,12 +2407,12 @@ function downloadCsvFile(filename, rows) {
 }
 
 function downloadMenuTemplate() {
-  downloadCsvFile("plantilla_menu.csv", [["codigo", "nombre", "categoria", "precio", "cantidad"], ["HAMB01", "Hamburguesa clásica", "Platos fuertes", "8.50", "50"]]);
+  downloadCsvFile("plantilla_menu.csv", [["codigo", "nombre", "categoria", "precio", "cantidad", "disponible", "opciones"], ["HAMB01", "Hamburguesa clásica", "Platos fuertes", "8.50", "50", "SI", "Término*: Poco cocida | 3/4 | Bien cocida; Extras+: Queso +1.00 | Tocino +1.50"]]);
 }
 
 function exportRestaurantMenu() {
   if (!allProducts.length) return alert("No hay productos para exportar.");
-  downloadCsvFile(`menu_${company}.csv`, [["codigo", "nombre", "categoria", "precio", "cantidad"], ...allProducts.map(product => [product.code, product.name, menuCategoryOf(product), Number(product.price).toFixed(2), product.quantity])]);
+  downloadCsvFile(`menu_${company}.csv`, [["codigo", "nombre", "categoria", "precio", "cantidad", "disponible", "opciones"], ...allProducts.map(product => [product.code, product.name, menuCategoryOf(product), Number(product.price).toFixed(2), product.quantity, Number(product.available ?? 1) === 1 ? "SI" : "NO", formatModifierDefinitions(product).replace(/\n/g, "; ")])]);
 }
 
 async function importRestaurantMenu(event) {
@@ -2328,17 +2425,26 @@ async function importRestaurantMenu(event) {
   const columns = {
     code: column(["codigo", "code"]), name: column(["nombre", "producto", "name"]),
     menuCategory: column(["categoria", "category"]), price: column(["precio", "price"]),
-    quantity: column(["cantidad", "stock", "quantity"])
+    quantity: column(["cantidad", "stock", "quantity"]),
+    available: column(["disponible", "available"]), modifiers: column(["opciones", "modificadores", "modifiers"])
   };
   if (columns.code < 0 || columns.name < 0 || columns.price < 0) {
     event.target.value = "";
     return alert("El archivo necesita las columnas código, nombre y precio.");
   }
-  const items = rows.map(values => ({
-    code: values[columns.code]?.trim(), name: values[columns.name]?.trim(),
-    menuCategory: columns.menuCategory >= 0 ? values[columns.menuCategory]?.trim() : "General",
-    price: Number(values[columns.price]), quantity: columns.quantity >= 0 ? Number(values[columns.quantity]) : 0
-  })).filter(item => item.code || item.name);
+  let items;
+  try {
+    items = rows.map(values => ({
+      code: values[columns.code]?.trim(), name: values[columns.name]?.trim(),
+      menuCategory: columns.menuCategory >= 0 ? values[columns.menuCategory]?.trim() : "General",
+      price: Number(values[columns.price]), quantity: columns.quantity >= 0 ? Number(values[columns.quantity]) : 0,
+      available: columns.available < 0 || !/^(no|false|0|agotado)$/i.test(values[columns.available]?.trim() || ""),
+      modifierGroups: columns.modifiers >= 0 ? parseModifierDefinitions((values[columns.modifiers] || "").replace(/;\s*/g, "\n")) : []
+    })).filter(item => item.code || item.name);
+  } catch (err) {
+    event.target.value = "";
+    return alert(`Revisa las opciones del menú: ${err.message}`);
+  }
   const res = await fetch(`${API}/restaurant/menu/import`, {
     method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ items })
   });
@@ -2350,6 +2456,78 @@ async function importRestaurantMenu(event) {
 }
 
 // ------- POS / CARRITO -------
+
+function configureAndAddProduct(product) {
+  if (businessType === "RESTAURANT" && Number(product.available ?? 1) !== 1) {
+    alert(`${product.name} está marcado como agotado.`);
+    return;
+  }
+  const groups = productModifierGroups(product);
+  if (!groups.length) return addToCart(product, []);
+  pendingModifierProduct = product;
+  document.getElementById("modifierProductName").textContent = product.name;
+  document.getElementById("modifierProductPrice").textContent = `Precio base: $${Number(product.price).toFixed(2)}`;
+  const body = document.getElementById("modifierGroups");
+  body.innerHTML = "";
+  groups.forEach((group, groupIndex) => {
+    const fieldset = document.createElement("fieldset");
+    fieldset.className = "modifier-group";
+    const legend = document.createElement("legend");
+    legend.textContent = `${group.name}${group.required ? " · obligatorio" : " · opcional"}${group.multiple ? " · puedes elegir varios" : ""}`;
+    fieldset.appendChild(legend);
+    (group.options || []).forEach(option => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = group.multiple ? "checkbox" : "radio";
+      input.name = `modifier-group-${groupIndex}`;
+      input.value = option.name;
+      input.dataset.group = group.name;
+      input.dataset.priceDelta = Number(option.priceDelta || 0);
+      input.addEventListener("change", updateModifierUnitTotal);
+      const text = document.createElement("span");
+      text.textContent = `${option.name}${Number(option.priceDelta || 0) ? ` (+$${Number(option.priceDelta).toFixed(2)})` : ""}`;
+      label.append(input, text);
+      fieldset.appendChild(label);
+    });
+    body.appendChild(fieldset);
+  });
+  document.getElementById("modifierValidation").classList.add("hidden");
+  document.getElementById("productModifierModal").classList.remove("hidden");
+  updateModifierUnitTotal();
+}
+
+function updateModifierUnitTotal() {
+  const extra = [...document.querySelectorAll("#modifierGroups input:checked")]
+    .reduce((sum, input) => sum + Number(input.dataset.priceDelta || 0), 0);
+  document.getElementById("modifierUnitTotal").textContent = (Number(pendingModifierProduct?.price || 0) + extra).toFixed(2);
+}
+
+function closeProductModifierModal() {
+  pendingModifierProduct = null;
+  document.getElementById("productModifierModal").classList.add("hidden");
+}
+
+function confirmProductModifiers() {
+  if (!pendingModifierProduct) return;
+  const groups = productModifierGroups(pendingModifierProduct);
+  const selections = groups.map((group, groupIndex) => ({
+    group: group.name,
+    options: [...document.querySelectorAll(`input[name="modifier-group-${groupIndex}"]:checked`)].map(input => ({
+      name: input.value,
+      priceDelta: Number(input.dataset.priceDelta || 0)
+    }))
+  })).filter(selection => selection.options.length);
+  const missing = groups.find(group => group.required && !selections.some(selection => selection.group === group.name));
+  if (missing) {
+    const validation = document.getElementById("modifierValidation");
+    validation.textContent = `Selecciona una opción para ${missing.name}.`;
+    validation.classList.remove("hidden");
+    return;
+  }
+  const product = pendingModifierProduct;
+  closeProductModifierModal();
+  addToCart(product, selections);
+}
 
 function setInvoiceType(type) {
   invoiceType = type === "FACTURA" ? "FACTURA" : "CONSUMIDOR_FINAL";
@@ -2477,23 +2655,32 @@ function addToCartByCode() {
     return;
   }
 
-  addToCart(product);
+  configureAndAddProduct(product);
   codeInput.value = "";
 }
 
-function addToCart(product) {
-  const existing = cart.find(item => item.id === product.id);
+function addToCart(product, selectedModifiers = []) {
+  const modifierKey = JSON.stringify(selectedModifiers.map(selection => ({
+    group: selection.group,
+    options: (selection.options || []).map(option => option.name).sort()
+  })));
+  const existing = cart.find(item => item.id === product.id && item.modifierKey === modifierKey);
   if (existing) {
     existing.quantity += 1;
   } else {
+    const modifierExtra = selectedModifiers.flatMap(selection => selection.options || []).reduce((sum, option) => sum + Number(option.priceDelta || 0), 0);
     cart.push({
       id: product.id,
       code: product.code,
       name: product.name,
-      price: Number(product.price),
+      basePrice: Number(product.price),
+      price: Number(product.price) + modifierExtra,
       quantity: 1,
       discountPercent: 0,
-      discountReason: ""
+      discountReason: "",
+      selectedModifiers,
+      modifierKey,
+      note: ""
     });
   }
   if (activeRestaurantOrder) restaurantOrderDirty = true;
@@ -2658,16 +2845,24 @@ async function activateRestaurantOrder(order) {
   }
   activeRestaurantOrder = order;
   restaurantOrderDirty = false;
-  cart = (order.items || []).map(item => ({
-    id: Number(item.productId),
-    code: item.code,
-    name: item.name,
-    price: Number(item.price),
-    quantity: Number(item.quantity),
-    discountPercent: Number(item.discountPercent || 0),
-    discountReason: item.discountReason || "",
-    note: item.note || ""
-  }));
+  cart = (order.items || []).map(item => {
+    const selectedModifiers = Array.isArray(item.selectedModifiers) ? item.selectedModifiers : [];
+    const modifierKey = JSON.stringify(selectedModifiers.map(selection => ({ group: selection.group, options: (selection.options || []).map(option => option.name).sort() })));
+    const modifierExtra = selectedModifiers.flatMap(selection => selection.options || []).reduce((sum, option) => sum + Number(option.priceDelta || 0), 0);
+    return {
+      id: Number(item.productId),
+      code: item.code,
+      name: item.name,
+      basePrice: Number(item.price) - modifierExtra,
+      price: Number(item.price),
+      quantity: Number(item.quantity),
+      discountPercent: Number(item.discountPercent || 0),
+      discountReason: item.discountReason || "",
+      selectedModifiers,
+      modifierKey,
+      note: item.note || ""
+    };
+  });
   renderRestaurantOrderContext();
   renderCart();
   showTab("pos");
@@ -2720,6 +2915,7 @@ function renderCart() {
     const discountPercent = Number(item.discountPercent || 0);
     const lineTotal = gross * (1 - discountPercent / 100);
     const discountReason = item.discountReason || "";
+    const modifierLabel = modifierSelectionLabel(item.selectedModifiers);
     const reasonControl = discountPercent > 0
       ? `<select class="cart-discount-reason" onchange="updateCartDiscountReason(${index}, this.value)">
           <option value=""${discountReason ? "" : " selected"}>Motivo...</option>
@@ -2730,7 +2926,7 @@ function renderCart() {
       : "";
     const cells = {
       code: `<td>${escapeCartValue(item.code)}</td>`,
-      name: `<td>${escapeCartValue(item.name)}</td>`,
+      name: `<td>${escapeCartValue(item.name)}${modifierLabel ? `<small class="cart-modifier-summary">${escapeCartValue(modifierLabel)}</small>` : ""}</td>`,
       quantity: `<td>
           <input type="number" min="1" value="${item.quantity}"
                  onchange="updateCartQuantity(${index}, this.value)">
@@ -2816,6 +3012,102 @@ function updateChange() {
     change > 0 ? change.toFixed(2) : "0.00";
 }
 
+function renderThermalReceipt(data) {
+  const invoice = data.invoice || {};
+  const issuer = data.issuer || {};
+  const date = invoice.date ? new Date(invoice.date) : new Date();
+  const documentLabel = invoice.invoiceType === "FACTURA" ? "FACTURA ELECTRÓNICA" : "COMPROBANTE ELECTRÓNICO";
+  const statusLabel = data.environment === "TEST"
+    ? "AMBIENTE DE PRUEBAS · SIN VALIDEZ TRIBUTARIA"
+    : data.authorized ? "AUTORIZADO POR EL SRI" : "PENDIENTE DE AUTORIZACIÓN SRI · SIN VALIDEZ TRIBUTARIA";
+  const modifierHtml = selections => (Array.isArray(selections) ? selections : []).flatMap(selection =>
+    (selection.options || []).map(option => `<small>${escapeCartValue(selection.group)}: ${escapeCartValue(option.name)}</small>`)
+  ).join("");
+  const rows = (data.lines || []).map(line => `
+    <tr><td colspan="3"><strong>${escapeCartValue(line.name)}</strong>${modifierHtml(line.selectedModifiers)}</td></tr>
+    <tr><td>${Number(line.quantity)} × $${Number(line.price).toFixed(2)}</td><td>${Number(line.discountAmount || 0) ? `Desc. $${Number(line.discountAmount).toFixed(2)}` : ""}</td><td>$${Number(line.total).toFixed(2)}</td></tr>
+  `).join("");
+  const accessKey = invoice.accessKey || invoice.authorizationNumber || "";
+  document.getElementById("thermalReceipt").innerHTML = `
+    <header class="receipt-center">
+      <h1>${escapeCartValue(issuer.commercialName || issuer.legalName || company)}</h1>
+      ${issuer.commercialName && issuer.legalName ? `<div>${escapeCartValue(issuer.legalName)}</div>` : ""}
+      <div>RUC: ${escapeCartValue(issuer.ruc || "NO CONFIGURADO")}</div>
+      ${issuer.mainAddress ? `<div>Matriz: ${escapeCartValue(issuer.mainAddress)}</div>` : ""}
+      ${issuer.establishmentAddress ? `<div>Establecimiento: ${escapeCartValue(issuer.establishmentAddress)}</div>` : ""}
+      ${issuer.taxRegime ? `<div>${escapeCartValue(issuer.taxRegime)}</div>` : ""}
+      ${issuer.specialTaxpayerNumber ? `<div>Contribuyente especial: ${escapeCartValue(issuer.specialTaxpayerNumber)}</div>` : ""}
+      <div>Obligado a llevar contabilidad: ${escapeCartValue(issuer.accountingRequired || "NO")}</div>
+    </header>
+    <div class="receipt-separator"></div>
+    <section class="receipt-center">
+      <strong>${documentLabel}</strong>
+      <div>No. ${escapeCartValue(invoice.invoiceNumber || "—")}</div>
+      <div class="receipt-status">${statusLabel}</div>
+    </section>
+    <div class="receipt-separator"></div>
+    <section>
+      <div>Fecha: ${date.toLocaleDateString("es-EC")} ${date.toLocaleTimeString("es-EC")}</div>
+      <div>Cliente: ${escapeCartValue(invoice.buyerName || "CONSUMIDOR FINAL")}</div>
+      <div>Identificación: ${escapeCartValue(invoice.buyerIdNumber || "9999999999999")}</div>
+      ${invoice.buyerAddress ? `<div>Dirección: ${escapeCartValue(invoice.buyerAddress)}</div>` : ""}
+      ${invoice.buyerEmail ? `<div>Correo: ${escapeCartValue(invoice.buyerEmail)}</div>` : ""}
+      <div>Cajero: ${escapeCartValue(invoice.issuedByName || "—")}</div>
+      ${data.restaurant ? `<div>Mesa: ${escapeCartValue(data.restaurant.tableName)} · Mesero: ${escapeCartValue(data.restaurant.serverName || "Sin asignar")}</div>` : ""}
+    </section>
+    <div class="receipt-separator"></div>
+    <table class="receipt-items"><tbody>${rows}</tbody></table>
+    <div class="receipt-separator"></div>
+    <section class="receipt-totals">
+      <div><span>Subtotal 15%</span><strong>$${Number(invoice.subtotal || 0).toFixed(2)}</strong></div>
+      <div><span>Subtotal 0%</span><strong>$0.00</strong></div>
+      <div><span>Subtotal no objeto IVA</span><strong>$0.00</strong></div>
+      <div><span>Subtotal exento IVA</span><strong>$0.00</strong></div>
+      <div><span>Subtotal sin impuestos</span><strong>$${Number(invoice.subtotal || 0).toFixed(2)}</strong></div>
+      <div><span>Descuento</span><strong>$${Number(invoice.discountAmount || 0).toFixed(2)}</strong></div>
+      <div><span>ICE</span><strong>$0.00</strong></div>
+      <div><span>IVA 15%</span><strong>$${Number(invoice.taxAmount || 0).toFixed(2)}</strong></div>
+      <div class="receipt-grand-total"><span>VALOR A PAGAR</span><strong>$${Number(invoice.total || 0).toFixed(2)}</strong></div>
+    </section>
+    <div class="receipt-separator"></div>
+    <section>
+      <div>Forma de pago: ${escapeCartValue(invoice.paymentType || "—")}</div>
+      ${invoice.paymentType === "Efectivo" ? `<div>Recibido: $${Number(invoice.cashReceived || 0).toFixed(2)} · Cambio: $${Number(invoice.changeDue || 0).toFixed(2)}</div>` : ""}
+      ${accessKey ? `<div class="receipt-access-key">${invoice.authorizationNumber ? `<strong>NÚMERO DE AUTORIZACIÓN</strong><br>${escapeCartValue(invoice.authorizationNumber)}<br>` : ""}${invoice.authorizedAt ? `Fecha autorización: ${escapeCartValue(invoice.authorizedAt)}<br>` : ""}<strong>CLAVE DE ACCESO</strong><br>${escapeCartValue(invoice.accessKey || invoice.authorizationNumber)}</div>` : `<div class="receipt-warning">La clave de acceso aparecerá cuando el SRI autorice el comprobante.</div>`}
+    </section>
+    <div class="receipt-separator"></div>
+    <footer class="receipt-center">Gracias por su compra<br><small>Representación impresa del comprobante electrónico (RIDE) únicamente cuando conste como autorizado por el SRI.</small></footer>
+  `;
+}
+
+async function printSaleReceipt(invoiceId) {
+  if (!invoiceId) return alert("No se encontró el comprobante para imprimir.");
+  const previousTitle = document.title;
+  try {
+    const res = await fetch(`${API}/invoices/${invoiceId}/receipt`, { headers: authHeaders(), cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "No se pudo preparar el recibo.");
+      return false;
+    }
+    renderThermalReceipt(data);
+    document.title = `Recibo_${data.invoice?.invoiceNumber || invoiceId}`;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    window.print();
+    return true;
+  } catch {
+    alert("La venta fue registrada, pero no se pudo abrir el recibo. Puedes imprimirlo desde Ventas.");
+    return false;
+  } finally {
+    document.title = previousTitle;
+  }
+}
+
+async function printSelectedSaleReceipt() {
+  if (!selectedSale?.invoiceId) return alert("Selecciona una fila de la venta primero.");
+  await printSaleReceipt(selectedSale.invoiceId);
+}
+
 async function finishSale() {
   if (!cart.length) {
     alert("No hay productos en el carrito.");
@@ -2868,6 +3160,8 @@ async function finishSale() {
   });
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudo registrar la factura.");
+
+  await printSaleReceipt(data.invoiceId);
 
   cart = [];
   activeRestaurantOrder = null;
@@ -3043,10 +3337,28 @@ function selectSaleRow(row, id) {
   selectedSale = allSales.find(sale => sale.id === id) || null;
   document.querySelectorAll("#salesBody tr").forEach(item => item.classList.remove("selected-row"));
   row.classList.add("selected-row");
+  document.getElementById("btnPrintSaleReceipt").disabled = !selectedSale?.invoiceId;
 }
 
 function resetSaleSelection() {
   selectedSale = null;
+  const printButton = document.getElementById("btnPrintSaleReceipt");
+  if (printButton) printButton.disabled = true;
+}
+
+async function toggleSelectedMenuAvailability() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede cambiar la disponibilidad.");
+  if (!selectedMenuProduct) return alert("Selecciona un producto primero.");
+  const available = Number(selectedMenuProduct.available ?? 1) !== 1;
+  const res = await fetch(`${API}/restaurant/menu/${selectedMenuProduct.id}/availability`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ available })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cambiar la disponibilidad.");
+  selectedMenuProduct = null;
+  await loadProducts();
 }
 
 async function returnSelectedSale() {
