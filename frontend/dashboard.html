@@ -27,6 +27,7 @@
           <button id="nav-meseros" data-module="meseros" class="hidden" onclick="showTab('meseros')">Meseros</button>
           <button id="nav-menu" data-module="menu" class="hidden" onclick="showTab('menu')">Menú</button>
           <button id="nav-cocina" data-module="cocina" class="hidden" onclick="showTab('cocina')">Cocina</button>
+          <button id="nav-rendimiento-cocina" data-module="rendimiento-cocina" data-admin-only="true" class="hidden" onclick="showTab('rendimiento-cocina')">Rendimiento de cocina</button>
           <button id="nav-historial-mesas" data-module="historial-mesas" class="hidden" onclick="showTab('historial-mesas')">Historial de atención</button>
         </div>
       </div>
@@ -278,6 +279,39 @@
         </section>
         <div id="kitchenEmpty" class="restaurant-empty hidden">No hay pedidos activos en cocina.</div>
         <div id="kitchenBoard" class="kitchen-board"></div>
+      </section>
+
+      <!-- TAB: RENDIMIENTO DE COCINA (SOLO ADMIN) -->
+      <section id="rendimiento-cocina" class="tab-section hidden restaurant-tables-section kitchen-performance-section">
+        <div class="restaurant-section-heading">
+          <div>
+            <h2>Rendimiento de cocina</h2>
+            <p>Analiza tiempos, volumen y cumplimiento de la cocina.</p>
+          </div>
+        </div>
+        <div class="sales-kpis kitchen-performance-kpis">
+          <article><span>Pedidos terminados</span><strong id="performanceOrderCount">0</strong></article>
+          <article><span>Productos preparados</span><strong id="performanceItemCount">0</strong></article>
+          <article><span>Espera promedio</span><strong><span id="performanceWaitAverage">0</span> min</strong></article>
+          <article><span>Preparación promedio</span><strong><span id="performancePrepAverage">0</span> min</strong></article>
+          <article><span>Tiempo total promedio</span><strong><span id="performanceTotalAverage">0</span> min</strong></article>
+          <article><span id="performanceTargetLabel">Listos en 20 min</span><strong><span id="performanceOnTime">0</span>%</strong></article>
+        </div>
+        <div class="kitchen-performance-insights">
+          <section>
+            <h3>Productos más preparados</h3>
+            <div class="table-scroll"><table><thead><tr><th>Producto</th><th>Cantidad</th><th>Pedidos</th><th>Tiempo prom.</th></tr></thead><tbody id="performanceProductsBody"></tbody></table></div>
+          </section>
+          <section>
+            <h3>Horas de mayor actividad</h3>
+            <div class="table-scroll"><table><thead><tr><th>Hora</th><th>Pedidos</th><th>Productos</th><th>Tiempo prom.</th></tr></thead><tbody id="performanceHoursBody"></tbody></table></div>
+          </section>
+        </div>
+        <h3 class="sales-detail-title">Detalle de pedidos terminados</h3>
+        <p id="performanceRangeLabel" class="settings-note">Todas las fechas</p>
+        <div class="table-scroll">
+          <table><thead><tr><th>Pedido</th><th>Mesa</th><th>Mesero</th><th>Recibido</th><th>Inicio</th><th>Listo</th><th>Espera</th><th>Preparación</th><th>Total</th><th>Productos</th></tr></thead><tbody id="performanceOrdersBody"></tbody></table>
+        </div>
       </section>
 
       <!-- TAB: MESEROS (RESTAURANTE) -->
@@ -640,11 +674,29 @@
     <button type="button" onclick="downloadMenuTemplate()">Descargar plantilla</button>
     <button type="button" onclick="exportRestaurantMenu()">Exportar menú (CSV)</button>
   </div>
+
+  <div id="kitchenPerformanceFilters" class="filter-group hidden">
+    <div class="filter-banner">RENDIMIENTO COCINA</div>
+    <div class="sales-quick-filters">
+      <button type="button" onclick="setKitchenPerformanceRange('today', this)">Hoy</button>
+      <button type="button" onclick="setKitchenPerformanceRange('week', this)">Últimos 7 días</button>
+      <button type="button" onclick="setKitchenPerformanceRange('month', this)">Este mes</button>
+      <button type="button" onclick="clearKitchenPerformanceFilters()">Todo</button>
+    </div>
+    <div class="restaurant-history-side-filters">
+      <label>Desde: <input id="kitchenPerformanceFrom" type="date"></label>
+      <label>Hasta: <input id="kitchenPerformanceTo" type="date"></label>
+    </div>
+    <button type="button" onclick="applyKitchenPerformanceFilters()">Seleccionar fechas</button>
+    <div class="filter-banner" style="margin-top:16px;">EXPORTAR</div>
+    <button type="button" onclick="exportKitchenPerformance()">Exportar reporte (CSV)</button>
+  </div>
 </aside>
 
 <script src="js/dialogs.js"></script>
 <script src="js/mesas.js"></script>
 <script src="js/cocina.js"></script>
+<script src="js/rendimiento-cocina.js"></script>
 <script>
 const API = "";
 const company = localStorage.getItem("company");
@@ -654,10 +706,11 @@ let enabledModules = ["inventario", "pos", "ventas", "clientes", "usuarios", "co
 
 function applyModuleVisibility() {
   document.querySelectorAll("[data-module]").forEach(element => {
-    element.classList.toggle("hidden", !enabledModules.includes(element.dataset.module));
+    const roleAllowed = !element.hasAttribute("data-admin-only") || userRole === "Admin";
+    element.classList.toggle("hidden", !enabledModules.includes(element.dataset.module) || !roleAllowed);
   });
   const restaurantGroup = document.getElementById("restaurantNavGroup");
-  const hasRestaurantModules = ["mesas", "meseros", "historial-mesas", "menu", "cocina", "reloj"].some(module => enabledModules.includes(module));
+  const hasRestaurantModules = ["mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"].some(module => enabledModules.includes(module));
   if (restaurantGroup) restaurantGroup.classList.toggle("hidden", !hasRestaurantModules);
 }
 
@@ -780,11 +833,11 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inventario", "pos", "mesas", "meseros", "menu", "cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
+  ["inventario", "pos", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
-  const restaurantTabs = ["mesas", "meseros", "menu", "historial-mesas", "cocina", "reloj"];
+  const restaurantTabs = ["mesas", "meseros", "menu", "historial-mesas", "cocina", "rendimiento-cocina", "reloj"];
   const restaurantButton = document.getElementById("nav-restaurante");
   if (restaurantButton) restaurantButton.classList.toggle("active", restaurantTabs.includes(tabId));
   if (restaurantTabs.includes(tabId)) toggleRestaurantMenu(true);
@@ -798,6 +851,7 @@ function showTab(tabId) {
   if (tabId === "historial-mesas") loadRestaurantTableHistory();
   if (tabId === "menu") loadProducts();
   if (tabId === "cocina") loadKitchenOrders();
+  if (tabId === "rendimiento-cocina" && userRole === "Admin") loadKitchenPerformance();
 
   // actualizar panel derecho
   updateRightPanel(tabId);
@@ -811,12 +865,14 @@ function updateRightPanel(tabId) {
   const clientImport  = document.getElementById("clients-import");    // clientes importar/exportar
   const historyFilters = document.getElementById("restaurantHistoryFilters");
   const menuTools = document.getElementById("restaurantMenuTools");
+  const kitchenPerformanceFilters = document.getElementById("kitchenPerformanceFilters");
 
   const showInv     = (tabId === "inventario");
   const showSales   = (tabId === "ventas");
   const showClients = (tabId === "clientes");
   const showHistory = (tabId === "historial-mesas");
   const showMenu = (tabId === "menu" && userRole === "Admin");
+  const showKitchenPerformance = (tabId === "rendimiento-cocina" && userRole === "Admin");
 
   if (invFilters) {
     invFilters.classList.toggle("hidden", !showInv);
@@ -838,6 +894,7 @@ function updateRightPanel(tabId) {
     historyFilters.classList.toggle("hidden", !showHistory);
   }
   if (menuTools) menuTools.classList.toggle("hidden", !showMenu);
+  if (kitchenPerformanceFilters) kitchenPerformanceFilters.classList.toggle("hidden", !showKitchenPerformance);
 }
 
 
