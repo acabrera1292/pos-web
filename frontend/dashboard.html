@@ -12,6 +12,9 @@
       <div class="logo">POS Simple</div>
 
       <div class="nav-section-title">Módulos</div>
+      <button id="nav-inicio" data-module="inicio" onclick="showTab('inicio')">
+        Inicio
+      </button>
       <button id="nav-inventario" data-module="inventario" onclick="showTab('inventario'); loadProducts();">
         Inventario
       </button>
@@ -57,8 +60,68 @@
         </div>
       </header>
 
+      <!-- TAB: INICIO -->
+      <section id="inicio" class="tab-section app-card">
+        <div class="home-heading">
+          <div>
+            <h2>Resumen de hoy</h2>
+            <p id="homeDateLabel">Cargando información...</p>
+          </div>
+          <span id="homeCashStatus" class="cash-register-status closed">Caja cerrada</span>
+        </div>
+
+        <div class="home-kpis">
+          <article><span>Ventas netas</span><strong>$<span id="homeSalesTotal">0.00</span></strong></article>
+          <article><span>Transacciones</span><strong id="homeTransactions">0</strong></article>
+          <article><span>Venta promedio</span><strong>$<span id="homeAverage">0.00</span></strong></article>
+          <article><span>Productos vendidos</span><strong id="homeUnits">0</strong></article>
+          <article><span>Valor descontado</span><strong>$<span id="homeDiscount">0.00</span></strong></article>
+          <article><span>Productos de cortesía</span><strong id="homeComplimentary">0</strong></article>
+        </div>
+
+        <div id="homeComparison" class="home-comparison neutral">
+          <strong id="homeComparisonTitle">Comparación con ayer</strong>
+          <span id="homeComparisonText">Sin datos todavía.</span>
+        </div>
+
+        <div class="home-columns">
+          <section>
+            <h3>Métodos de pago de hoy</h3>
+            <div class="payment-summary">
+              <div><span>Efectivo</span><strong>$<span id="homeCashPayments">0.00</span></strong></div>
+              <div><span>Tarjeta</span><strong>$<span id="homeCardPayments">0.00</span></strong></div>
+              <div><span>Transferencia</span><strong>$<span id="homeTransferPayments">0.00</span></strong></div>
+              <div id="homeOtherPaymentsRow" class="hidden"><span>Otros</span><strong>$<span id="homeOtherPayments">0.00</span></strong></div>
+            </div>
+          </section>
+          <section>
+            <div class="home-section-heading">
+              <h3>Stock bajo</h3>
+              <button type="button" onclick="showTab('inventario'); showLowStock();">Ver inventario</button>
+            </div>
+            <p id="homeLowStockSummary" class="home-muted">No hay productos con stock bajo.</p>
+            <div class="table-scroll"><table><thead><tr><th>Producto</th><th>Código</th><th>Cantidad</th></tr></thead><tbody id="homeLowStockBody"></tbody></table></div>
+          </section>
+        </div>
+
+        <section id="homeRestaurantSummary" class="home-restaurant hidden">
+          <h3>Restaurante ahora</h3>
+          <div class="home-restaurant-kpis">
+            <button type="button" onclick="showTab('mesas')"><span>Mesas abiertas</span><strong id="homeOpenTables">0</strong></button>
+            <button type="button" onclick="showTab('cocina')"><span>Pedidos activos en cocina</span><strong id="homeActiveOrders">0</strong></button>
+            <button type="button" onclick="showTab(userRole === 'Admin' ? 'rendimiento-cocina' : 'cocina')"><span>Preparación promedio hoy</span><strong><span id="homePreparationTime">0</span> min</strong></button>
+          </div>
+        </section>
+
+        <div class="home-quick-actions">
+          <button type="button" onclick="showTab('pos')">Ir a Punto de Venta</button>
+          <button type="button" onclick="showTab('caja')">Ver Caja</button>
+          <button type="button" onclick="showTab('ventas')">Ver Ventas</button>
+        </div>
+      </section>
+
       <!-- TAB: INVENTARIO -->
-      <section id="inventario" class="tab-section app-card">
+      <section id="inventario" class="tab-section app-card hidden">
         <h2>Agregar / Editar Producto</h2>
         <div class="form-row">
           <input id="code" placeholder="Código">
@@ -769,7 +832,7 @@ const API = "";
 const company = localStorage.getItem("company");
 const userRole = localStorage.getItem("role") || "Usuario";
 let businessType = localStorage.getItem("businessType") || "SHOP";
-let enabledModules = ["inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config"];
+let enabledModules = ["inicio", "inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config"];
 
 function applyModuleVisibility() {
   document.querySelectorAll("[data-module]").forEach(element => {
@@ -781,7 +844,7 @@ function applyModuleVisibility() {
   if (restaurantGroup) {
     restaurantGroup.classList.toggle("hidden", !hasRestaurantModules);
     if (businessType === "RESTAURANT") {
-      const firstModule = document.getElementById("nav-inventario");
+      const firstModule = document.getElementById("nav-inicio");
       if (firstModule && restaurantGroup.nextElementSibling !== firstModule) firstModule.parentElement.insertBefore(restaurantGroup, firstModule);
     }
   }
@@ -822,6 +885,7 @@ if (!company) {
 // Mostrar nombre de tienda al cargar
 window.addEventListener("DOMContentLoaded", () => {
   applyModuleVisibility();
+  showTab("inicio");
   loadStoreContext();
   initializeRestaurantTables();
   initializeRestaurantServers();
@@ -908,7 +972,7 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inventario", "pos", "caja", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
+  ["inicio", "inventario", "pos", "caja", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
@@ -918,6 +982,7 @@ function showTab(tabId) {
   if (restaurantTabs.includes(tabId)) toggleRestaurantMenu(true);
 
   // cargar datos según pestaña
+  if (tabId === "inicio") loadDashboardSummary();
   if (tabId === "ventas")   loadSales();
   if (tabId === "caja") loadCashRegister();
   if (tabId === "clientes") loadClients();
@@ -971,6 +1036,86 @@ function updateRightPanel(tabId) {
   }
   if (menuTools) menuTools.classList.toggle("hidden", !showMenu);
   if (kitchenPerformanceFilters) kitchenPerformanceFilters.classList.toggle("hidden", !showKitchenPerformance);
+}
+
+// ------- INICIO -------
+
+function homeMoney(value) {
+  return Number(value || 0).toFixed(2);
+}
+
+async function loadDashboardSummary() {
+  const dateLabel = document.getElementById("homeDateLabel");
+  if (dateLabel) dateLabel.textContent = "Actualizando resumen...";
+  try {
+    const res = await fetch(`${API}/dashboard/summary?threshold=${encodeURIComponent(getThreshold())}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "No se pudo cargar el resumen.");
+    const today = data.today || {};
+    const payments = today.payments || {};
+    document.getElementById("homeSalesTotal").textContent = homeMoney(today.total);
+    document.getElementById("homeTransactions").textContent = Number(today.transactions || 0);
+    document.getElementById("homeAverage").textContent = homeMoney(today.average);
+    document.getElementById("homeUnits").textContent = Number(today.units || 0);
+    document.getElementById("homeDiscount").textContent = homeMoney(today.discount);
+    document.getElementById("homeComplimentary").textContent = Number(today.complimentary || 0);
+    document.getElementById("homeCashPayments").textContent = homeMoney(payments.Efectivo);
+    document.getElementById("homeCardPayments").textContent = homeMoney(payments.Tarjeta);
+    document.getElementById("homeTransferPayments").textContent = homeMoney(payments.Transferencia);
+    document.getElementById("homeOtherPayments").textContent = homeMoney(payments.Otros);
+    document.getElementById("homeOtherPaymentsRow").classList.toggle("hidden", !Number(payments.Otros || 0));
+
+    const parsedDate = new Date(`${data.date}T12:00:00`);
+    dateLabel.textContent = Number.isNaN(parsedDate.getTime())
+      ? data.date
+      : parsedDate.toLocaleDateString("es-EC", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
+    const status = document.getElementById("homeCashStatus");
+    const registerOpen = Boolean(data.cashRegister?.open);
+    status.textContent = registerOpen ? "Caja abierta" : "Caja cerrada";
+    status.className = `cash-register-status ${registerOpen ? "open" : "closed"}`;
+
+    const comparison = document.getElementById("homeComparison");
+    const difference = Number(data.comparison?.difference || 0);
+    const percentage = data.comparison?.percentage;
+    comparison.className = `home-comparison ${difference > 0 ? "positive" : difference < 0 ? "negative" : "neutral"}`;
+    if (percentage === null || percentage === undefined) {
+      document.getElementById("homeComparisonText").textContent = Number(today.total || 0) > 0
+        ? `Ayer no hubo ventas. Hoy llevas $${homeMoney(today.total)}.`
+        : "Ayer y hoy todavía no tienen ventas.";
+    } else if (difference === 0) {
+      document.getElementById("homeComparisonText").textContent = `Igual que ayer: $${homeMoney(today.total)}.`;
+    } else {
+      document.getElementById("homeComparisonText").textContent = `${difference > 0 ? "↑" : "↓"} ${Math.abs(Number(percentage)).toFixed(1)}% (${difference > 0 ? "+" : "-"}$${homeMoney(Math.abs(difference))}) frente a ayer.`;
+    }
+
+    const lowStock = Array.isArray(data.lowStock) ? data.lowStock : [];
+    document.getElementById("homeLowStockSummary").textContent = data.lowStockCount
+      ? `${data.lowStockCount} producto(s) con ${data.threshold} unidades o menos.`
+      : `Todo está por encima del umbral de ${data.threshold} unidades.`;
+    const lowStockBody = document.getElementById("homeLowStockBody");
+    lowStockBody.innerHTML = "";
+    lowStock.forEach(product => {
+      const row = document.createElement("tr");
+      row.innerHTML = "<td></td><td></td><td></td>";
+      row.children[0].textContent = product.name || "Producto";
+      row.children[1].textContent = product.code || "—";
+      row.children[2].textContent = Number(product.quantity || 0);
+      lowStockBody.appendChild(row);
+    });
+    if (!lowStock.length) lowStockBody.innerHTML = '<tr><td colspan="3" class="empty-table">No hay alertas de stock.</td></tr>';
+
+    const restaurantSection = document.getElementById("homeRestaurantSummary");
+    restaurantSection.classList.toggle("hidden", !data.restaurant);
+    if (data.restaurant) {
+      document.getElementById("homeOpenTables").textContent = Number(data.restaurant.openTables || 0);
+      document.getElementById("homeActiveOrders").textContent = Number(data.restaurant.activeOrders || 0);
+      document.getElementById("homePreparationTime").textContent = Number(data.restaurant.averagePreparationMinutes || 0).toFixed(1);
+    }
+  } catch (err) {
+    console.error("Error cargando el resumen:", err);
+    if (dateLabel) dateLabel.textContent = "No se pudo cargar el resumen. Vuelve a entrar a Inicio para intentarlo nuevamente.";
+  }
 }
 
 // ------- CAJA -------
