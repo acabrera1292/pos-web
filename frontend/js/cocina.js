@@ -41,13 +41,20 @@
     return { label: "Nuevo", className: "new" };
   }
 
+  function modifierText(item) {
+    return (Array.isArray(item.selectedModifiers) ? item.selectedModifiers : []).flatMap(selection =>
+      (selection.options || []).map(option => `${selection.group}: ${option.name}`)
+    ).join(" · ");
+  }
+
   function renderKitchenSummary() {
     const summary = new Map();
     kitchenOrders
       .filter(order => order.kitchenStatus !== "READY")
       .forEach(order => order.items.forEach(item => {
-        const current = summary.get(item.name) || 0;
-        summary.set(item.name, current + Number(item.quantity || 0));
+        const label = [item.name, modifierText(item)].filter(Boolean).join(" — ");
+        const current = summary.get(label) || 0;
+        summary.set(label, current + Number(item.quantity || 0));
       }));
     const container = document.getElementById("kitchenProductSummary");
     const empty = document.getElementById("kitchenProductSummaryEmpty");
@@ -71,7 +78,7 @@
     board.innerHTML = kitchenOrders.map(order => {
       const info = statusInfo(order.kitchenStatus);
       const items = order.items.map(item => {
-        const notes = [item.note, item.discountPercent ? `${item.discountPercent}% desc.${item.discountReason ? ` · ${item.discountReason}` : ""}` : ""]
+        const notes = [modifierText(item), item.note, item.discountPercent ? `${item.discountPercent}% desc.${item.discountReason ? ` · ${item.discountReason}` : ""}` : ""]
           .filter(Boolean).map(note => `<small>${escapeHtml(note)}</small>`).join("");
         return `<li><strong>${Number(item.quantity)}×</strong><span>${escapeHtml(item.name)}${notes}</span></li>`;
       }).join("");
