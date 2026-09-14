@@ -471,14 +471,14 @@
     <h3 class="sales-detail-title">Detalle de ventas</h3>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>Fecha</th><th>Código</th><th>Nombre</th><th>Cant.</th><th>Precio</th><th>Descuento</th><th>Total neto</th><th>Motivo / Usuario</th><th>Tipo</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Factura</th><th>Código</th><th>Nombre</th><th>Vendida</th><th>Devuelta</th><th>Precio</th><th>Total original</th><th>Neto actual</th><th>Estado</th><th>Motivo / Usuario</th><th>Tipo</th></tr></thead>
         <tbody id="salesBody"></tbody>
       </table>
     </div>
     <button onclick="loadSales(true)">Actualizar</button>
     <span id="saleDeleteActions">
-      <button id="btnDeleteSale" onclick="deleteSelectedSale()">Eliminar</button>
-      <button id="btnDeleteMultipleSales" onclick="deleteMultipleSales()">Eliminar Varios</button>
+      <button id="btnReturnSale" onclick="returnSelectedSale()">Devolver producto</button>
+      <button id="btnCancelSale" class="danger-button" onclick="cancelSelectedSale()">Anular venta</button>
     </span>
 
   </div>
@@ -778,7 +778,13 @@ function applyModuleVisibility() {
   });
   const restaurantGroup = document.getElementById("restaurantNavGroup");
   const hasRestaurantModules = ["mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"].some(module => enabledModules.includes(module));
-  if (restaurantGroup) restaurantGroup.classList.toggle("hidden", !hasRestaurantModules);
+  if (restaurantGroup) {
+    restaurantGroup.classList.toggle("hidden", !hasRestaurantModules);
+    if (businessType === "RESTAURANT") {
+      const firstModule = document.getElementById("nav-inventario");
+      if (firstModule && restaurantGroup.nextElementSibling !== firstModule) firstModule.parentElement.insertBefore(restaurantGroup, firstModule);
+    }
+  }
 }
 
 function toggleRestaurantMenu(forceOpen) {
@@ -872,8 +878,6 @@ let cartColumnLayout = loadCartColumnLayout();
 let draggedCartColumn = null;
 let allSales = [];
 let selectedSale = null;
-let selectedSaleIds = new Set();
-let multiSaleSelection = false;
 let allClients = [];
 let invoiceType = "CONSUMIDOR_FINAL";
 let selectedInvoiceClient = null;
@@ -2740,7 +2744,7 @@ async function finishSale() {
 // ------- VENTAS (LISTADO) -------
 
 async function loadSales(preserveFilter = false) {
-  const res = await fetch(`${API}/sales/${company}`);
+  const res = await fetch(`${API}/sales/${company}`, { headers: authHeaders() });
   const data = await res.json();
 
   if (!Array.isArray(data)) {
@@ -2767,18 +2771,32 @@ function renderSalesTable(list) {
     const tipo = s.paymentType || "Efectivo";
     const discountPercent = Number(s.discountPercent || 0);
     const discountAmount = Number(s.discountAmount || 0);
-    const discountDetail = discountPercent > 0
+    const returnedQuantity = Number(s.returnedQuantity || 0);
+    const returnedAmount = Number(s.returnedAmount || 0);
+    const currentTotal = Math.max(0, Number(s.total || 0) - returnedAmount);
+    const statusLabels = {
+      COMPLETADA: "Completada",
+      DEVOLUCION_PARCIAL: "Devolución parcial",
+      DEVUELTA: "Devuelta",
+      ANULADA: "Anulada"
+    };
+    const discountDetail = returnedQuantity > 0
+      ? `${escapeCartValue(s.adjustmentReason || "Devolución")}${s.adjustmentByName ? `<br><small>${escapeCartValue(s.adjustmentByName)}</small>` : ""}`
+      : discountPercent > 0
       ? `${escapeCartValue(s.discountReason || "Descuento")}${s.grantedByName ? `<br><small>${escapeCartValue(s.grantedByName)}</small>` : ""}`
       : "—";
     tbody.innerHTML += `
-      <tr onclick="selectSaleRow(this, ${s.id})">
+      <tr class="sale-row-${String(s.saleStatus || "COMPLETADA").toLowerCase()}" onclick="selectSaleRow(this, ${s.id})">
         <td>${fecha}</td>
+        <td>${escapeCartValue(s.invoiceNumber || "—")}</td>
         <td>${s.code}</td>
         <td>${s.name}</td>
         <td>${s.quantity}</td>
+        <td>${returnedQuantity || "—"}</td>
         <td>$${Number(s.price).toFixed(2)}</td>
-        <td>${discountPercent > 0 ? `${discountPercent}% · $${discountAmount.toFixed(2)}` : "—"}</td>
         <td>$${Number(s.total).toFixed(2)}</td>
+        <td>$${currentTotal.toFixed(2)}</td>
+        <td><span class="sale-status sale-status-${String(s.saleStatus || "COMPLETADA").toLowerCase()}">${statusLabels[s.saleStatus] || "Completada"}</span></td>
         <td>${discountDetail}</td>
         <td>${tipo}</td>
       </tr>
@@ -2877,18 +2895,6 @@ function authHeaders() {
 }
 
 function selectSaleRow(row, id) {
-  if (multiSaleSelection) {
-    if (selectedSaleIds.has(id)) {
-      selectedSaleIds.delete(id);
-      row.classList.remove("selected-row");
-    } else {
-      selectedSaleIds.add(id);
-      row.classList.add("selected-row");
-    }
-    updateMultipleDeleteButton();
-    return;
-  }
-
   selectedSale = allSales.find(sale => sale.id === id) || null;
   document.querySelectorAll("#salesBody tr").forEach(item => item.classList.remove("selected-row"));
   row.classList.add("selected-row");
@@ -2896,84 +2902,56 @@ function selectSaleRow(row, id) {
 
 function resetSaleSelection() {
   selectedSale = null;
-  selectedSaleIds.clear();
-  multiSaleSelection = false;
-  updateMultipleDeleteButton();
 }
 
-function updateMultipleDeleteButton() {
-  const button = document.getElementById("btnDeleteMultipleSales");
-  if (!button) return;
-  button.textContent = multiSaleSelection
-    ? `Confirmar eliminación (${selectedSaleIds.size})`
-    : "Eliminar Varios";
-}
-
-async function deleteSaleRequest(id) {
-  return fetch(`${API}/sales/${company}/${id}`, {
-    method: "DELETE",
-    headers: authHeaders()
+async function returnSelectedSale() {
+  if (userRole !== "Admin") {
+    alert("Solo un administrador puede registrar devoluciones.");
+    return;
+  }
+  if (!selectedSale) return alert("Selecciona un producto vendido primero.");
+  const remaining = Number(selectedSale.quantity || 0) - Number(selectedSale.returnedQuantity || 0);
+  if (remaining <= 0 || selectedSale.saleStatus === "ANULADA") return alert("Este producto ya no tiene unidades disponibles para devolver.");
+  const rawQuantity = await appPrompt(`Cantidad a devolver (máximo ${remaining}):`, String(remaining), { inputType: "number" });
+  if (rawQuantity === null) return;
+  const quantity = Number(rawQuantity);
+  if (!Number.isInteger(quantity) || quantity <= 0 || quantity > remaining) return alert(`Ingresa una cantidad entera entre 1 y ${remaining}.`);
+  const reason = await appPrompt("Motivo de la devolución:", "");
+  if (reason === null) return;
+  if (reason.trim().length < 3) return alert("Escribe el motivo de la devolución.");
+  if (!await appConfirm(`¿Devolver ${quantity} unidad(es) de ${selectedSale.name}?\n\nEl inventario se repondrá y la venta conservará su historial.`)) return;
+  const res = await fetch(`${API}/sales/${company}/${selectedSale.id}/return`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ quantity, reason: reason.trim() })
   });
-}
-
-async function deleteSelectedSale() {
-  if (userRole !== "Admin") {
-    alert("Solo un administrador puede eliminar ventas.");
-    return;
-  }
-
-  if (!selectedSale) {
-    alert("Selecciona una venta primero.");
-    return;
-  }
-
-  if (!await appConfirm("¿Eliminar esta venta y devolver la cantidad al inventario?")) return;
-
-  const res = await deleteSaleRequest(selectedSale.id);
   const data = await res.json();
-
-  if (!res.ok) {
-    alert(data.error || "No se pudo eliminar la venta.");
-    return;
-  }
-
-  await Promise.all([loadSales(true), loadProducts()]);
+  if (!res.ok) return alert(data.error || "No se pudo registrar la devolución.");
+  await Promise.all([loadSales(true), loadProducts(), loadCashRegister()]);
+  alert(`Devolución registrada por $${Number(data.amount || 0).toFixed(2)}.`);
 }
 
-async function deleteMultipleSales() {
+async function cancelSelectedSale() {
   if (userRole !== "Admin") {
-    alert("Solo un administrador puede eliminar ventas.");
+    alert("Solo un administrador puede anular ventas.");
     return;
   }
-
-  if (!multiSaleSelection) {
-    multiSaleSelection = true;
-    selectedSale = null;
-    selectedSaleIds.clear();
-    document.querySelectorAll("#salesBody tr").forEach(row => row.classList.remove("selected-row"));
-    updateMultipleDeleteButton();
-    alert("Selecciona las ventas que deseas eliminar y vuelve a pulsar el botón para confirmar.");
-    return;
-  }
-
-  if (!selectedSaleIds.size) {
-    alert("Selecciona al menos una venta.");
-    return;
-  }
-
-  if (!await appConfirm(`¿Eliminar ${selectedSaleIds.size} ventas y devolver sus cantidades al inventario?`)) return;
-
-  for (const id of selectedSaleIds) {
-    const res = await deleteSaleRequest(id);
-    if (!res.ok) {
-      const data = await res.json();
-      alert(data.error || "No se pudieron eliminar todas las ventas.");
-      break;
-    }
-  }
-
-  resetSaleSelection();
-  await Promise.all([loadSales(true), loadProducts()]);
+  if (!selectedSale) return alert("Selecciona una fila de la venta primero.");
+  if (selectedSale.saleStatus === "ANULADA") return alert("Esta venta ya fue anulada.");
+  const reason = await appPrompt("Motivo de la anulación completa:", "");
+  if (reason === null) return;
+  if (reason.trim().length < 3) return alert("Escribe el motivo de la anulación.");
+  const reference = selectedSale.invoiceNumber && selectedSale.invoiceNumber !== "—" ? ` ${selectedSale.invoiceNumber}` : " seleccionada";
+  if (!await appConfirm(`¿Anular completamente la venta${reference}?\n\nSe repondrán al inventario todas las unidades que todavía no hayan sido devueltas. La venta no se borrará.`)) return;
+  const res = await fetch(`${API}/sales/${company}/${selectedSale.id}/cancel`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: reason.trim() })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo anular la venta.");
+  await Promise.all([loadSales(true), loadProducts(), loadCashRegister()]);
+  alert(`Venta anulada. Valor registrado: $${Number(data.amount || 0).toFixed(2)}.`);
 }
 
 function filterSalesByDate() {
@@ -3045,11 +3023,17 @@ function applyCustomSalesFilter() {
 }
 
 function renderSalesReport(list, label) {
-  const total = list.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
-  const discount = list.reduce((sum, sale) => sum + Number(sale.discountAmount || 0), 0);
-  const complimentary = list.reduce((sum, sale) => sum + (Number(sale.discountPercent || 0) === 100 ? Number(sale.quantity || 0) : 0), 0);
-  const units = list.reduce((sum, sale) => sum + Number(sale.quantity || 0), 0);
-  const transactionIds = new Set(list.map(sale => sale.invoiceId ? `invoice-${sale.invoiceId}` : `line-${sale.id}`));
+  const currentUnits = sale => Math.max(0, Number(sale.quantity || 0) - Number(sale.returnedQuantity || 0));
+  const currentTotal = sale => Math.max(0, Number(sale.total || 0) - Number(sale.returnedAmount || 0));
+  const total = list.reduce((sum, sale) => sum + currentTotal(sale), 0);
+  const discount = list.reduce((sum, sale) => {
+    const ratio = Number(sale.quantity || 0) ? currentUnits(sale) / Number(sale.quantity) : 0;
+    return sum + Number(sale.discountAmount || 0) * ratio;
+  }, 0);
+  const complimentary = list.reduce((sum, sale) => sum + (Number(sale.discountPercent || 0) === 100 ? currentUnits(sale) : 0), 0);
+  const units = list.reduce((sum, sale) => sum + currentUnits(sale), 0);
+  const activeSales = list.filter(sale => currentUnits(sale) > 0);
+  const transactionIds = new Set(activeSales.map(sale => sale.invoiceId ? `invoice-${sale.invoiceId}` : `line-${sale.id}`));
   const transactionCount = transactionIds.size;
   document.getElementById("summaryLabel").textContent = label;
   document.getElementById("summaryTotal").textContent = total.toFixed(2);
@@ -3061,10 +3045,12 @@ function renderSalesReport(list, label) {
 
   const products = new Map();
   list.forEach(sale => {
+    const activeUnits = currentUnits(sale);
+    if (!activeUnits) return;
     const key = `${sale.code || ""}::${sale.name || "Producto"}`;
     const item = products.get(key) || { name: sale.name || sale.code || "Producto", units: 0, total: 0 };
-    item.units += Number(sale.quantity || 0);
-    item.total += Number(sale.total || 0);
+    item.units += activeUnits;
+    item.total += currentTotal(sale);
     products.set(key, item);
   });
   const topBody = document.getElementById("topProductsBody");
@@ -3081,8 +3067,9 @@ function renderSalesReport(list, label) {
 
   const payments = new Map();
   list.forEach(sale => {
+    if (!currentUnits(sale)) return;
     const type = sale.paymentType || "Efectivo";
-    payments.set(type, (payments.get(type) || 0) + Number(sale.total || 0));
+    payments.set(type, (payments.get(type) || 0) + currentTotal(sale));
   });
   const paymentSummary = document.getElementById("paymentSummary");
   paymentSummary.innerHTML = "";
@@ -3118,7 +3105,7 @@ function exportSales() {
     return;
   }
 
-  const rows = [["fecha","hora","codigo","nombre","cantidad","precio_unitario","total_antes_descuento","descuento_porcentaje","valor_descontado","total_neto","motivo_descuento","autorizado_por","tipo_pago"]];
+  const rows = [["fecha","hora","factura","codigo","nombre","cantidad_vendida","cantidad_devuelta","cantidad_neta","precio_unitario","total_original","valor_devuelto","total_neto_actual","estado","motivo_ajuste","realizado_por","tipo_pago"]];
 
   list.forEach(s => {
     let fecha = "";
@@ -3135,16 +3122,19 @@ function exportSales() {
     rows.push([
       fecha,
       hora,
+      s.invoiceNumber || "",
       s.code,
       s.name,
       s.quantity,
+      Number(s.returnedQuantity || 0),
+      Math.max(0, Number(s.quantity || 0) - Number(s.returnedQuantity || 0)),
       Number(s.price).toFixed(2),
-      Number(s.grossTotal || (Number(s.price) * Number(s.quantity))).toFixed(2),
-      Number(s.discountPercent || 0).toFixed(2),
-      Number(s.discountAmount || 0).toFixed(2),
       Number(s.total).toFixed(2),
-      s.discountReason || "",
-      s.grantedByName || "",
+      Number(s.returnedAmount || 0).toFixed(2),
+      Math.max(0, Number(s.total || 0) - Number(s.returnedAmount || 0)).toFixed(2),
+      s.saleStatus || "COMPLETADA",
+      s.adjustmentReason || s.discountReason || "",
+      s.adjustmentByName || s.grantedByName || "",
       tipo
     ]);
   });
