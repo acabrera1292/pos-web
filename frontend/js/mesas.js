@@ -54,6 +54,7 @@
 
   function tableState(table) {
     if (!table.active) return { className: "inactive", label: "Inactiva" };
+    if (table.joinedToSessionId) return { className: "joined", label: "Cuenta unida" };
     if (table.sessionId && table.kitchenStatus === "READY" && Number(table.orderItemCount || 0)) return { className: "ready", label: "Comida lista" };
     if (table.sessionId && table.kitchenStatus === "COOKING") return { className: "cooking", label: "En cocina" };
     if (table.sessionId && table.kitchenStatus === "NEW" && Number(table.orderItemCount || 0)) return { className: "ordered", label: "Pedido enviado" };
@@ -88,7 +89,9 @@
       const detail = document.createElement("span");
       detail.className = "restaurant-table-detail";
       detail.textContent = table.sessionId
-        ? `${table.guests} cliente${Number(table.guests) === 1 ? "" : "s"} · ${minutesSince(table.openedAt)} min`
+        ? table.joinedToSessionId
+          ? `Unida a ${table.joinedTableName || "otra mesa"} · ${minutesSince(table.openedAt)} min`
+          : `${table.guests} cliente${Number(table.guests) === 1 ? "" : "s"} · ${minutesSince(table.openedAt)} min`
         : `Capacidad: ${table.capacity}`;
       const server = document.createElement("small");
       const orderItems = Number(table.orderItemCount || 0);
@@ -111,15 +114,24 @@
     if (!selectedRestaurantTable) return;
 
     const table = selectedRestaurantTable;
+    const joined = Boolean(table.joinedToSessionId);
     document.getElementById("selectedRestaurantTableName").textContent = table.name;
     document.getElementById("selectedRestaurantTableDetail").textContent = table.sessionId
-      ? `${table.guests} cliente${Number(table.guests) === 1 ? "" : "s"} · ${minutesSince(table.openedAt)} min · ${table.serverName}${Number(table.orderItemCount || 0) ? ` · ${table.orderItemCount} producto${Number(table.orderItemCount) === 1 ? "" : "s"}` : ""}`
+      ? joined
+        ? `Cuenta compartida con ${table.joinedTableName || "otra mesa"} · abre la cuenta principal para cobrar`
+        : `${table.guests} cliente${Number(table.guests) === 1 ? "" : "s"} · ${minutesSince(table.openedAt)} min · ${table.serverName}${Number(table.orderItemCount || 0) ? ` · ${table.orderItemCount} producto${Number(table.orderItemCount) === 1 ? "" : "s"}` : ""}`
       : table.active ? `Disponible · capacidad ${table.capacity}` : "Mesa inactiva";
 
     document.getElementById("btnSeatRestaurantTable").classList.toggle("hidden", Boolean(table.sessionId) || !table.active);
-    document.getElementById("btnOpenRestaurantOrder").classList.toggle("hidden", !table.sessionId);
+    const openButton = document.getElementById("btnOpenRestaurantOrder");
+    openButton.classList.toggle("hidden", !table.sessionId);
+    openButton.textContent = joined ? "Abrir cuenta unida" : "Abrir pedido";
     document.getElementById("restaurantSeatFields").classList.toggle("hidden", Boolean(table.sessionId) || !table.active);
-    document.getElementById("btnCloseRestaurantTable").classList.toggle("hidden", !table.sessionId);
+    document.getElementById("btnCloseRestaurantTable").classList.toggle("hidden", !table.sessionId || joined);
+    const joinCandidates = restaurantTables.filter(item => item.id !== table.id && item.sessionId && !item.joinedToSessionId);
+    document.getElementById("btnJoinRestaurantTable").classList.toggle("hidden", !table.sessionId || joined || !joinCandidates.length);
+    populateRestaurantJoinSelect(joinCandidates);
+    document.getElementById("restaurantJoinFields").classList.add("hidden");
     document.getElementById("btnEditRestaurantTable").classList.toggle("hidden", userRole !== "Admin" || Boolean(table.sessionId));
     const deleteButton = document.getElementById("btnDeleteRestaurantTable");
     deleteButton.classList.toggle("hidden", userRole !== "Admin" || Boolean(table.sessionId));
@@ -130,6 +142,49 @@
   function selectRestaurantTable(id) {
     selectedRestaurantTable = restaurantTables.find(table => table.id === id) || null;
     renderRestaurantTables();
+  }
+
+  function populateRestaurantJoinSelect(candidates) {
+    const select = document.getElementById("restaurantJoinTableSelect");
+    if (!select) return;
+    const options = candidates || restaurantTables.filter(table =>
+      table.id !== selectedRestaurantTable?.id && table.sessionId && !table.joinedToSessionId
+    );
+    select.innerHTML = '<option value="">Selecciona una mesa</option>';
+    options.forEach(table => {
+      const option = document.createElement("option");
+      option.value = table.id;
+      option.textContent = `${table.name} · ${table.guests} cliente${Number(table.guests) === 1 ? "" : "s"}`;
+      select.appendChild(option);
+    });
+  }
+
+  function toggleRestaurantJoinFields(show) {
+    const panel = document.getElementById("restaurantJoinFields");
+    if (!panel || !selectedRestaurantTable?.sessionId || selectedRestaurantTable.joinedToSessionId) return;
+    const shouldShow = typeof show === "boolean" ? show : panel.classList.contains("hidden");
+    populateRestaurantJoinSelect();
+    panel.classList.toggle("hidden", !shouldShow);
+  }
+
+  async function joinSelectedRestaurantTable() {
+    if (!selectedRestaurantTable?.sessionId || selectedRestaurantTable.joinedToSessionId) return;
+    const otherTableId = Number(document.getElementById("restaurantJoinTableSelect")?.value);
+    const other = restaurantTables.find(table => table.id === otherTableId);
+    if (!other) return alert("Selecciona la otra mesa que quieres unir.");
+    if (!await appConfirm(`¿Unir ${selectedRestaurantTable.name} con ${other.name} en una sola cuenta?`)) return;
+    try {
+      const res = await fetch(`${API}/restaurant/tables/${selectedRestaurantTable.id}/join`, {
+        method: "POST",
+        headers: { ...headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ otherTableId })
+      });
+      const result = await readResponse(res);
+      await loadRestaurantTables();
+      alert(`Cuenta unida: ${result.tableName}. Ahora puedes cobrar todo desde la mesa principal.`);
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   async function readResponse(res) {
@@ -542,6 +597,8 @@
   window.seatSelectedRestaurantTable = seatSelectedRestaurantTable;
   window.closeSelectedRestaurantTable = closeSelectedRestaurantTable;
   window.openSelectedRestaurantOrder = openSelectedRestaurantOrder;
+  window.toggleRestaurantJoinFields = toggleRestaurantJoinFields;
+  window.joinSelectedRestaurantTable = joinSelectedRestaurantTable;
   window.editSelectedRestaurantTable = editSelectedRestaurantTable;
   window.deleteSelectedRestaurantTable = deleteSelectedRestaurantTable;
   window.editSelectedRestaurantServer = editSelectedRestaurantServer;
