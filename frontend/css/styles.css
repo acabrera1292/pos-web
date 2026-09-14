@@ -1187,6 +1187,13 @@ td button {
 .kitchen-ticket footer button { width: 100%; min-height: 46px; font-size: 15px; font-weight: 700; }
 .kitchen-ready-message { display: block; padding: 11px; border: 1px solid #86a78d; border-radius: 6px; background: #e7f2e9; text-align: center; }
 
+/* Restaurante: Rendimiento de cocina */
+.kitchen-performance-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.kitchen-performance-insights { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.kitchen-performance-insights > section { min-width: 0; padding: 14px; border: 1px solid #d1d5db; border-radius: 8px; background: #f8f9fa; }
+.kitchen-performance-insights h3 { margin: 0 0 10px; }
+.kitchen-performance-section #performanceRangeLabel { margin: -4px 0 9px; }
+
 .cart-discount-control {
   display: flex;
   flex-wrap: wrap;
@@ -1228,6 +1235,8 @@ td button {
 
   .kitchen-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .kitchen-board { grid-template-columns: 1fr; }
+  .kitchen-performance-kpis,
+  .kitchen-performance-insights { grid-template-columns: 1fr; }
 }
 
 /* --------------------------------------------------
