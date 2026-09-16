@@ -15,15 +15,6 @@
       <button id="nav-inicio" data-module="inicio" onclick="showTab('inicio')">
         Inicio
       </button>
-      <button id="nav-inventario" data-module="inventario" onclick="showTab('inventario'); loadProducts();">
-        Inventario
-      </button>
-      <button id="nav-pos" data-module="pos" onclick="showTab('pos')">
-        Punto de Venta
-      </button>
-      <button id="nav-caja" data-module="caja" onclick="showTab('caja')">
-        Caja
-      </button>
       <div id="restaurantNavGroup" class="nav-group hidden">
         <button id="nav-restaurante" class="nav-group-toggle" type="button" aria-expanded="false" onclick="toggleRestaurantMenu()">
           <span>Restaurante</span><span id="restaurantNavArrow" class="nav-group-arrow">›</span>
@@ -37,6 +28,15 @@
           <button id="nav-historial-mesas" data-module="historial-mesas" class="hidden" onclick="showTab('historial-mesas')">Historial de atención</button>
         </div>
       </div>
+      <button id="nav-inventario" data-module="inventario" onclick="showTab('inventario'); loadProducts();">
+        Inventario
+      </button>
+      <button id="nav-pos" data-module="pos" onclick="showTab('pos')">
+        Punto de Venta
+      </button>
+      <button id="nav-caja" data-module="caja" onclick="showTab('caja')">
+        Caja
+      </button>
       <button id="nav-ventas" data-module="ventas" onclick="showTab('ventas')">
         Ventas
       </button>
@@ -2218,7 +2218,21 @@ function menuCategoryOf(product) {
 }
 
 function productModifierGroups(product) {
-  if (Array.isArray(product?.modifierGroups)) return product.modifierGroups;
+  if (Array.isArray(product?.modifierGroups) && product.modifierGroups.length) return product.modifierGroups;
+  const category = menuCategoryOf(product).toLowerCase();
+  const name = String(product?.name || '').toLowerCase();
+  if (category.includes('hamburg') || name.includes('burger') || name.includes('hamburgues')) {
+    return [
+      { name: 'Término', required: true, multiple: false, options: [
+        { name: 'Poco cocida', priceDelta: 0 }, { name: '2/3', priceDelta: 0 },
+        { name: '3/4', priceDelta: 0 }, { name: 'Bien cocida', priceDelta: 0 }
+      ]},
+      { name: 'Extras', required: false, multiple: true, options: [
+        { name: 'Papas fritas', priceDelta: 0 }, { name: 'Tocino', priceDelta: 1.5 },
+        { name: 'Queso extra', priceDelta: 1 }, { name: 'Huevo', priceDelta: 1.25 }
+      ]}
+    ];
+  }
   try {
     const parsed = JSON.parse(product?.modifierGroups || "[]");
     return Array.isArray(parsed) ? parsed : [];
@@ -2478,7 +2492,7 @@ async function importRestaurantMenu(event) {
       price: Number(values[columns.price]), quantity: columns.quantity >= 0 ? Number(values[columns.quantity]) : 0,
       available: columns.available < 0 || !/^(no|false|0|agotado)$/i.test(values[columns.available]?.trim() || ""),
       modifierGroups: columns.modifiers >= 0 ? parseModifierDefinitions((values[columns.modifiers] || "").replace(/;\s*/g, "\n")) : []
-    })).filter(item => item.code || item.name);
+    })).filter(item => (item.code || item.name) && Number.isFinite(item.price) && item.price >= 0 && Number.isInteger(item.quantity) && item.quantity >= 0);
   } catch (err) {
     event.target.value = "";
     return alert(`Revisa las opciones del menú: ${err.message}`);
