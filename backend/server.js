@@ -571,8 +571,24 @@ function normalizeModifierGroups(input) {
   })).filter(group => group.name && group.options.length);
 }
 
+function defaultBurgerModifierGroups(product) {
+  const category = String(product?.menuCategory || '').toLowerCase();
+  const name = String(product?.name || '').toLowerCase();
+  if (!(category.includes('hamburg') || name.includes('burger') || name.includes('hamburgues'))) return [];
+  return [
+    { name: 'Término', required: true, multiple: false, options: [
+      { name: 'Poco cocida' }, { name: '2/3' }, { name: '3/4' }, { name: 'Bien cocida' }
+    ]},
+    { name: 'Extras', required: false, multiple: true, options: [
+      { name: 'Papas fritas' }, { name: 'Tocino', priceDelta: 1.5 },
+      { name: 'Queso extra', priceDelta: 1 }, { name: 'Huevo', priceDelta: 1.25 }
+    ]}
+  ];
+}
+
 function parseProductModifierGroups(product) {
-  return normalizeModifierGroups(product?.modifierGroups || []);
+  const configured = normalizeModifierGroups(product?.modifierGroups || []);
+  return configured.length ? configured : normalizeModifierGroups(defaultBurgerModifierGroups(product));
 }
 
 function parseJsonArray(value) {
@@ -1150,6 +1166,9 @@ app.post("/products/:company", (req, res) => {
   if (!code) {
     return res.status(400).json({ error: "El código es obligatorio." });
   }
+  if (!Number.isInteger(Number(quantity)) || Number(quantity) < 0 || !Number.isFinite(Number(price)) || Number(price) < 0) {
+    return res.status(400).json({ error: "Ingresa una cantidad y un precio válidos." });
+  }
 
   // ¿Ya existe ese código para esta compañía?
   db.get(
@@ -1187,6 +1206,9 @@ app.post("/products/import/:company", (req, res) => {
 
   if (!code) {
     return res.status(400).json({ error: "El código es obligatorio." });
+  }
+  if (!Number.isInteger(Number(quantity)) || Number(quantity) < 0 || !Number.isFinite(Number(price)) || Number(price) < 0) {
+    return res.status(400).json({ error: "La fila contiene una cantidad o precio inválido." });
   }
 
   db.get(
@@ -3169,6 +3191,7 @@ app.post("/restaurant/tables/:id/seat", requireRestaurantStore, async (req, res)
   const id = Number(req.params.id);
   const guests = Number(req.body.guests);
   const restaurantServerId = Number(req.body.restaurantServerId) || null;
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: "Mesa inválida." });
   if (!Number.isInteger(guests) || guests > 99) return res.status(400).json({ error: "Ingresa una cantidad válida de clientes." });
   if (guests < 1) return res.status(400).json({ error: "Debe haber al menos un cliente." });
   try {
