@@ -893,6 +893,20 @@ app.post("/settings/sri/:company/certificate/validate", requireUserAdmin, async 
   }
 });
 
+app.post("/settings/sri/:company/test-connection", requireUserAdmin, async (req, res) => {
+  const settings = await dbGet("SELECT environment FROM sri_settings WHERE company = ?", [req.params.company]);
+  const environment = settings?.environment === "PRODUCTION" ? "PRODUCTION" : "TEST";
+  const base = environment === "PRODUCTION" ? "https://cel.sri.gob.ec" : "https://celcer.sri.gob.ec";
+  const url = `${base}/comprobantes-electronicos-ws/RecepcionComprobantesOffline?wsdl`;
+  try {
+    const response = await fetch(url, { headers: { Accept: "text/xml, application/xml" } });
+    if (!response.ok) throw new Error(`SRI respondió HTTP ${response.status}.`);
+    res.json({ connected: true, environment, endpoint: url });
+  } catch (err) {
+    res.status(502).json({ connected: false, environment, error: `No se pudo conectar con el SRI: ${err.message}` });
+  }
+});
+
 app.get("/settings/client-intake/:company", requireUserAdmin, async (req, res) => {
   try {
     const row = await dbGet("SELECT active, createdAt FROM client_intake_tokens WHERE company = ?", [req.params.company]);
