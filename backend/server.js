@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const path = require("path");
 const crypto = require("crypto");
+const forge = require("node-forge");
 const { createDatabase } = require("./database");
 
 const app = express();
@@ -207,7 +208,8 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       senderEmail TEXT,
       adminCopyEmail TEXT,
       certificateConfigured INTEGER DEFAULT 0,
-      certificateValidated INTEGER DEFAULT 0
+      certificateValidated INTEGER DEFAULT 0,
+      certificateLocalValidated INTEGER DEFAULT 0
     )
   `);
 
@@ -750,7 +752,9 @@ app.get("/settings/sri/:company", requireCompanyUser, async (req, res) => {
       emissionPoint: "001",
       nextSequence: 1,
       accountingRequired: "NO",
-      certificateConfigured: 0
+      certificateConfigured: 0,
+      certificateLocalValidated: 0,
+      certificateValidated: 0
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -846,9 +850,10 @@ app.post("/settings/sri/:company/certificate", requireUserAdmin, async (req, res
       [company, path.basename(filename), certificateEncrypted, passwordEncrypted, installedAt]
     );
     await dbRun(
-      `INSERT INTO sri_settings (company, certificateConfigured, certificateValidated)
-       VALUES (?, 1, 0)
-       ON CONFLICT(company) DO UPDATE SET certificateConfigured=1, certificateValidated=0, environment='TEST'`,
+      `INSERT INTO sri_settings (company, certificateConfigured, certificateValidated, certificateLocalValidated)
+       VALUES (?, 1, 0, 0)
+       ON CONFLICT(company) DO UPDATE SET certificateConfigured=1, certificateValidated=0,
+         certificateLocalValidated=0, environment='TEST'`,
       [company]
     );
     res.json({ configured: true, validated: false, filename: path.basename(filename), installedAt });
@@ -861,12 +866,30 @@ app.delete("/settings/sri/:company/certificate", requireUserAdmin, async (req, r
   try {
     await dbRun("DELETE FROM sri_certificates WHERE company = ?", [req.params.company]);
     await dbRun(
-      "UPDATE sri_settings SET certificateConfigured = 0, certificateValidated = 0, environment = 'TEST' WHERE company = ?",
+      "UPDATE sri_settings SET certificateConfigured = 0, certificateValidated = 0, certificateLocalValidated = 0, environment = 'TEST' WHERE company = ?",
       [req.params.company]
     );
     res.json({ removed: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/settings/sri/:company/certificate/validate", requireUserAdmin, async (req, res) => {
+  try {
+    const row = await dbGet(
+      "SELECT certificateEncrypted, passwordEncrypted, filename FROM sri_certificates WHERE company = ?",
+      [req.params.company]
+    );
+    if (!row) return res.status(400).json({ error: "Primero instala un certificado .p12/.pfx." });
+    const certificate = decryptCertificateValue(row.certificateEncrypted);
+    const password = decryptCertificateValue(row.passwordEncrypted).toString("utf8");
+    const details = inspectPkcs12(certificate, password);
+    await dbRun("UPDATE sri_settings SET certificateLocalValidated = 1 WHERE company = ?", [req.params.company]);
+    res.json({ validated: true, sriValidated: false, filename: row.filename, expiresAt: details.expiresAt });
+  } catch (err) {
+    await dbRun("UPDATE sri_settings SET certificateLocalValidated = 0 WHERE company = ?", [req.params.company]).catch(() => {});
+    res.status(400).json({ error: err.message || "No se pudo validar el certificado." });
   }
 });
 
@@ -2440,6 +2463,7 @@ if (!dataStore.postgres) {
   addColumnIfMissing("restaurant_orders", "kitchenStartedAt TEXT");
   addColumnIfMissing("restaurant_orders", "kitchenReadyAt TEXT");
   addColumnIfMissing("sri_settings", "certificateValidated INTEGER DEFAULT 0");
+  addColumnIfMissing("sri_settings", "certificateLocalValidated INTEGER DEFAULT 0");
   addColumnIfMissing("store_licenses", "businessType TEXT DEFAULT 'SHOP'");
 }
 
@@ -2666,6 +2690,42 @@ async function ensureRestaurantOrder(session) {
     [session.id, session.company]
   );
   return order;
+}
+
+function decryptCertificateValue(value) {
+  const key = certificateEncryptionKey();
+  if (!key) throw new Error("SRI_CERT_ENCRYPTION_KEY no está configurada en el servidor.");
+  const parts = String(value || "").split(":");
+  if (parts.length !== 4 || parts[0] !== "v1") throw new Error("Formato de certificado cifrado no reconocido.");
+  const iv = Buffer.from(parts[1], "base64");
+  const tag = Buffer.from(parts[2], "base64");
+  const encrypted = Buffer.from(parts[3], "base64");
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+}
+
+function inspectPkcs12(certificate, password) {
+  try {
+    const der = forge.util.createBuffer(certificate.toString("binary"), "raw");
+    const asn1 = forge.asn1.fromDer(der, false);
+    const p12 = forge.pkcs12.pkcs12FromAsn1(asn1, false, password);
+    const certBags = p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag] || [];
+    const keyBags = [forge.pki.oids.pkcs8ShroudedKeyBag, forge.pki.oids.keyBag]
+      .flatMap(type => p12.getBags({ bagType: type })[type] || []);
+    const cert = certBags.find(bag => bag.cert)?.cert;
+    if (!cert || !keyBags.some(bag => bag.key)) throw new Error("El archivo no contiene certificado y clave privada.");
+    const now = new Date();
+    if (cert.validity?.notAfter && cert.validity.notAfter < now) throw new Error("El certificado está vencido.");
+    if (cert.validity?.notBefore && cert.validity.notBefore > now) throw new Error("El certificado todavía no es válido.");
+    return { subject: cert.subject?.attributes || [], issuer: cert.issuer?.attributes || [], expiresAt: cert.validity?.notAfter?.toISOString() || null };
+  } catch (error) {
+    const message = String(error?.message || "");
+    if (/Invalid password|MAC could not be verified|PKCS12/i.test(message)) {
+      throw new Error("La contraseña no corresponde al certificado .p12/.pfx o el archivo está dañado.");
+    }
+    throw error;
+  }
 }
 
 async function primaryRestaurantSession(session, company) {
@@ -3386,7 +3446,7 @@ async function initializePostgres() {
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS canceledByUserId INTEGER`,
     `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS canceledByName TEXT`,
     `CREATE TABLE IF NOT EXISTS sale_adjustments (id SERIAL PRIMARY KEY, company TEXT NOT NULL, invoiceId INTEGER, saleId INTEGER NOT NULL, type TEXT NOT NULL, quantity INTEGER NOT NULL, amount DOUBLE PRECISION NOT NULL, reason TEXT NOT NULL, paymentType TEXT NOT NULL, cashRegisterSessionId INTEGER NOT NULL, performedByUserId INTEGER, performedByName TEXT NOT NULL, createdAt TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS sri_settings (company TEXT PRIMARY KEY, environment TEXT DEFAULT 'TEST', ruc TEXT, legalName TEXT, commercialName TEXT, mainAddress TEXT, establishmentAddress TEXT, establishmentCode TEXT DEFAULT '001', emissionPoint TEXT DEFAULT '001', nextSequence INTEGER DEFAULT 1, accountingRequired TEXT DEFAULT 'NO', specialTaxpayerNumber TEXT, taxRegime TEXT, senderEmail TEXT, adminCopyEmail TEXT, certificateConfigured INTEGER DEFAULT 0, certificateValidated INTEGER DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS sri_settings (company TEXT PRIMARY KEY, environment TEXT DEFAULT 'TEST', ruc TEXT, legalName TEXT, commercialName TEXT, mainAddress TEXT, establishmentAddress TEXT, establishmentCode TEXT DEFAULT '001', emissionPoint TEXT DEFAULT '001', nextSequence INTEGER DEFAULT 1, accountingRequired TEXT DEFAULT 'NO', specialTaxpayerNumber TEXT, taxRegime TEXT, senderEmail TEXT, adminCopyEmail TEXT, certificateConfigured INTEGER DEFAULT 0, certificateValidated INTEGER DEFAULT 0, certificateLocalValidated INTEGER DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS sri_certificates (company TEXT PRIMARY KEY, filename TEXT NOT NULL, certificateEncrypted TEXT NOT NULL, passwordEncrypted TEXT NOT NULL, installedAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS client_intake_tokens (company TEXT PRIMARY KEY, tokenHash TEXT NOT NULL UNIQUE, active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS client_intake_submissions (id SERIAL PRIMARY KEY, company TEXT NOT NULL, clientId INTEGER NOT NULL, createdAt TEXT NOT NULL, claimedAt TEXT)`,

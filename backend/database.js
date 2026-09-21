@@ -58,7 +58,7 @@ function createDatabase() {
     mainaddress: "mainAddress", establishmentaddress: "establishmentAddress", establishmentcode: "establishmentCode",
     emissionpoint: "emissionPoint", nextsequence: "nextSequence", accountingrequired: "accountingRequired",
     specialtaxpayernumber: "specialTaxpayerNumber", taxregime: "taxRegime", senderemail: "senderEmail",
-    admincopyemail: "adminCopyEmail", certificateconfigured: "certificateConfigured", certificatevalidated: "certificateValidated",
+    admincopyemail: "adminCopyEmail", certificateconfigured: "certificateConfigured", certificatevalidated: "certificateValidated", certificatelocalvalidated: "certificateLocalValidated",
     businesstype: "businessType", tableid: "tableId", tablename: "tableName", sessionid: "sessionId", serveruserid: "serverUserId", restaurantserverid: "restaurantServerId",
     servername: "serverName", openedat: "openedAt", closedat: "closedAt", durationminutes: "durationMinutes", joinedtosessionid: "joinedToSessionId", joinedtablename: "joinedTableName",
     tablesessionid: "tableSessionId", orderid: "orderId", orderstatus: "orderStatus", itemid: "itemId", paidat: "paidAt", itemcount: "itemCount", orderitemcount: "orderItemCount",
