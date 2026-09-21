@@ -705,6 +705,7 @@
               <input id="sriCertificatePassword" type="password" autocomplete="new-password" placeholder="Contraseña del certificado">
               <button type="button" onclick="installSriCertificate()">Instalar firma</button>
               <button type="button" onclick="validateSriCertificate()">Validar certificado</button>
+              <button type="button" onclick="testSriConnection()">Probar conexión SRI</button>
               <button type="button" onclick="removeSriCertificate()">Quitar firma</button>
             </div>
             <small>El archivo y su contraseña se cifran en el servidor y nunca se vuelven a mostrar.</small>
@@ -2909,6 +2910,16 @@ async function validateSriCertificate() {
   document.getElementById("sriCertificateStatus").textContent = data.sriValidated
     ? "Autorizada por el SRI" : "Válida localmente; pendiente de prueba SRI";
   alert(`Certificado válido. Vencimiento: ${data.expiresAt ? new Date(data.expiresAt).toLocaleDateString() : "no disponible"}. Ahora falta enviar una factura de prueba al ambiente TEST del SRI.`);
+}
+
+async function testSriConnection() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede probar la conexión SRI.");
+  const res = await fetch(`${API}/settings/sri/${company}/test-connection`, {
+    method: "POST", headers: authHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo conectar con el SRI.");
+  alert(`Conexión correcta con el SRI en ambiente ${data.environment === "TEST" ? "de Pruebas" : "de Producción"}.`);
 }
 
 function roundMoneyValue(value) {
