@@ -704,6 +704,7 @@
               <input id="sriCertificateFile" type="file" accept=".p12,.pfx,application/x-pkcs12">
               <input id="sriCertificatePassword" type="password" autocomplete="new-password" placeholder="Contraseña del certificado">
               <button type="button" onclick="installSriCertificate()">Instalar firma</button>
+              <button type="button" onclick="validateSriCertificate()">Validar certificado</button>
               <button type="button" onclick="removeSriCertificate()">Quitar firma</button>
             </div>
             <small>El archivo y su contraseña se cifran en el servidor y nunca se vuelven a mostrar.</small>
@@ -2040,7 +2041,9 @@ async function loadSriSettings() {
   });
   sriCertificateValidated = Boolean(data.certificateValidated);
   document.getElementById("sriCertificateStatus").textContent = data.certificateValidated
-    ? "Validada" : data.certificateConfigured ? "Instalada, pendiente de validación" : "No configurada";
+    ? "Autorizada por el SRI" : data.certificateLocalValidated
+      ? "Válida localmente; pendiente de prueba SRI" : data.certificateConfigured
+        ? "Instalada, pendiente de validación" : "No configurada";
 }
 
 async function saveSriSettings() {
@@ -2894,6 +2897,18 @@ function renderRestaurantOrderContext() {
     `${activeRestaurantOrder.guests} cliente${Number(activeRestaurantOrder.guests) === 1 ? "" : "s"} · ${activeRestaurantOrder.serverName}${restaurantSplitMode ? " · Pago parcial" : ""}`;
   const splitButton = document.getElementById("btnSplitRestaurantBill");
   if (splitButton) splitButton.textContent = restaurantSplitMode ? "Cancelar división" : "Dividir cuenta";
+}
+
+async function validateSriCertificate() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede validar la firma.");
+  const res = await fetch(`${API}/settings/sri/${company}/certificate/validate`, {
+    method: "POST", headers: authHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo validar el certificado.");
+  document.getElementById("sriCertificateStatus").textContent = data.sriValidated
+    ? "Autorizada por el SRI" : "Válida localmente; pendiente de prueba SRI";
+  alert(`Certificado válido. Vencimiento: ${data.expiresAt ? new Date(data.expiresAt).toLocaleDateString() : "no disponible"}. Ahora falta enviar una factura de prueba al ambiente TEST del SRI.`);
 }
 
 function roundMoneyValue(value) {
