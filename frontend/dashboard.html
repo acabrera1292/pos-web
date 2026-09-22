@@ -3232,8 +3232,8 @@ function renderThermalReceipt(data) {
     (selection.options || []).map(option => `<small>${escapeCartValue(selection.group)}: ${escapeCartValue(option.name)}</small>`)
   ).join("");
   const rows = (data.lines || []).map(line => `
-    <tr><td colspan="3"><strong>${escapeCartValue(line.name)}</strong>${modifierHtml(line.selectedModifiers)}</td></tr>
-    <tr><td>${Number(line.quantity)} × $${Number(line.price).toFixed(2)}</td><td>${Number(line.discountAmount || 0) ? `Desc. $${Number(line.discountAmount).toFixed(2)}` : ""}</td><td>$${Number(line.total).toFixed(2)}</td></tr>
+    <tr class="receipt-product"><td colspan="3"><strong>${escapeCartValue(line.name)}</strong>${modifierHtml(line.selectedModifiers)}</td></tr>
+    <tr class="receipt-product-detail"><td>${Number(line.quantity)} × $${Number(line.price).toFixed(2)}</td><td>${Number(line.discountAmount || 0) ? `Desc. $${Number(line.discountAmount).toFixed(2)}` : ""}</td><td>$${Number(line.total).toFixed(2)}</td></tr>
   `).join("");
   const accessKey = invoice.accessKey || invoice.authorizationNumber || "";
   const payments = Array.isArray(data.payments) && data.payments.length
@@ -3270,9 +3270,10 @@ function renderThermalReceipt(data) {
       ${data.restaurant ? `<div>Mesa: ${escapeCartValue(data.restaurant.tableName)} · Mesero: ${escapeCartValue(data.restaurant.serverName || "Sin asignar")}</div>` : ""}
     </section>
     <div class="receipt-separator"></div>
-    <table class="receipt-items"><tbody>${rows}</tbody></table>
+    <table class="receipt-items"><thead><tr><th colspan="2">DETALLE</th><th>TOTAL</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="receipt-separator"></div>
     <section class="receipt-totals">
+      <div class="receipt-section-title">RESUMEN DE VALORES</div>
       <div><span>Subtotal 15%</span><strong>$${Number(invoice.subtotal || 0).toFixed(2)}</strong></div>
       <div><span>Subtotal 0%</span><strong>$0.00</strong></div>
       <div><span>Subtotal no objeto IVA</span><strong>$0.00</strong></div>
