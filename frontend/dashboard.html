@@ -713,11 +713,18 @@
             <label>Nombre <input id="storeUserName" autocomplete="name"></label>
             <label>Correo <input id="storeUserEmail" type="email" autocomplete="email"></label>
             <label>Contraseña temporal <input id="storeUserTemporaryPassword" type="password" autocomplete="new-password"></label>
-            <label>Rol <select id="storeUserRole"><option value="Usuario">Usuario</option><option value="Admin">Admin</option></select></label>
+            <fieldset class="role-picker"><legend>Roles operativos</legend>
+              <label><input type="checkbox" name="storeUserRoles" value="Mesero"> Mesero</label>
+              <label><input type="checkbox" name="storeUserRoles" value="Host"> Host</label>
+              <label><input type="checkbox" name="storeUserRoles" value="Cocina"> Cocina</label>
+              <label><input type="checkbox" name="storeUserRoles" value="Barra / Bebidas"> Barra / Bebidas</label>
+              <label><input type="checkbox" name="storeUserRoles" value="Cajero"> Cajero</label>
+              <label><input type="checkbox" name="storeUserRoles" value="Administrador"> Administrador</label>
+            </fieldset>
             <button type="button" onclick="createStoreUser()">Agregar usuario</button>
           </div>
           <input id="storeUserSearch" class="store-user-search" placeholder="Buscar por nombre o correo" oninput="renderStoreUsers()">
-          <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th></tr></thead><tbody id="storeUsersBody"></tbody></table></div>
+          <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Roles</th><th>Estado</th></tr></thead><tbody id="storeUsersBody"></tbody></table></div>
           <div class="inventory-actions">
             <button type="button" onclick="changeSelectedStoreUserRole()">Cambiar rol</button>
             <button type="button" onclick="setSelectedStoreUserTemporaryPassword()">Contraseña temporal</button>
@@ -3764,7 +3771,9 @@ function renderStoreUsers() {
     row.innerHTML = "<td></td><td></td><td></td><td></td>";
     row.children[0].textContent = user.fullName || "—";
     row.children[1].textContent = user.username;
-    row.children[2].textContent = user.role;
+    let roles = [];
+    try { roles = Array.isArray(user.roles) ? user.roles : JSON.parse(user.roles || "[]"); } catch { roles = []; }
+    row.children[2].textContent = roles.length ? roles.join(" · ") : (user.role === "Admin" ? "Administrador" : "Cajero");
     row.children[3].textContent = user.mustChangePassword ? "Pendiente de crear contraseña" : "Activo";
     row.onclick = () => {
       selectedStoreUser = user;
@@ -3781,12 +3790,13 @@ async function createStoreUser() {
     fullName: document.getElementById("storeUserName").value.trim(),
     username: document.getElementById("storeUserEmail").value.trim(),
     password: document.getElementById("storeUserTemporaryPassword").value,
-    role: document.getElementById("storeUserRole").value
+    roles: [...document.querySelectorAll('input[name="storeUserRoles"]:checked')].map(input => input.value)
   };
   const res = await fetch(`${API}/store/users`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudo crear el usuario.");
   ["storeUserName", "storeUserEmail", "storeUserTemporaryPassword"].forEach(id => document.getElementById(id).value = "");
+  document.querySelectorAll('input[name="storeUserRoles"]').forEach(input => { input.checked = false; });
   await loadStoreUsers();
   alert("Usuario creado. Envíale su correo y contraseña temporal.");
 }
