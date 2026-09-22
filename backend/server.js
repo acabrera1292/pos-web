@@ -536,7 +536,7 @@ app.get("/backup/export/:company", requireUserAdmin, async (req, res) => {
     "products", "clients", "sales", "invoices", "invoice_payments",
     "cash_register_sessions", "cash_register_movements", "sale_adjustments",
     "restaurant_tables", "restaurant_servers", "restaurant_table_sessions",
-    "restaurant_orders", "restaurant_order_items", "menu_categories",
+    "restaurant_orders", "restaurant_order_items",
     "client_intake_submissions"
   ];
   try {
