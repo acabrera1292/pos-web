@@ -1479,8 +1479,22 @@ td button {
 
 .cash-register-positive { color: #166534 !important; }
 .cash-register-negative { color: #b42318 !important; }
+
+.purchase-grid { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(420px, 1.4fr); gap: 16px; margin: 16px 0 22px; }
+.purchase-card { border: 1px solid #d1d5db; border-radius: 8px; padding: 14px; background: #f9fafb; }
+.purchase-card h3 { margin-top: 0; }
+.purchase-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.purchase-form-grid input, .purchase-form-grid select, .purchase-line-form input, .purchase-line-form select { min-width: 0; }
+.purchase-line-form { display: grid; grid-template-columns: 1.5fr .7fr .8fr auto; gap: 7px; margin: 10px 0; }
+.purchase-total { text-align: right; font-size: 1.05rem; }
+.sales-daily-report { margin: 18px 0; }
+@media (max-width: 850px) { .purchase-grid { grid-template-columns: 1fr; } .purchase-line-form { grid-template-columns: 1fr 1fr; } }
 #cashRegisterAdminHistory { margin-top: 22px; }
 #cashRegisterAdminHistory > button { margin-top: 10px; }
+.backup-settings-card { margin: 20px 0; padding: 14px; border: 1px solid #d1d5db; border-left: 4px solid #6b7280; border-radius: 6px; background: #f9fafb; }
+.backup-settings-card h3 { margin: 0 0 5px; }
+.backup-settings-card p { margin: 0 0 12px; }
+.backup-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
 @media (max-width: 900px) {
   .sales-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1653,20 +1667,33 @@ tbody td {
 
 /* Recibo térmico POSINTMART PM-80E: rollo de 80 mm, área útil de 72 mm. */
 .print-only { display: none; }
-.thermal-receipt { color: #000; background: #fff; font-family: "Courier New", monospace; font-size: 9.5pt; line-height: 1.18; overflow-wrap: anywhere; }
-.thermal-receipt h1 { margin: 0 0 3px; font-size: 13pt; }
+.thermal-receipt { color: #000; background: #fff; font-family: "Courier New", monospace; font-size: 9.2pt; line-height: 1.28; overflow-wrap: anywhere; }
+.thermal-receipt h1 { margin: 0 0 5px; font-size: 14pt; letter-spacing: .2px; }
 .receipt-center { text-align: center; }
-.receipt-separator { margin: 6px 0; border-top: 1px dashed #000; }
-.receipt-status { margin-top: 4px; font-weight: 700; }
-.receipt-items { width: 100%; border-collapse: collapse; }
-.receipt-items td { padding: 2px 0; border: 0 !important; vertical-align: top; }
+.receipt-separator { margin: 8px 0; border-top: 1px dashed #000; }
+.receipt-status { margin-top: 5px; padding: 3px 0; font-weight: 700; border-top: 1px solid #000; border-bottom: 1px solid #000; }
+.receipt-items { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.receipt-items th { padding: 3px 0; border: 0 !important; border-bottom: 1px solid #000 !important; font-size: 8.5pt; text-align: left; }
+.receipt-items th:last-child { width: 24%; text-align: right; }
+.receipt-items td { padding: 3px 0; border: 0 !important; vertical-align: top; }
 .receipt-items td:nth-child(2) { text-align: center; }
 .receipt-items td:last-child { text-align: right; }
-.receipt-items small { display: block; padding-left: 8px; }
-.receipt-totals > div { display: flex; justify-content: space-between; gap: 8px; }
-.receipt-grand-total { margin-top: 3px; padding-top: 3px; border-top: 1px solid #000; font-size: 11pt; }
+.receipt-product td { padding-top: 6px; padding-bottom: 0; }
+.receipt-product-detail td { color: #222; padding-top: 1px; padding-bottom: 4px; }
+.receipt-items small { display: block; padding-left: 8px; color: #333; font-size: 8.4pt; }
+.receipt-totals { padding: 2px 0; }
+.receipt-totals > div { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+.receipt-totals .receipt-section-title { display: block; padding: 3px 0 4px; font-weight: 700; border-bottom: 1px solid #000; }
+.receipt-grand-total { margin-top: 5px; padding: 5px 0; border-top: 1px solid #000; border-bottom: 2px double #000; font-size: 11.5pt; }
 .receipt-access-key, .receipt-warning { margin-top: 7px; text-align: center; overflow-wrap: anywhere; }
 .receipt-warning { font-weight: 700; }
+
+/* Caja: make the shift workflow easier to scan at a glance. */
+.cash-register-empty { border-left: 4px solid #9ca3af; }
+.cash-register-kpis article { min-height: 68px; display: flex; flex-direction: column; justify-content: space-between; }
+.cash-register-kpis article strong { font-size: 1.15rem; }
+.cash-register-close-card { border-left: 4px solid #6b7280 !important; }
+.cash-register-close-card button { font-weight: 700; }
 
 @media print {
   @page { margin: 0; }
