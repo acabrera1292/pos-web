@@ -170,7 +170,8 @@ function fillStoreSelect() {
     const option = document.createElement("option");
     option.value = store.company;
     option.textContent = `${store.company} (${store.userCount}/${store.userLimit})`;
-    option.disabled = storeState(store) !== "active";
+    // Una licencia por vencer sigue siendo utilizable hasta su fecha real de vencimiento.
+    option.disabled = !store.active || (store.expiresAt && daysUntil(store.expiresAt) < 0);
     select.appendChild(option);
     if (filter) {
       const filterOption = document.createElement("option");
@@ -272,6 +273,37 @@ function selectUserRow(user, row) {
 function resetSelectedUserPassword() {
   if (!selectedUser) return alert("Selecciona un usuario de la tabla primero.");
   openPasswordReset(selectedUser);
+}
+
+function editSelectedUser() {
+  if (!selectedUser) return alert("Selecciona un usuario de la tabla primero.");
+  document.getElementById("editUserId").value = selectedUser.id;
+  document.getElementById("editUserFullName").value = selectedUser.fullName || "";
+  document.getElementById("editUserEmail").value = selectedUser.username || "";
+  document.getElementById("editUserStore").value = selectedUser.company || "";
+  document.getElementById("editUserRole").value = selectedUser.role === "Usuario" ? "Usuario" : "Admin";
+  document.getElementById("editUserActive").checked = selectedUser.active !== 0;
+  document.getElementById("userEditPanel").classList.remove("hidden");
+  document.getElementById("editUserFullName").focus();
+}
+
+function closeUserEdit() { document.getElementById("userEditPanel").classList.add("hidden"); }
+
+async function saveUserEdit() {
+  const id = document.getElementById("editUserId").value;
+  const payload = {
+    fullName: document.getElementById("editUserFullName").value.trim(),
+    username: document.getElementById("editUserEmail").value.trim(),
+    company: document.getElementById("editUserStore").value,
+    role: document.getElementById("editUserRole").value,
+    active: document.getElementById("editUserActive").checked
+  };
+  const res = await fetch(adminUrl(`/admin/usuarios/${id}`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo guardar el usuario.");
+  closeUserEdit();
+  await loadAll();
+  alert("Usuario actualizado.");
 }
 
 function deleteSelectedUser() {
