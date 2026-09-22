@@ -1701,6 +1701,11 @@ tbody td {
 .role-picker legend { padding: 0 4px; font-weight: 600; }
 .role-picker label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .role-picker input { width: auto; min-height: 0 !important; }
+.store-user-edit-window { width: min(680px, 100%); }
+.store-user-edit-form { display: grid; gap: 12px; margin-top: 16px; }
+.store-user-edit-form > label { display: grid; gap: 5px; font-weight: 600; }
+.edit-user-active { display: flex !important; align-items: center; }
+.edit-user-active input { width: auto; min-height: 0 !important; }
 
 /* Barra compacta para operación desde el teléfono del mesero. */
 .mobile-operation-bar { display: none; }
