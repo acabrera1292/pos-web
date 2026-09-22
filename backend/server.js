@@ -600,7 +600,12 @@ async function submitInvoiceToSri(company, invoiceId) {
     if (existingTax) {
       existingTax.baseImponible = money(Number(existingTax.baseImponible) + base).toFixed(2);
       existingTax.valor = money(Number(existingTax.valor) + tax).toFixed(2);
-    } else totalConImpuestos.push({ ...taxRow });
+    } else totalConImpuestos.push({
+      codigo: taxRow.codigo,
+      codigoPorcentaje: taxRow.codigoPorcentaje,
+      baseImponible: taxRow.baseImponible,
+      valor: taxRow.valor
+    });
     return {
       codigoPrincipal: String(line.code || line.productId),
       descripcion: String(line.name || "Producto").slice(0, 300),
@@ -907,9 +912,10 @@ app.put("/settings/sri/:company", requireUserAdmin, async (req, res) => {
   const environment = values.environment === "PRODUCTION" ? "PRODUCTION" : "TEST";
 
   try {
-    const existing = await dbGet("SELECT certificateConfigured, certificateValidated FROM sri_settings WHERE company = ?", [company]);
+    const existing = await dbGet("SELECT certificateConfigured, certificateValidated, certificateLocalValidated FROM sri_settings WHERE company = ?", [company]);
     const certificateConfigured = existing?.certificateConfigured ? 1 : 0;
     const certificateValidated = existing?.certificateValidated ? 1 : 0;
+    const certificateLocalValidated = existing?.certificateLocalValidated ? 1 : 0;
     if (environment === "PRODUCTION" && !certificateValidated) {
       return res.status(400).json({ error: "La firma debe validarse con el SRI antes de activar Producción." });
     }
@@ -918,8 +924,8 @@ app.put("/settings/sri/:company", requireUserAdmin, async (req, res) => {
        (company, environment, ruc, legalName, commercialName, mainAddress,
         establishmentAddress, establishmentCode, emissionPoint, nextSequence,
         accountingRequired, specialTaxpayerNumber, taxRegime, senderEmail,
-        adminCopyEmail, certificateConfigured, certificateValidated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        adminCopyEmail, certificateConfigured, certificateValidated, certificateLocalValidated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(company) DO UPDATE SET
          environment=excluded.environment, ruc=excluded.ruc,
          legalName=excluded.legalName, commercialName=excluded.commercialName,
@@ -933,7 +939,8 @@ app.put("/settings/sri/:company", requireUserAdmin, async (req, res) => {
          taxRegime=excluded.taxRegime, senderEmail=excluded.senderEmail,
          adminCopyEmail=excluded.adminCopyEmail,
          certificateConfigured=excluded.certificateConfigured,
-         certificateValidated=excluded.certificateValidated`,
+         certificateValidated=excluded.certificateValidated,
+         certificateLocalValidated=excluded.certificateLocalValidated`,
       [
         company, environment, values.ruc || "", values.legalName || "",
         values.commercialName || "", values.mainAddress || "",
@@ -942,10 +949,11 @@ app.put("/settings/sri/:company", requireUserAdmin, async (req, res) => {
         values.accountingRequired === "SI" ? "SI" : "NO",
         values.specialTaxpayerNumber || "", values.taxRegime || "",
         values.senderEmail || "", values.adminCopyEmail || "",
-        certificateConfigured, certificateValidated
+        certificateConfigured, certificateValidated, certificateLocalValidated
       ]
     );
-    res.json({ saved: true, environment });
+    const saved = await dbGet("SELECT * FROM sri_settings WHERE company = ?", [company]);
+    res.json({ saved: true, environment, settings: saved });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
