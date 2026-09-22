@@ -162,9 +162,11 @@ function renderSummary() {
 
 function fillStoreSelect() {
   const select = document.getElementById("storeSelect");
+  const editSelect = document.getElementById("editUserStore");
   const filter = document.getElementById("userStoreFilter");
   const selectedFilter = filter ? filter.value : "";
   select.innerHTML = "";
+  if (editSelect) editSelect.innerHTML = "";
   if (filter) filter.innerHTML = '<option value="">Todas las tiendas</option>';
   stores.forEach(store => {
     const option = document.createElement("option");
@@ -173,6 +175,10 @@ function fillStoreSelect() {
     // Una licencia por vencer sigue siendo utilizable hasta su fecha real de vencimiento.
     option.disabled = !store.active || (store.expiresAt && daysUntil(store.expiresAt) < 0);
     select.appendChild(option);
+    if (editSelect) {
+      const editOption = option.cloneNode(true);
+      editSelect.appendChild(editOption);
+    }
     if (filter) {
       const filterOption = document.createElement("option");
       filterOption.value = store.company;
