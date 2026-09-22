@@ -1028,7 +1028,10 @@ function roleModuleAllowed(module) {
   if (userRoles.includes("Mesero")) ["mesas", "pos", "ventas", "clientes"].forEach(item => allowed.add(item));
   if (userRoles.includes("Host")) allowed.add("mesas");
   if (userRoles.includes("Cocina") || userRoles.includes("Barra / Bebidas")) allowed.add("cocina");
-  if (userRoles.includes("Cajero")) ["pos", "ventas", "clientes"].forEach(item => allowed.add(item));
+  // En tiendas, Cajero conserva el flujo operativo normal y también puede
+  // consultar/actualizar inventario (el backend mantiene las restricciones
+  // para no borrar ni modificar precio/cantidad sin permisos).
+  if (userRoles.includes("Cajero")) ["inventario", "pos", "ventas", "clientes"].forEach(item => allowed.add(item));
   return allowed.has(module);
 }
 
