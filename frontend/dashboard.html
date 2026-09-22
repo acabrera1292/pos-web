@@ -726,7 +726,7 @@
           <input id="storeUserSearch" class="store-user-search" placeholder="Buscar por nombre o correo" oninput="renderStoreUsers()">
           <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Roles</th><th>Estado</th></tr></thead><tbody id="storeUsersBody"></tbody></table></div>
           <div class="inventory-actions">
-            <button type="button" onclick="changeSelectedStoreUserRole()">Cambiar rol</button>
+            <button type="button" onclick="editSelectedStoreUser()">Editar</button>
             <button type="button" onclick="setSelectedStoreUserTemporaryPassword()">Contraseña temporal</button>
             <button type="button" class="danger-button" onclick="deleteSelectedStoreUser()">Eliminar</button>
           </div>
@@ -965,6 +965,21 @@
       <button type="button" onclick="closeSplitBillModal()">Cancelar</button>
       <button type="button" class="primary-button" onclick="confirmSplitBill()">Continuar al pago</button>
     </div>
+  </div>
+</div>
+
+<div id="storeUserEditModal" class="modifier-modal hidden" role="dialog" aria-modal="true" aria-labelledby="storeUserEditTitle">
+  <div class="modifier-window store-user-edit-window">
+    <div class="modifier-window-heading"><div><h2 id="storeUserEditTitle">Editar Personal</h2><p>Actualiza los datos y permisos de esta persona.</p></div><button type="button" class="modifier-close" onclick="closeStoreUserEditModal()">×</button></div>
+    <div class="store-user-edit-form">
+      <label>Nombre <input id="editStoreUserName"></label>
+      <label>Correo <input id="editStoreUserEmail" type="email"></label>
+      <label class="edit-user-active"><input id="editStoreUserActive" type="checkbox"> Usuario activo</label>
+      <fieldset class="role-picker"><legend>Roles operativos</legend>
+        <label><input type="checkbox" name="editStoreUserRoles" value="Mesero"> Mesero</label><label><input type="checkbox" name="editStoreUserRoles" value="Host"> Host</label><label><input type="checkbox" name="editStoreUserRoles" value="Cocina"> Cocina</label><label><input type="checkbox" name="editStoreUserRoles" value="Barra / Bebidas"> Barra / Bebidas</label><label><input type="checkbox" name="editStoreUserRoles" value="Cajero"> Cajero</label><label><input type="checkbox" name="editStoreUserRoles" value="Administrador"> Administrador</label>
+      </fieldset>
+    </div>
+    <div class="modifier-actions"><button type="button" onclick="closeStoreUserEditModal()">Cancelar</button><button type="button" class="primary-button" onclick="saveStoreUserEdit()">Guardar cambios</button></div>
   </div>
 </div>
 
@@ -3847,6 +3862,27 @@ function selectSaleRow(row, id) {
   document.getElementById("btnPrintSaleReceipt").disabled = !selectedSale?.invoiceId;
   const retryButton = document.getElementById("btnRetrySri");
   if (retryButton) retryButton.disabled = userRole !== "Admin" || !selectedSale?.invoiceId || selectedSale?.status === "AUTHORIZED";
+}
+
+function closeStoreUserEditModal() { document.getElementById("storeUserEditModal")?.classList.add("hidden"); }
+function editSelectedStoreUser() {
+  if (!selectedStoreUser) return alert("Selecciona una persona de la tabla primero.");
+  document.getElementById("editStoreUserName").value = selectedStoreUser.fullName || "";
+  document.getElementById("editStoreUserEmail").value = selectedStoreUser.username || "";
+  document.getElementById("editStoreUserActive").checked = Number(selectedStoreUser.active) !== 0;
+  let roles = []; try { roles = Array.isArray(selectedStoreUser.roles) ? selectedStoreUser.roles : JSON.parse(selectedStoreUser.roles || "[]"); } catch {}
+  document.querySelectorAll('input[name="editStoreUserRoles"]').forEach(input => { input.checked = roles.includes(input.value); });
+  document.getElementById("storeUserEditModal").classList.remove("hidden");
+}
+async function saveStoreUserEdit() {
+  if (!selectedStoreUser) return;
+  const roles = [...document.querySelectorAll('input[name="editStoreUserRoles"]:checked')].map(input => input.value);
+  if (!roles.length) return alert("Selecciona al menos un rol.");
+  const payload = { fullName: document.getElementById("editStoreUserName").value.trim(), username: document.getElementById("editStoreUserEmail").value.trim(), active: document.getElementById("editStoreUserActive").checked, roles };
+  const res = await fetch(`${API}/store/users/${selectedStoreUser.id}/details`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudieron guardar los cambios.");
+  closeStoreUserEditModal(); await loadStoreUsers();
 }
 
 function resetSaleSelection() {
