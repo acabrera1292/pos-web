@@ -1457,6 +1457,31 @@ app.post("/admin/usuarios", requireAdmin, async (req, res) => {
   }
 });
 
+// Editar los datos y permisos básicos de un usuario desde el panel superadmin.
+app.put("/admin/usuarios/:id", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const fullName = String(req.body.fullName || "").trim();
+  const username = String(req.body.username || "").trim().toLowerCase();
+  const company = String(req.body.company || "").trim();
+  const role = req.body.role === "Usuario" ? "Usuario" : "Admin";
+  const active = req.body.active === false ? 0 : 1;
+  if (!id || !fullName || !/^\S+@\S+\.\S+$/.test(username) || !company) {
+    return res.status(400).json({ error: "Completa nombre, correo y tienda." });
+  }
+  try {
+    const target = await dbGet("SELECT id, company, role FROM users WHERE id = ?", [id]);
+    if (!target) return res.status(404).json({ error: "Usuario no encontrado." });
+    const license = await dbGet("SELECT active, expiresAt FROM store_licenses WHERE company = ?", [company]);
+    if (!license) return res.status(400).json({ error: "La tienda seleccionada no existe." });
+    if (!license.active) return res.status(403).json({ error: "La licencia de la tienda está inactiva." });
+    if (license.expiresAt && license.expiresAt < getETLocalISO().slice(0, 10)) return res.status(403).json({ error: "La licencia de la tienda está vencida." });
+    await dbRun("UPDATE users SET fullName = ?, username = ?, company = ?, role = ?, active = ? WHERE id = ?", [fullName, username, company, role, active, id]);
+    res.json({ updated: true });
+  } catch (err) {
+    res.status(String(err.message).includes("UNIQUE") ? 409 : 500).json({ error: String(err.message).includes("UNIQUE") ? "Ese correo ya está registrado." : err.message });
+  }
+});
+
 // Eliminar usuario
 app.delete("/admin/usuarios/:id", requireAdmin, (req, res) => {
   db.run("DELETE FROM password_reset_codes WHERE userId = ?", [req.params.id], err => {
