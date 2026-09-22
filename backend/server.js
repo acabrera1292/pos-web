@@ -561,6 +561,18 @@ function sriPaymentType(paymentType) {
   return FormaPago.OTROS_SISTEMA_FINANCIERO;
 }
 
+// The client table stores friendly labels (Cedula/RUC/Pasaporte), while the
+// SRI XML requires the numeric catalog codes (05/04/06/07).
+function sriIdentificationType(value, idNumber) {
+  const normalized = String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (!value || normalized.includes("consumidor") || normalized === "07") return "07";
+  if (normalized === "ruc" || normalized === "04") return "04";
+  if (normalized.includes("pasaporte") || normalized === "06") return "06";
+  if (normalized.includes("cedula") || normalized === "05") return "05";
+  // Imported clients sometimes have only an identification number.
+  return /^\d{13}$/.test(String(idNumber || "")) ? "04" : "05";
+}
+
 async function submitInvoiceToSri(company, invoiceId) {
   const settings = await dbGet("SELECT * FROM sri_settings WHERE company = ?", [company]);
   if (!settings?.ruc || !settings.legalName || !settings.mainAddress) {
@@ -629,11 +641,13 @@ async function submitInvoiceToSri(company, invoiceId) {
       dirMatriz: String(settings.mainAddress).slice(0, 300), tipoEmision: TipoEmision.Normal
     },
     dirEstablecimiento: settings.establishmentAddress || undefined,
+    contribuyenteEspecial: settings.specialTaxpayerNumber || undefined,
     fechaEmision: sriDate(invoice.date),
-    tipoIdentificacionComprador: invoice.buyerIdType || "07",
+    tipoIdentificacionComprador: sriIdentificationType(invoice.buyerIdType, invoice.buyerIdNumber),
     razonSocialComprador: String(invoice.buyerName || "CONSUMIDOR FINAL").slice(0, 300),
     identificacionComprador: String(invoice.buyerIdNumber || "9999999999999"),
     direccionComprador: invoice.buyerAddress || undefined,
+    obligadoContabilidad: settings.accountingRequired === "SI" ? "SI" : "NO",
     totalSinImpuestos: Number(invoice.subtotal || 0).toFixed(2),
     totalDescuento: Number(invoice.discountAmount || 0).toFixed(2),
     importeTotal: Number(invoice.total || 0).toFixed(2),
@@ -655,7 +669,17 @@ async function submitInvoiceToSri(company, invoiceId) {
     }
     throw error;
   }
-  const messages = (result.messages || []).map(message => `${message.identificador || "SRI"}: ${message.mensaje || message.message || ""}`).join(" | ");
+  // Keep all fields returned by SRI. Error 35 is intentionally generic, and
+  // the additional fields usually identify the exact XML node or value that
+  // was rejected.
+  const messages = (result.messages || []).map(message => {
+    if (!message || typeof message !== "object") return String(message || "");
+    const detail = Object.entries(message)
+      .filter(([, value]) => value !== undefined && value !== null && String(value) !== "")
+      .map(([key, value]) => `${key}: ${value}`)
+      .join(" · ");
+    return detail || "SRI";
+  }).filter(Boolean).join(" | ");
   const status = result.status === "AUTORIZADO" ? "AUTHORIZED" : result.status === "RECHAZADO" ? "SRI_REJECTED" : "PENDING_SRI";
   await dbRun(
     `UPDATE invoices SET status = ?, accessKey = ?, authorizationNumber = ?, authorizedAt = ?, sriMessage = ? WHERE id = ? AND company = ?`,
