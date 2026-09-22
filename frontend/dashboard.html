@@ -3894,10 +3894,12 @@ async function saveStoreUserEdit() {
   const roles = [...document.querySelectorAll('input[name="editStoreUserRoles"]:checked')].map(input => input.value);
   if (!roles.length) return alert("Selecciona al menos un rol.");
   const payload = { fullName: document.getElementById("editStoreUserName").value.trim(), username: document.getElementById("editStoreUserEmail").value.trim(), active: document.getElementById("editStoreUserActive").checked, roles };
-  const res = await fetch(`${API}/store/users/${selectedStoreUser.id}/details`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-  const data = await res.json();
-  if (!res.ok) return alert(data.error || "No se pudieron guardar los cambios.");
-  closeStoreUserEditModal(); await loadStoreUsers();
+  try {
+    const res = await fetch(`${API}/store/users/${selectedStoreUser.id}/details`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (!res.ok) return alert(data.error || `No se pudieron guardar los cambios (${res.status}).`);
+    closeStoreUserEditModal(); await loadStoreUsers(); alert("Cambios guardados correctamente.");
+  } catch (error) { alert(`No se pudo guardar: ${error.message}`); }
 }
 
 function resetSaleSelection() {
