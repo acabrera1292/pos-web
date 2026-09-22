@@ -544,7 +544,7 @@ app.get("/backup/export/:company", requireUserAdmin, async (req, res) => {
       backup.tables[table] = await dbAll(`SELECT * FROM ${table} WHERE company = ? ORDER BY id`, [company]);
     }
     backup.tables.users = await dbAll(
-      `SELECT id, username, fullName, company, role, active, mustChangePassword, createdAt, updatedAt
+      `SELECT id, username, fullName, company, role, active, mustChangePassword
        FROM users WHERE company = ? ORDER BY id`, [company]
     );
     backup.tables.sri_settings = await dbAll(
