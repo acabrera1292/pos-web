@@ -2517,6 +2517,22 @@ app.post("/store/users", requireUserAdmin, async (req, res) => {
   }
 });
 
+app.put("/store/users/:id/details", requireUserAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const fullName = String(req.body.fullName || "").trim();
+  const username = String(req.body.username || "").trim().toLowerCase();
+  const allowedRoles = ["Mesero", "Host", "Cocina", "Barra / Bebidas", "Cajero", "Administrador"];
+  const roles = [...new Set((Array.isArray(req.body.roles) ? req.body.roles : []).filter(role => allowedRoles.includes(role)))];
+  if (!fullName || !/^\S+@\S+\.\S+$/.test(username) || !roles.length) return res.status(400).json({ error: "Completa nombre, correo y al menos un rol." });
+  const role = roles.includes("Administrador") ? "Admin" : "Usuario";
+  try {
+    const target = await dbGet("SELECT id FROM users WHERE id = ? AND company = ?", [id, req.user.company]);
+    if (!target) return res.status(404).json({ error: "Usuario no encontrado." });
+    await dbRun("UPDATE users SET fullName = ?, username = ?, role = ?, roles = ?, active = ? WHERE id = ? AND company = ?", [fullName, username, role, JSON.stringify(roles), req.body.active === false ? 0 : 1, id, req.user.company]);
+    res.json({ updated: true, roles });
+  } catch (err) { res.status(String(err.message).includes("UNIQUE") ? 409 : 500).json({ error: String(err.message).includes("UNIQUE") ? "Ese correo ya está registrado." : err.message }); }
+});
+
 app.put("/store/users/:id/temporary-password", requireUserAdmin, async (req, res) => {
   const password = String(req.body.password || "");
   if (password.length < 8) return res.status(400).json({ error: "La contraseña temporal debe tener al menos 8 caracteres." });
