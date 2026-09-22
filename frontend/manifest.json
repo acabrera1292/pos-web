@@ -1,0 +1,12 @@
+{
+  "name": "POS Simple",
+  "short_name": "POS Simple",
+  "description": "Punto de venta e inventario para tiendas y restaurantes",
+  "start_url": "./dashboard.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#f3f4f6",
+  "lang": "es",
+  "icons": []
+}
