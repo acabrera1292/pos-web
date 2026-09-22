@@ -30,6 +30,9 @@ body {
   display: none !important;
 }
 
+/* Tablet/touch baseline: keep controls comfortable without changing desktop sizing. */
+button, input, select, textarea { touch-action: manipulation; }
+
 
 /* --------------------------------------------------
    APP LAYOUT  (3 columns)
@@ -1716,6 +1719,13 @@ tbody td {
   .right-panel {
     display: none;
   }
+
+  .main-area { padding: 12px; }
+  .main-area button { min-height: 40px; }
+  .main-area input, .main-area select, .main-area textarea { min-height: 40px; }
+  .pos-actions, .cart-actions, .payment-actions { gap: 10px; }
+  .pos-actions button, .cart-actions button, .payment-actions button { min-height: 46px; }
+  .table-scroll { -webkit-overflow-scrolling: touch; }
 }
 
 @media (max-width: 700px) {
