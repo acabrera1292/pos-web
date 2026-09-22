@@ -567,6 +567,7 @@
     </div>
     <button onclick="loadSales(true)">Actualizar</button>
     <button id="btnPrintSaleReceipt" onclick="printSelectedSaleReceipt()" disabled>Imprimir recibo</button>
+    <button id="btnRetrySri" onclick="retrySelectedSri()" disabled>Reintentar envío SRI</button>
     <span id="saleDeleteActions">
       <button id="btnReturnSale" onclick="returnSelectedSale()">Devolver producto</button>
       <button id="btnCancelSale" class="danger-button" onclick="cancelSelectedSale()">Anular venta</button>
@@ -3565,12 +3566,27 @@ function selectSaleRow(row, id) {
   document.querySelectorAll("#salesBody tr").forEach(item => item.classList.remove("selected-row"));
   row.classList.add("selected-row");
   document.getElementById("btnPrintSaleReceipt").disabled = !selectedSale?.invoiceId;
+  const retryButton = document.getElementById("btnRetrySri");
+  if (retryButton) retryButton.disabled = userRole !== "Admin" || !selectedSale?.invoiceId || selectedSale?.status === "AUTHORIZED";
 }
 
 function resetSaleSelection() {
   selectedSale = null;
   const printButton = document.getElementById("btnPrintSaleReceipt");
   if (printButton) printButton.disabled = true;
+  const retryButton = document.getElementById("btnRetrySri");
+  if (retryButton) retryButton.disabled = true;
+}
+
+async function retrySelectedSri() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede reenviar comprobantes al SRI.");
+  if (!selectedSale?.invoiceId) return alert("Selecciona una factura primero.");
+  const company = localStorage.getItem("company");
+  const res = await fetch(`${API}/invoices/${encodeURIComponent(company)}/${selectedSale.invoiceId}/sri-send`, { method: "POST", headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo enviar el comprobante al SRI.");
+  alert(`Resultado SRI: ${data.status}${data.message ? `\n${data.message}` : ""}`);
+  await loadSales(true);
 }
 
 async function toggleSelectedMenuAvailability() {
