@@ -1726,6 +1726,35 @@ tbody td {
   .pos-actions, .cart-actions, .payment-actions { gap: 10px; }
   .pos-actions button, .cart-actions button, .payment-actions button { min-height: 46px; }
   .table-scroll { -webkit-overflow-scrolling: touch; }
+
+  /* Flujo táctil para tabletas: objetivos grandes y lectura rápida. */
+  #pos > div:first-of-type:not(.restaurant-order-context) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  #pos > div:first-of-type:not(.restaurant-order-context) input { flex: 1 1 220px; }
+  #pos > div:first-of-type:not(.restaurant-order-context) button { min-width: 100px; }
+  .restaurant-quick-menu { padding: 14px; }
+  .quick-menu-categories { gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+  .quick-menu-categories button { min-height: 46px; padding: 9px 15px; white-space: nowrap; }
+  .quick-menu-products { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+  .quick-menu-product { min-height: 96px; padding: 14px; font-size: 15px; }
+  .cart-table-help { font-size: 13px; }
+  .cart-table-scroll { max-height: 42vh; overflow: auto; }
+  .cart-table input, .cart-table select { min-height: 44px; font-size: 16px; }
+  .invoice-totals { max-width: 100%; padding: 14px; }
+  #paymentType { min-height: 46px; min-width: 180px; font-size: 16px; }
+  .mixed-payment-panel { padding: 14px; }
+  .mixed-payment-fields input { min-height: 46px; font-size: 16px; }
+  .invoice-choice { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .invoice-choice-button { min-height: 46px; padding: 10px 14px; }
+  #cashReceived { min-height: 46px; font-size: 16px; }
+  #pos > button:last-of-type { width: 100%; min-height: 54px; margin-top: 12px; font-size: 17px; font-weight: 700; }
+  .restaurant-table-card { min-height: 150px; padding: 16px; }
+  .restaurant-table-card button { min-height: 46px; }
+  .restaurant-table-card select { min-height: 46px; font-size: 16px; }
 }
 
 @media (max-width: 700px) {
