@@ -1698,6 +1698,9 @@ tbody td {
 .cash-register-close-card { border-left: 4px solid #6b7280 !important; }
 .cash-register-close-card button { font-weight: 700; }
 
+/* Barra compacta para operación desde el teléfono del mesero. */
+.mobile-operation-bar { display: none; }
+
 @media print {
   @page { margin: 0; }
   html, body { width: 80mm !important; min-width: 80mm !important; margin: 0 !important; padding: 0 !important; background: #fff !important; }
@@ -1770,4 +1773,34 @@ tbody td {
     padding: 10px 12px;
   }
   .modifier-group { grid-template-columns: 1fr; }
+  body { padding-bottom: 72px; }
+  .mobile-operation-bar {
+    position: fixed;
+    z-index: 1200;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
+    border-top: 1px solid #cbd5e1;
+    background: rgba(248, 250, 252, .97);
+    box-shadow: 0 -3px 12px rgba(15, 23, 42, .12);
+  }
+  .mobile-operation-bar button {
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+    min-height: 52px;
+    margin: 0;
+    padding: 5px 3px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    color: #1f2937;
+    background: #fff;
+  }
+  .mobile-operation-bar button:active { background: #e5e7eb; transform: translateY(1px); }
+  .mobile-operation-bar span { font-size: 21px; line-height: 1; font-weight: 700; }
+  .mobile-operation-bar small { font-size: 12px; font-weight: 600; }
 }
