@@ -17,7 +17,7 @@ const {
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "6mb" }));
+app.use(express.json({ limit: "25mb" }));
 
 // Serve frontend
 app.use(express.static(path.join(__dirname, "../frontend")));
@@ -64,6 +64,13 @@ if (!dataStore.postgres) db.serialize(() => {
     mustChangePassword INTEGER DEFAULT 0
   )
 `);
+
+  db.run(`CREATE TABLE IF NOT EXISTS backup_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    payload TEXT NOT NULL
+  )`);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS store_licenses (
@@ -525,22 +532,32 @@ function dbAll(sql, params = []) {
   return dataStore.all(sql, params);
 }
 
-// Export a portable, company-scoped backup without exposing passwords or
-// encrypted signing certificates. The backup is intentionally read-only; a
-// future restore flow can validate it before changing production data.
-app.get("/backup/export/:company", requireUserAdmin, async (req, res) => {
-  const company = req.params.company;
-  if (company !== req.user.company) return res.status(403).json({ error: "No autorizado para esta tienda." });
-  const backup = { format: "pos-simple-backup", version: 1, company, generatedAt: new Date().toISOString(), tables: {} };
-  const scopedTables = [
+const backupTables = [
     "products", "clients", "sales", "invoices", "invoice_payments",
     "cash_register_sessions", "cash_register_movements", "sale_adjustments",
     "restaurant_tables", "restaurant_servers", "restaurant_table_sessions",
     "restaurant_orders", "restaurant_order_items",
     "client_intake_submissions"
-  ];
+];
+
+async function getExistingColumns(table) {
+  if (dataStore.postgres) {
+    const rows = await dbAll("SELECT column_name FROM information_schema.columns WHERE table_name = ? ORDER BY ordinal_position", [table]);
+    return rows.map(row => row.column_name || row.columnName);
+  }
+  const rows = await dbAll(`PRAGMA table_info(${table})`);
+  return rows.map(row => row.name);
+}
+
+function resolveBackupColumn(key, columns) {
+  const normalized = String(key).replace(/_/g, "").toLowerCase();
+  return columns.find(column => String(column).replace(/_/g, "").toLowerCase() === normalized);
+}
+
+async function buildCompanyBackup(company) {
+  const backup = { format: "pos-simple-backup", version: 1, company, generatedAt: new Date().toISOString(), tables: {} };
   try {
-    for (const table of scopedTables) {
+    for (const table of backupTables) {
       backup.tables[table] = await dbAll(`SELECT * FROM ${table} WHERE company = ? ORDER BY id`, [company]);
     }
     backup.tables.users = await dbAll(
@@ -555,12 +572,88 @@ app.get("/backup/export/:company", requireUserAdmin, async (req, res) => {
               certificateLocalValidated
        FROM sri_settings WHERE company = ?`, [company]
     );
+    return backup;
+  } catch (err) {
+    throw new Error(`No se pudo crear el respaldo: ${err.message}`);
+  }
+}
+
+// Export a portable, company-scoped backup without exposing passwords or
+// encrypted signing certificates.
+app.get("/backup/export/:company", requireUserAdmin, async (req, res) => {
+  const company = req.params.company;
+  if (company !== req.user.company) return res.status(403).json({ error: "No autorizado para esta tienda." });
+  try {
+    const backup = await buildCompanyBackup(company);
     const filename = `pos-simple-respaldo-${company.replace(/[^a-z0-9_-]/gi, "-")}-${new Date().toISOString().slice(0, 10)}.json`;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.json(backup);
   } catch (err) {
-    res.status(500).json({ error: `No se pudo crear el respaldo: ${err.message}` });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function validateBackupPayload(payload, company) {
+  if (!payload || payload.format !== "pos-simple-backup" || Number(payload.version) !== 1) {
+    throw new Error("El archivo no es un respaldo válido de POS Simple.");
+  }
+  if (payload.company !== company) throw new Error("El respaldo pertenece a otra tienda.");
+  if (!payload.tables || typeof payload.tables !== "object") throw new Error("El respaldo no contiene tablas.");
+  const summary = {};
+  for (const table of backupTables) {
+    const rows = payload.tables[table] ?? [];
+    if (!Array.isArray(rows) || rows.length > 50000) throw new Error(`La tabla ${table} no tiene un formato válido.`);
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error(`La tabla ${table} contiene una fila inválida.`);
+      if (row.company !== undefined && row.company !== company) throw new Error(`La tabla ${table} contiene datos de otra tienda.`);
+    }
+    summary[table] = rows.length;
+  }
+  if (payload.tables.users && !Array.isArray(payload.tables.users)) throw new Error("La tabla de usuarios no tiene un formato válido.");
+  return summary;
+}
+
+app.post("/backup/restore/:company", requireUserAdmin, async (req, res) => {
+  const company = req.params.company;
+  if (company !== req.user.company) return res.status(403).json({ error: "No autorizado para esta tienda." });
+  try {
+    const summary = validateBackupPayload(req.body?.backup, company);
+    if (!req.body?.confirm) return res.json({ valid: true, summary, message: "Respaldo válido. Confirma para restaurarlo." });
+    const incoming = req.body.backup;
+    const current = await buildCompanyBackup(company);
+    await dbRun("INSERT INTO backup_snapshots (company, createdAt, payload) VALUES (?, ?, ?)", [company, new Date().toISOString(), JSON.stringify(current)]);
+    const childFirst = ["client_intake_submissions", "restaurant_order_items", "restaurant_orders", "restaurant_table_sessions", "restaurant_tables", "restaurant_servers", "cash_register_movements", "cash_register_sessions", "sale_adjustments", "invoice_payments", "sales", "invoices", "products", "clients"];
+    const parentFirst = ["products", "clients", "invoices", "sales", "invoice_payments", "sale_adjustments", "cash_register_sessions", "cash_register_movements", "restaurant_tables", "restaurant_servers", "restaurant_table_sessions", "restaurant_orders", "restaurant_order_items", "client_intake_submissions"];
+    await dataStore.transaction(async () => {
+      for (const table of childFirst) await dbRun(`DELETE FROM ${table} WHERE company = ?`, [company]);
+      const sri = incoming.tables.sri_settings;
+      await dbRun(`DELETE FROM sri_settings WHERE company = ?`, [company]);
+      if (Array.isArray(sri) && sri.length) {
+        const columns = await getExistingColumns("sri_settings");
+        const row = sri[0];
+        const pairs = Object.keys(row).map(key => ({ source: key, column: resolveBackupColumn(key, columns) })).filter(pair => pair.column && pair.source !== "company" && !["certificateConfigured", "certificateValidated", "certificateLocalValidated"].includes(pair.source));
+        if (pairs.length) {
+          const keys = pairs.map(pair => pair.column);
+          const values = pairs.map(pair => row[pair.source]);
+          await dbRun(`INSERT INTO sri_settings (company, ${keys.join(", ")}) VALUES (?, ${keys.map(() => "?").join(", ")})`, [company, ...values]);
+        }
+      }
+      for (const table of parentFirst) {
+        const rows = incoming.tables[table] || [];
+        const columns = await getExistingColumns(table);
+        for (const source of rows) {
+          const pairs = Object.keys(source).map(key => ({ source: key, column: resolveBackupColumn(key, columns) })).filter(pair => pair.column && pair.source !== "company");
+          if (!pairs.length) continue;
+          const keys = pairs.map(pair => pair.column);
+          const values = pairs.map(pair => source[pair.source]);
+          await dbRun(`INSERT INTO ${table} (company, ${keys.join(", ")}) VALUES (?, ${keys.map(() => "?").join(", ")})`, [company, ...values]);
+        }
+      }
+    });
+    res.json({ restored: true, summary, message: "Respaldo restaurado. Se guardó una copia automática anterior." });
+  } catch (err) {
+    res.status(400).json({ error: `No se pudo restaurar el respaldo: ${err.message}` });
   }
 });
 
@@ -3648,6 +3741,7 @@ async function initializePostgres() {
   if (!dataStore.postgres) return;
   const statements = [
     `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE, password TEXT, company TEXT, role TEXT DEFAULT 'Admin', active INTEGER DEFAULT 1, fullName TEXT DEFAULT '', mustChangePassword INTEGER DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS backup_snapshots (id SERIAL PRIMARY KEY, company TEXT NOT NULL, createdAt TEXT NOT NULL, payload TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS store_licenses (company TEXT PRIMARY KEY, active INTEGER DEFAULT 1, expiresAt TEXT, userLimit INTEGER DEFAULT 3, businessType TEXT DEFAULT 'SHOP', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
     `ALTER TABLE store_licenses ADD COLUMN IF NOT EXISTS businessType TEXT DEFAULT 'SHOP'`,
     `CREATE TABLE IF NOT EXISTS password_reset_codes (id SERIAL PRIMARY KEY, userId INTEGER NOT NULL, codeHash TEXT NOT NULL, expiresAt TEXT NOT NULL, usedAt TEXT, createdAt TEXT NOT NULL)`,
