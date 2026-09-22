@@ -3443,7 +3443,15 @@ function renderThermalReceipt(data) {
   `;
 }
 
-async function printSaleReceipt(invoiceId) {
+function openReceiptPrintWindow() {
+  try {
+    return window.open("", "posReceipt", "width=420,height=760,scrollbars=yes");
+  } catch {
+    return null;
+  }
+}
+
+async function printSaleReceipt(invoiceId, receiptWindow = null) {
   if (!invoiceId) return alert("No se encontró el comprobante para imprimir.");
   const previousTitle = document.title;
   try {
@@ -3456,9 +3464,22 @@ async function printSaleReceipt(invoiceId) {
     renderThermalReceipt(data);
     document.title = `Recibo_${data.invoice?.invoiceNumber || invoiceId}`;
     await new Promise(resolve => setTimeout(resolve, 100));
-    window.print();
+    if (receiptWindow && !receiptWindow.closed) {
+      const receiptMarkup = document.getElementById("thermalReceipt")?.innerHTML || "";
+      receiptWindow.document.open();
+      receiptWindow.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Recibo ${escapeCartValue(data.invoice?.invoiceNumber || invoiceId)}</title><style>
+        @page{size:80mm auto;margin:0}html,body{width:80mm;margin:0;padding:0;background:#fff;color:#000}body{font-family:"Courier New",monospace;font-size:9.2pt;line-height:1.28}#receipt{box-sizing:border-box;width:80mm;padding:3mm 4mm 5mm;overflow-wrap:anywhere}.receipt-center{text-align:center}.receipt-separator{margin:8px 0;border-top:1px dashed #000}.receipt-items{width:100%;border-collapse:collapse;table-layout:fixed}.receipt-items th{padding:3px 0;border:0;border-bottom:1px solid #000;font-size:8.5pt;text-align:left}.receipt-items th:last-child{width:24%;text-align:right}.receipt-items td{padding:3px 0;border:0;vertical-align:top}.receipt-items td:nth-child(2){text-align:center}.receipt-items td:last-child{text-align:right}.receipt-product td{padding-top:6px;padding-bottom:0}.receipt-product-detail td{color:#222;padding-top:1px;padding-bottom:4px}.receipt-items small{display:block;padding-left:8px;color:#333;font-size:8.4pt}.receipt-totals{padding:2px 0}.receipt-totals>div{display:flex;justify-content:space-between;gap:8px;padding:1px 0}.receipt-totals .receipt-section-title{display:block;padding:3px 0 4px;font-weight:700;border-bottom:1px solid #000}.receipt-grand-total{margin-top:5px;padding:5px 0;border-top:1px solid #000;border-bottom:2px double #000;font-size:11.5pt}.receipt-access-key,.receipt-warning{margin-top:7px;text-align:center;overflow-wrap:anywhere}.receipt-warning{font-weight:700}h1{margin:0 0 5px;font-size:14pt;letter-spacing:.2px}.receipt-status{margin-top:5px;padding:3px 0;font-weight:700;border-top:1px solid #000;border-bottom:1px solid #000}
+      </style></head><body><section id="receipt">${receiptMarkup}</section></body></html>`);
+      receiptWindow.document.close();
+      receiptWindow.focus();
+      await new Promise(resolve => setTimeout(resolve, 180));
+      receiptWindow.print();
+    } else {
+      window.print();
+    }
     return true;
   } catch {
+    if (receiptWindow && !receiptWindow.closed) receiptWindow.close();
     alert("La venta fue registrada, pero no se pudo abrir el recibo. Puedes imprimirlo desde Ventas.");
     return false;
   } finally {
@@ -3512,9 +3533,16 @@ async function finishSale() {
   );
   if (!confirmed) return;
 
+  // Abrir la ventana justo al confirmar evita que el navegador bloquee el
+  // diálogo de impresión después de guardar la venta.
+  const receiptWindow = openReceiptPrintWindow();
+
   // No reenviar un pedido sin cambios: hacerlo reiniciaría sus tiempos de Cocina
   // justo antes de cobrar y lo quitaría del reporte de rendimiento.
-  if (activeRestaurantOrder && !restaurantSplitMode && restaurantOrderDirty && !await saveRestaurantOrder(true)) return;
+  if (activeRestaurantOrder && !restaurantSplitMode && restaurantOrderDirty && !await saveRestaurantOrder(true)) {
+    if (receiptWindow && !receiptWindow.closed) receiptWindow.close();
+    return;
+  }
 
   const completedRestaurantOrder = activeRestaurantOrder;
 
@@ -3533,9 +3561,12 @@ async function finishSale() {
     })
   });
   const data = await res.json();
-  if (!res.ok) return alert(data.error || "No se pudo registrar la factura.");
+  if (!res.ok) {
+    if (receiptWindow && !receiptWindow.closed) receiptWindow.close();
+    return alert(data.error || "No se pudo registrar la factura.");
+  }
 
-  await printSaleReceipt(data.invoiceId);
+  await printSaleReceipt(data.invoiceId, receiptWindow);
 
   cart = [];
   activeRestaurantOrder = null;
