@@ -23,6 +23,12 @@ app.use(express.json({ limit: "25mb" }));
 app.use(express.static(path.join(__dirname, "../frontend")));
 
 const dataStore = createDatabase();
+const runningOnRender = process.env.RENDER === "true" || Boolean(process.env.RENDER_SERVICE_ID);
+const runningHosted = runningOnRender || process.env.NODE_ENV === "production";
+if (runningHosted && !dataStore.postgres) {
+  console.error("FATAL: Render no tiene DATABASE_URL configurada. Se detiene el servicio para evitar guardar datos en SQLite temporal.");
+  process.exit(1);
+}
 const db = {
   serialize(work) { work(); },
   get(sql, params, callback) {
@@ -3837,7 +3843,12 @@ app.post("/restaurant/tables/:id/close", requireRestaurantStore, async (req, res
 });
 
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", database: dataStore.postgres ? "postgresql" : "sqlite" });
+  res.json({
+    status: "ok",
+    database: dataStore.postgres ? "postgresql" : "sqlite",
+    persistent: dataStore.postgres,
+    warning: dataStore.postgres ? null : "SQLite local: los datos pueden perderse al reiniciar el servicio."
+  });
 });
 
 async function initializePostgres() {
