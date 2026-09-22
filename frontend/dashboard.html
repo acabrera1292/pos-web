@@ -2050,20 +2050,26 @@ async function loadSriSettings() {
 
 async function saveSriSettings() {
   if (userRole !== "Admin") return alert("Solo un administrador puede configurar el SRI.");
-  const payload = {};
-  Object.entries(sriFieldMap).forEach(([key, id]) => payload[key] = document.getElementById(id).value.trim());
-  payload.nextSequence = Number(payload.nextSequence) || 1;
-  if (!/^\d{13}$/.test(payload.ruc)) return alert("El RUC debe contener 13 dígitos.");
-  if (!payload.legalName || !payload.mainAddress) return alert("Razón social y dirección matriz son obligatorias.");
-  if (payload.environment === "PRODUCTION" && !sriCertificateValidated) return alert("No puedes activar Producción sin validar la firma electrónica con el SRI.");
-  const res = await fetch(`${API}/settings/sri/${company}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json();
-  if (!res.ok) return alert(data.error || "No se pudo guardar la configuración SRI.");
-  alert("Configuración SRI guardada en ambiente de " + (data.environment === "TEST" ? "Pruebas." : "Producción."));
+  try {
+    const payload = {};
+    Object.entries(sriFieldMap).forEach(([key, id]) => payload[key] = document.getElementById(id).value.trim());
+    payload.nextSequence = Number(payload.nextSequence) || 1;
+    if (!/^\d{13}$/.test(payload.ruc)) return alert("El RUC debe contener 13 dígitos.");
+    if (!payload.legalName || !payload.mainAddress) return alert("Razón social y dirección matriz son obligatorias.");
+    if (payload.environment === "PRODUCTION" && !sriCertificateValidated) return alert("No puedes activar Producción sin validar la firma electrónica con el SRI.");
+    const res = await fetch(`${API}/settings/sri/${company}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return alert(data.error || `No se pudo guardar la configuración SRI (HTTP ${res.status}).`);
+    await loadSriSettings();
+    alert("Configuración SRI guardada en ambiente de " + (data.environment === "TEST" ? "Pruebas." : "Producción."));
+  } catch (error) {
+    console.error("Error guardando configuración SRI", error);
+    alert("No se pudo guardar la configuración SRI. Verifica tu conexión e inténtalo nuevamente.");
+  }
 }
 
 async function installSriCertificate() {
