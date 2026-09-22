@@ -679,6 +679,15 @@
         </label>
         <button onclick="saveThreshold()">Guardar umbral</button>
 
+        <div class="backup-settings-card">
+          <h3>Respaldo de datos</h3>
+          <p class="settings-note">Descarga una copia de inventario, clientes, ventas, caja y configuración. Las contraseñas y el certificado electrónico nunca se incluyen.</p>
+          <div class="backup-actions">
+            <button type="button" onclick="downloadCompanyBackup()">Descargar respaldo</button>
+            <span id="backupLastDownload" class="settings-note">Todavía no se ha descargado un respaldo desde este dispositivo.</span>
+          </div>
+        </div>
+
         <div id="sriAdminSettings">
           <hr style="margin:20px 0;">
           <h3>Facturación Electrónica SRI</h3>
@@ -981,6 +990,7 @@ window.addEventListener("DOMContentLoaded", () => {
   if (cashRegisterAdminHistory) cashRegisterAdminHistory.classList.toggle("hidden", userRole !== "Admin");
   const clientImportAdminOnly = document.getElementById("clientImportAdminOnly");
   if (clientImportAdminOnly) clientImportAdminOnly.style.display = userRole === "Admin" ? "block" : "none";
+  updateBackupLastDownload();
   ["menuProductAvailableLabel", "menuProductModifiersLabel"].forEach(id => {
     document.getElementById(id)?.classList.toggle("hidden", userRole !== "Admin");
   });
@@ -2020,6 +2030,41 @@ async function changePassword() {
   } catch (err) {
     console.error(err);
     alert("No se pudo conectar con el servidor.");
+  }
+}
+
+function updateBackupLastDownload() {
+  const label = document.getElementById("backupLastDownload");
+  if (!label) return;
+  const saved = localStorage.getItem(`posSimpleBackup:${company}`);
+  if (saved) label.textContent = `Último respaldo descargado: ${new Date(saved).toLocaleString("es-EC")}`;
+}
+
+async function downloadCompanyBackup() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede descargar respaldos.");
+  try {
+    const res = await fetch(`${API}/backup/export/${encodeURIComponent(company)}`, { headers: authHeaders(), cache: "no-store" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return alert(data.error || "No se pudo crear el respaldo.");
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match?.[1] || `pos-simple-respaldo-${company}.json`;
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+    localStorage.setItem(`posSimpleBackup:${company}`, new Date().toISOString());
+    updateBackupLastDownload();
+    alert("Respaldo descargado correctamente.");
+  } catch (error) {
+    console.error("Error descargando respaldo", error);
+    alert("No se pudo descargar el respaldo. Verifica tu conexión e inténtalo nuevamente.");
   }
 }
 
