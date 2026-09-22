@@ -696,16 +696,18 @@
       <!-- TAB: USUARIOS -->
       <section id="usuarios" class="tab-section app-card hidden">
         <h2>Usuarios</h2>
-        <h3>Cambiar contraseña</h3>
+        <section class="user-settings-section user-password-section">
+        <h3>Mi contraseña</h3>
         <div class="config-form-row">
           <input id="currentPass" type="password" placeholder="Contraseña actual">
           <input id="newPass" type="password" placeholder="Nueva contraseña">
           <input id="newPass2" type="password" placeholder="Repetir nueva contraseña">
           <button onclick="changePassword()">Guardar nueva contraseña</button>
         </div>
+        </section>
 
         <div id="storeUserAdminSettings">
-          <hr style="margin:20px 0;">
+          <hr>
           <h3>Usuarios de la tienda</h3>
           <p class="settings-note">Crea cuentas con una contraseña temporal. En su primer acceso, cada persona deberá crear su propia contraseña.</p>
           <p id="storeUserLicenseStatus" class="settings-note"></p>
@@ -714,10 +716,10 @@
             <label>Correo <input id="storeUserEmail" type="email" autocomplete="email"></label>
             <label>Contraseña temporal <input id="storeUserTemporaryPassword" type="password" autocomplete="new-password"></label>
             <fieldset class="role-picker"><legend>Roles operativos</legend>
-              <label><input type="checkbox" name="storeUserRoles" value="Mesero"> Mesero</label>
-              <label><input type="checkbox" name="storeUserRoles" value="Host"> Host</label>
-              <label><input type="checkbox" name="storeUserRoles" value="Cocina"> Cocina</label>
-              <label><input type="checkbox" name="storeUserRoles" value="Barra / Bebidas"> Barra / Bebidas</label>
+              <label class="restaurant-role-option hidden"><input type="checkbox" name="storeUserRoles" value="Mesero"> Mesero</label>
+              <label class="restaurant-role-option hidden"><input type="checkbox" name="storeUserRoles" value="Host"> Host</label>
+              <label class="restaurant-role-option hidden"><input type="checkbox" name="storeUserRoles" value="Cocina"> Cocina</label>
+              <label class="restaurant-role-option hidden"><input type="checkbox" name="storeUserRoles" value="Barra / Bebidas"> Barra / Bebidas</label>
               <label><input type="checkbox" name="storeUserRoles" value="Cajero"> Cajero</label>
               <label><input type="checkbox" name="storeUserRoles" value="Administrador"> Administrador</label>
             </fieldset>
@@ -976,7 +978,7 @@
       <label>Correo <input id="editStoreUserEmail" type="email"></label>
       <label class="edit-user-active"><input id="editStoreUserActive" type="checkbox"> Usuario activo</label>
       <fieldset class="role-picker"><legend>Roles operativos</legend>
-        <label><input type="checkbox" name="editStoreUserRoles" value="Mesero"> Mesero</label><label><input type="checkbox" name="editStoreUserRoles" value="Host"> Host</label><label><input type="checkbox" name="editStoreUserRoles" value="Cocina"> Cocina</label><label><input type="checkbox" name="editStoreUserRoles" value="Barra / Bebidas"> Barra / Bebidas</label><label><input type="checkbox" name="editStoreUserRoles" value="Cajero"> Cajero</label><label><input type="checkbox" name="editStoreUserRoles" value="Administrador"> Administrador</label>
+        <label class="restaurant-role-option hidden"><input type="checkbox" name="editStoreUserRoles" value="Mesero"> Mesero</label><label class="restaurant-role-option hidden"><input type="checkbox" name="editStoreUserRoles" value="Host"> Host</label><label class="restaurant-role-option hidden"><input type="checkbox" name="editStoreUserRoles" value="Cocina"> Cocina</label><label class="restaurant-role-option hidden"><input type="checkbox" name="editStoreUserRoles" value="Barra / Bebidas"> Barra / Bebidas</label><label><input type="checkbox" name="editStoreUserRoles" value="Cajero"> Cajero</label><label><input type="checkbox" name="editStoreUserRoles" value="Administrador"> Administrador</label>
       </fieldset>
     </div>
     <div class="modifier-actions"><button type="button" onclick="closeStoreUserEditModal()">Cancelar</button><button type="button" class="primary-button" onclick="saveStoreUserEdit()">Guardar cambios</button></div>
@@ -1021,7 +1023,8 @@ function applyModuleVisibility() {
 
 function roleModuleAllowed(module) {
   if (userRole === "Admin" || userRoles.includes("Administrador")) return true;
-  const allowed = new Set(["inicio"]);
+  const allowed = new Set();
+  if (userRoles.includes("Cajero")) allowed.add("inicio");
   if (userRoles.includes("Mesero")) ["mesas", "pos", "ventas", "clientes"].forEach(item => allowed.add(item));
   if (userRoles.includes("Host")) allowed.add("mesas");
   if (userRoles.includes("Cocina") || userRoles.includes("Barra / Bebidas")) allowed.add("cocina");
@@ -1049,6 +1052,7 @@ async function loadStoreContext() {
     enabledModules = Array.isArray(context.enabledModules) ? context.enabledModules : enabledModules;
     localStorage.setItem("businessType", businessType);
     applyModuleVisibility();
+    updateOperationalRoleOptions();
     renderRestaurantQuickMenu();
   } catch (err) {
     console.error("No se pudo cargar el tipo de negocio:", err);
@@ -2138,6 +2142,16 @@ async function changePassword() {
     console.error(err);
     alert("No se pudo conectar con el servidor.");
   }
+}
+
+function updateOperationalRoleOptions() {
+  const restaurant = businessType === "RESTAURANT";
+  document.querySelectorAll('input[name="storeUserRoles"], input[name="editStoreUserRoles"]').forEach(input => {
+    const restaurantRole = ["Mesero", "Host", "Cocina", "Barra / Bebidas"].includes(input.value);
+    const label = input.closest("label");
+    if (label) label.classList.toggle("hidden", !restaurant && restaurantRole);
+    if (!restaurant && restaurantRole) input.checked = false;
+  });
 }
 
 function updateBackupLastDownload() {
@@ -3896,7 +3910,8 @@ async function saveStoreUserEdit() {
   const payload = { fullName: document.getElementById("editStoreUserName").value.trim(), username: document.getElementById("editStoreUserEmail").value.trim(), active: document.getElementById("editStoreUserActive").checked, roles };
   try {
     const res = await fetch(`${API}/store/users/${selectedStoreUser.id}/details`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    const data = await res.json();
+    const raw = await res.text();
+    let data; try { data = JSON.parse(raw); } catch { data = { error: `El servidor respondió ${res.status}. Publica el backend actualizado en Render.` }; }
     if (!res.ok) return alert(data.error || `No se pudieron guardar los cambios (${res.status}).`);
     closeStoreUserEditModal(); await loadStoreUsers(); alert("Cambios guardados correctamente.");
   } catch (error) { alert(`No se pudo guardar: ${error.message}`); }
