@@ -44,11 +44,11 @@ function createDatabase() {
     max: Math.max(2, Number(process.env.PG_POOL_MAX) || 10)
   });
   const context = new AsyncLocalStorage();
-  const idTables = new Set(["users", "password_reset_codes", "products", "sales", "invoices", "invoice_payments", "sale_adjustments", "client_intake_submissions", "clients", "restaurant_tables", "restaurant_servers", "restaurant_table_sessions", "restaurant_orders", "restaurant_order_items", "cash_register_sessions", "cash_register_movements"]);
+  const idTables = new Set(["users", "password_reset_codes", "products", "sales", "invoices", "invoice_payments", "sale_adjustments", "client_intake_submissions", "clients", "restaurant_tables", "restaurant_servers", "restaurant_table_sessions", "restaurant_orders", "restaurant_order_items", "cash_register_sessions", "cash_register_movements", "suppliers", "purchases", "purchase_items"]);
   const camelKeys = {
     fullname: "fullName", mustchangepassword: "mustChangePassword", expiresat: "expiresAt", userlimit: "userLimit", usercount: "userCount",
     createdat: "createdAt", updatedat: "updatedAt", userid: "userId", codehash: "codeHash", usedat: "usedAt",
-    taxrate: "taxRate", menucategory: "menuCategory", modifiergroups: "modifierGroups", productid: "productId", paymenttype: "paymentType", invoiceid: "invoiceId",
+    taxrate: "taxRate", menucategory: "menuCategory", modifiergroups: "modifierGroups", productid: "productId", paymenttype: "paymentType", invoiceid: "invoiceId", supplierid: "supplierId", invoicenumber: "invoiceNumber", purchasedate: "purchaseDate", subtotal: "subtotal", unitcost: "unitCost", purchaseid: "purchaseId",
     grosstotal: "grossTotal", discountpercent: "discountPercent", discountamount: "discountAmount",
     discountreason: "discountReason", selectedmodifiers: "selectedModifiers", grantedbyuserid: "grantedByUserId", grantedbyname: "grantedByName",
     invoicetype: "invoiceType", clientid: "clientId", buyeridtype: "buyerIdType", buyeridnumber: "buyerIdNumber",

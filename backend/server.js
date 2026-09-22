@@ -109,6 +109,7 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       name TEXT,
       quantity INTEGER,
       price REAL,
+      cost REAL DEFAULT 0,
       taxRate REAL DEFAULT 15,
       menuCategory TEXT DEFAULT 'General',
       available INTEGER DEFAULT 1,
@@ -116,6 +117,42 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
       company TEXT
     )
   `);
+
+  db.run(`ALTER TABLE products ADD COLUMN cost REAL DEFAULT 0`, () => {});
+  db.run(`CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT NOT NULL,
+    name TEXT NOT NULL,
+    taxId TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    address TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    createdAt TEXT NOT NULL
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT NOT NULL,
+    supplierId INTEGER,
+    invoiceNumber TEXT DEFAULT '',
+    purchaseDate TEXT NOT NULL,
+    subtotal REAL NOT NULL DEFAULT 0,
+    notes TEXT DEFAULT '',
+    createdByUserId INTEGER,
+    createdByName TEXT DEFAULT '',
+    createdAt TEXT NOT NULL
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS purchase_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT NOT NULL,
+    purchaseId INTEGER NOT NULL,
+    productId INTEGER NOT NULL,
+    code TEXT DEFAULT '',
+    name TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    unitCost REAL NOT NULL,
+    total REAL NOT NULL
+  )`);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS sales (
@@ -425,11 +462,11 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET || "posmaster";
 const BUSINESS_TYPES = Object.freeze({
   SHOP: Object.freeze({
     label: "Tienda",
-    modules: Object.freeze(["inicio", "inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config"])
+    modules: Object.freeze(["inicio", "inventario", "compras", "pos", "caja", "ventas", "clientes", "usuarios", "config"])
   }),
   RESTAURANT: Object.freeze({
     label: "Restaurante",
-    modules: Object.freeze(["inicio", "inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"])
+    modules: Object.freeze(["inicio", "inventario", "compras", "pos", "caja", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"])
   })
 });
 
@@ -533,7 +570,7 @@ function dbAll(sql, params = []) {
 }
 
 const backupTables = [
-    "products", "clients", "sales", "invoices", "invoice_payments",
+    "products", "clients", "sales", "invoices", "invoice_payments", "suppliers", "purchases", "purchase_items",
     "cash_register_sessions", "cash_register_movements", "sale_adjustments",
     "restaurant_tables", "restaurant_servers", "restaurant_table_sessions",
     "restaurant_orders", "restaurant_order_items",
@@ -623,8 +660,8 @@ app.post("/backup/restore/:company", requireUserAdmin, async (req, res) => {
     const incoming = req.body.backup;
     const current = await buildCompanyBackup(company);
     await dbRun("INSERT INTO backup_snapshots (company, createdAt, payload) VALUES (?, ?, ?)", [company, new Date().toISOString(), JSON.stringify(current)]);
-    const childFirst = ["client_intake_submissions", "restaurant_order_items", "restaurant_orders", "restaurant_table_sessions", "restaurant_tables", "restaurant_servers", "cash_register_movements", "cash_register_sessions", "sale_adjustments", "invoice_payments", "sales", "invoices", "products", "clients"];
-    const parentFirst = ["products", "clients", "invoices", "sales", "invoice_payments", "sale_adjustments", "cash_register_sessions", "cash_register_movements", "restaurant_tables", "restaurant_servers", "restaurant_table_sessions", "restaurant_orders", "restaurant_order_items", "client_intake_submissions"];
+    const childFirst = ["purchase_items", "client_intake_submissions", "restaurant_order_items", "restaurant_orders", "restaurant_table_sessions", "restaurant_tables", "restaurant_servers", "cash_register_movements", "cash_register_sessions", "sale_adjustments", "invoice_payments", "sales", "invoices", "purchases", "products", "suppliers", "clients"];
+    const parentFirst = ["suppliers", "products", "clients", "purchases", "invoices", "sales", "invoice_payments", "purchase_items", "sale_adjustments", "cash_register_sessions", "cash_register_movements", "restaurant_tables", "restaurant_servers", "restaurant_table_sessions", "restaurant_orders", "restaurant_order_items", "client_intake_submissions"];
     await dataStore.transaction(async () => {
       for (const table of childFirst) await dbRun(`DELETE FROM ${table} WHERE company = ?`, [company]);
       const sri = incoming.tables.sri_settings;
@@ -2191,6 +2228,7 @@ app.get("/dashboard/summary", requireCompanyUser, async (req, res) => {
       `SELECT s.*, COALESCE(a.returnedQuantity, 0) AS returnedQuantity,
               COALESCE(a.returnedAmount, 0) AS returnedAmount
        FROM sales s
+       LEFT JOIN products p ON p.id = s.productId AND p.company = s.company
        LEFT JOIN (
          SELECT saleId, SUM(quantity) AS returnedQuantity, SUM(amount) AS returnedAmount
          FROM sale_adjustments GROUP BY saleId
@@ -2514,11 +2552,12 @@ app.delete("/store/users/:id", requireUserAdmin, async (req, res) => {
 app.get("/sales/:company", requireCompanyUser, async (req, res) => {
   try {
     const [rows, paymentRows] = await Promise.all([dataStore.all(
-      `SELECT s.*, i.invoiceNumber, i.saleStatus AS invoiceSaleStatus,
+      `SELECT s.*, p.cost AS "productCost", i.invoiceNumber, i.saleStatus AS invoiceSaleStatus,
               COALESCE(a.returnedQuantity, 0) AS returnedQuantity,
               COALESCE(a.returnedAmount, 0) AS returnedAmount,
               a.adjustmentReason, a.adjustmentByName
        FROM sales s
+       LEFT JOIN products p ON p.id = s.productId AND p.company = s.company
        LEFT JOIN invoices i ON i.id = s.invoiceId AND i.company = s.company
        LEFT JOIN (
          SELECT saleId, SUM(quantity) AS returnedQuantity, SUM(amount) AS returnedAmount,
@@ -2553,6 +2592,70 @@ app.get("/sales/:company", requireCompanyUser, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ---------- COMPRAS Y PROVEEDORES ----------
+app.get("/suppliers/:company", requireCompanyUser, async (req, res) => {
+  try {
+    const rows = await dbAll("SELECT * FROM suppliers WHERE company = ? AND active = 1 ORDER BY name", [req.params.company]);
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/suppliers/:company", requireUserAdmin, async (req, res) => {
+  const name = String(req.body.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Escribe el nombre del proveedor." });
+  try {
+    const result = await dbRun(
+      `INSERT INTO suppliers (company, name, taxId, email, phone, address, active, createdAt) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+      [req.params.company, name, String(req.body.taxId || "").trim(), String(req.body.email || "").trim(), String(req.body.phone || "").trim(), String(req.body.address || "").trim(), getETLocalISO()]
+    );
+    res.json({ id: result.lastID });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/purchases/:company", requireCompanyUser, async (req, res) => {
+  try {
+    const purchases = await dbAll(
+      `SELECT p.*, s.name AS supplierName FROM purchases p LEFT JOIN suppliers s ON s.id = p.supplierId AND s.company = p.company WHERE p.company = ? ORDER BY p.purchaseDate DESC, p.id DESC`,
+      [req.params.company]
+    );
+    const items = await dbAll("SELECT * FROM purchase_items WHERE company = ? ORDER BY id", [req.params.company]);
+    const grouped = new Map();
+    items.forEach(item => { const key = String(item.purchaseId); if (!grouped.has(key)) grouped.set(key, []); grouped.get(key).push(item); });
+    res.json(purchases.map(purchase => ({ ...purchase, items: grouped.get(String(purchase.id)) || [] })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/purchases/:company", requireUserAdmin, async (req, res) => {
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ error: "Agrega al menos un producto a la compra." });
+  const cleanItems = items.map(item => ({ productId: Number(item.productId), quantity: Number(item.quantity), unitCost: Number(item.unitCost) })).filter(item => Number.isInteger(item.productId) && item.productId > 0 && Number.isInteger(item.quantity) && item.quantity > 0 && Number.isFinite(item.unitCost) && item.unitCost >= 0);
+  if (cleanItems.length !== items.length) return res.status(400).json({ error: "Revisa cantidades y costos de los productos." });
+  try {
+    const total = money(cleanItems.reduce((sum, item) => sum + item.quantity * item.unitCost, 0));
+    const purchaseDate = String(req.body.purchaseDate || getETLocalISO()).slice(0, 30);
+    const result = await dataStore.transaction(async () => {
+      const supplierId = req.body.supplierId ? Number(req.body.supplierId) : null;
+      if (supplierId) {
+        const supplier = await dbGet("SELECT id FROM suppliers WHERE id = ? AND company = ? AND active = 1", [supplierId, req.params.company]);
+        if (!supplier) throw new Error("Proveedor no encontrado.");
+      }
+      const created = await dbRun(
+        `INSERT INTO purchases (company, supplierId, invoiceNumber, purchaseDate, subtotal, notes, createdByUserId, createdByName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [req.params.company, supplierId, String(req.body.invoiceNumber || "").trim(), purchaseDate, total, String(req.body.notes || "").trim(), req.user.id, req.user.fullName || req.user.username, getETLocalISO()]
+      );
+      for (const item of cleanItems) {
+        const product = await dbGet("SELECT id, code, name, quantity FROM products WHERE id = ? AND company = ?", [item.productId, req.params.company]);
+        if (!product) throw new Error("Uno de los productos ya no existe en el inventario.");
+        const lineTotal = money(item.quantity * item.unitCost);
+        await dbRun(`INSERT INTO purchase_items (company, purchaseId, productId, code, name, quantity, unitCost, total) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [req.params.company, created.lastID, product.id, product.code || "", product.name || "Producto", item.quantity, money(item.unitCost), lineTotal]);
+        await dbRun("UPDATE products SET quantity = COALESCE(quantity, 0) + ?, cost = ? WHERE id = ? AND company = ?", [item.quantity, money(item.unitCost), product.id, req.params.company]);
+      }
+      return created.lastID;
+    });
+    res.json({ id: result, total });
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // ---------- CLIENTES (por empresa) ----------
@@ -3745,7 +3848,11 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS store_licenses (company TEXT PRIMARY KEY, active INTEGER DEFAULT 1, expiresAt TEXT, userLimit INTEGER DEFAULT 3, businessType TEXT DEFAULT 'SHOP', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
     `ALTER TABLE store_licenses ADD COLUMN IF NOT EXISTS businessType TEXT DEFAULT 'SHOP'`,
     `CREATE TABLE IF NOT EXISTS password_reset_codes (id SERIAL PRIMARY KEY, userId INTEGER NOT NULL, codeHash TEXT NOT NULL, expiresAt TEXT NOT NULL, usedAt TEXT, createdAt TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, taxRate DOUBLE PRECISION DEFAULT 15, menuCategory TEXT DEFAULT 'General', available INTEGER DEFAULT 1, modifierGroups TEXT DEFAULT '[]', company TEXT)`,
+    `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, cost DOUBLE PRECISION DEFAULT 0, taxRate DOUBLE PRECISION DEFAULT 15, menuCategory TEXT DEFAULT 'General', available INTEGER DEFAULT 1, modifierGroups TEXT DEFAULT '[]', company TEXT)`,
+    `ALTER TABLE products ADD COLUMN IF NOT EXISTS cost DOUBLE PRECISION DEFAULT 0`,
+    `CREATE TABLE IF NOT EXISTS suppliers (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, taxId TEXT DEFAULT '', email TEXT DEFAULT '', phone TEXT DEFAULT '', address TEXT DEFAULT '', active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS purchases (id SERIAL PRIMARY KEY, company TEXT NOT NULL, supplierId INTEGER, invoiceNumber TEXT DEFAULT '', purchaseDate TEXT NOT NULL, subtotal DOUBLE PRECISION NOT NULL DEFAULT 0, notes TEXT DEFAULT '', createdByUserId INTEGER, createdByName TEXT DEFAULT '', createdAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS purchase_items (id SERIAL PRIMARY KEY, company TEXT NOT NULL, purchaseId INTEGER NOT NULL, productId INTEGER NOT NULL, code TEXT DEFAULT '', name TEXT NOT NULL, quantity INTEGER NOT NULL, unitCost DOUBLE PRECISION NOT NULL, total DOUBLE PRECISION NOT NULL)`,
     `ALTER TABLE products ADD COLUMN IF NOT EXISTS menuCategory TEXT DEFAULT 'General'`,
     `ALTER TABLE products ADD COLUMN IF NOT EXISTS available INTEGER DEFAULT 1`,
     `ALTER TABLE products ADD COLUMN IF NOT EXISTS modifierGroups TEXT DEFAULT '[]'`,
