@@ -781,6 +781,8 @@ tbody tr.selected-row {
 .empty-table { padding: 22px !important; color: #6b7280; text-align: center; }
 .password-reset-panel { display: flex; align-items: center; gap: 8px; margin: 14px 0; padding: 12px; border: 1px solid #9ca3af; border-radius: 6px; background: #f3f4f6; }
 .password-reset-panel span { font-weight: 600; }
+.password-reset-panel label { display: grid; gap: 4px; font-weight: 600; }
+.password-reset-panel input, .password-reset-panel select { min-width: 0; }
 
 @media (max-width: 1050px) {
   .license-form-grid,
