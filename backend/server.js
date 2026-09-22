@@ -67,7 +67,8 @@ if (!dataStore.postgres) db.serialize(() => {
     role TEXT DEFAULT 'Admin',
     active INTEGER DEFAULT 1,
     fullName TEXT DEFAULT '',
-    mustChangePassword INTEGER DEFAULT 0
+    mustChangePassword INTEGER DEFAULT 0,
+    roles TEXT DEFAULT '[]'
   )
 `);
 
@@ -461,6 +462,9 @@ if (!dataStore.postgres) db.run("ALTER TABLE restaurant_table_sessions ADD COLUM
     console.error("Error agregando restaurantServerId:", err.message);
   }
 });
+db.run(`ALTER TABLE users ADD COLUMN roles TEXT DEFAULT '[]'`, (err) => {
+  if (err && !String(err.message).includes("duplicate column")) console.error("Error añadiendo columna roles:", err.message);
+});
 
 const SECRET = process.env.JWT_SECRET || "pos-secret";
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "posmaster";
@@ -549,6 +553,7 @@ app.post("/auth/login", (req, res) => {
         company: user.company,
         username: user.username,
         role: user.role || "Admin",
+        roles: (() => { try { const parsed = JSON.parse(user.roles || "[]"); return Array.isArray(parsed) && parsed.length ? parsed : [user.role === "Admin" ? "Administrador" : "Cajero"]; } catch { return [user.role === "Admin" ? "Administrador" : "Cajero"]; } })(),
         businessType: normalizeBusinessType(license?.businessType),
         enabledModules: BUSINESS_TYPES[normalizeBusinessType(license?.businessType)].modules
       });
@@ -2158,7 +2163,7 @@ app.post("/admin/tiendas", requireAdmin, async (req, res) => {
 app.get("/store/users", requireUserAdmin, async (req, res) => {
   try {
     const rows = await new Promise((resolve, reject) => db.all(
-      "SELECT id, username, fullName, role, active, mustChangePassword FROM users WHERE company = ? ORDER BY fullName, username",
+      "SELECT id, username, fullName, role, roles, active, mustChangePassword FROM users WHERE company = ? ORDER BY fullName, username",
       [req.user.company], (err, data) => err ? reject(err) : resolve(data)
     ));
     const license = await dbGet("SELECT userLimit FROM store_licenses WHERE company = ?", [req.user.company]);
@@ -2489,7 +2494,11 @@ app.post("/store/users", requireUserAdmin, async (req, res) => {
   const username = String(req.body.username || "").trim().toLowerCase();
   const fullName = String(req.body.fullName || "").trim();
   const password = String(req.body.password || "");
-  const role = req.body.role === "Usuario" ? "Usuario" : "Admin";
+  const requestedRoles = Array.isArray(req.body.roles) ? req.body.roles : [];
+  const allowedRoles = ["Mesero", "Host", "Cocina", "Barra / Bebidas", "Cajero", "Administrador"];
+  const roles = [...new Set(requestedRoles.filter(role => allowedRoles.includes(role)))];
+  if (!roles.length) roles.push(req.body.role === "Admin" ? "Administrador" : "Cajero");
+  const role = roles.includes("Administrador") ? "Admin" : "Usuario";
   if (!fullName || !/^\S+@\S+\.\S+$/.test(username) || password.length < 8) {
     return res.status(400).json({ error: "Completa el nombre, un correo válido y una contraseña temporal de al menos 8 caracteres." });
   }
@@ -2500,8 +2509,8 @@ app.post("/store/users", requireUserAdmin, async (req, res) => {
       return res.status(409).json({ error: "Has alcanzado el límite de tu licencia. Contacta a POS Simple para comprar usuarios adicionales." });
     }
     const hashed = await bcrypt.hash(password, 10);
-    const result = await dbRun("INSERT INTO users (username, password, company, role, active, fullName, mustChangePassword) VALUES (?, ?, ?, ?, 1, ?, 1)", [username, hashed, req.user.company, role, fullName]);
-    res.json({ id: result.lastID });
+    const result = await dbRun("INSERT INTO users (username, password, company, role, active, fullName, mustChangePassword, roles) VALUES (?, ?, ?, ?, 1, ?, 1, ?)", [username, hashed, req.user.company, role, fullName, JSON.stringify(roles)]);
+    res.json({ id: result.lastID, roles });
   } catch (err) {
     const duplicate = String(err.message).includes("UNIQUE");
     res.status(duplicate ? 409 : 500).json({ error: duplicate ? "Ese correo ya está registrado." : err.message });
@@ -3854,7 +3863,8 @@ app.get("/health", (req, res) => {
 async function initializePostgres() {
   if (!dataStore.postgres) return;
   const statements = [
-    `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE, password TEXT, company TEXT, role TEXT DEFAULT 'Admin', active INTEGER DEFAULT 1, fullName TEXT DEFAULT '', mustChangePassword INTEGER DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE, password TEXT, company TEXT, role TEXT DEFAULT 'Admin', active INTEGER DEFAULT 1, fullName TEXT DEFAULT '', mustChangePassword INTEGER DEFAULT 0, roles TEXT DEFAULT '[]')`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS roles TEXT DEFAULT '[]'`,
     `CREATE TABLE IF NOT EXISTS backup_snapshots (id SERIAL PRIMARY KEY, company TEXT NOT NULL, createdAt TEXT NOT NULL, payload TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS store_licenses (company TEXT PRIMARY KEY, active INTEGER DEFAULT 1, expiresAt TEXT, userLimit INTEGER DEFAULT 3, businessType TEXT DEFAULT 'SHOP', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
     `ALTER TABLE store_licenses ADD COLUMN IF NOT EXISTS businessType TEXT DEFAULT 'SHOP'`,
