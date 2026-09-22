@@ -127,8 +127,8 @@
       </section>
 
       <nav class="mobile-operation-bar" aria-label="Acciones rápidas">
-        <button type="button" onclick="showTab('pos')"><span aria-hidden="true">＋</span><small>Venta</small></button>
-        <button type="button" onclick="showTab('mesas')"><span aria-hidden="true">▦</span><small>Mesas</small></button>
+        <button type="button" data-role-module="pos" onclick="showTab('pos')"><span aria-hidden="true">＋</span><small>Venta</small></button>
+        <button type="button" data-role-module="mesas" onclick="showTab('mesas')"><span aria-hidden="true">▦</span><small>Mesas</small></button>
         <button type="button" data-admin-only="true" class="hidden" onclick="showTab('caja')"><span aria-hidden="true">$</span><small>Caja</small></button>
       </nav>
 
@@ -993,6 +993,8 @@
 const API = "";
 const company = localStorage.getItem("company");
 const userRole = localStorage.getItem("role") || "Usuario";
+let userRoles = []; try { userRoles = JSON.parse(localStorage.getItem("roles") || "[]"); } catch {}
+if (!userRoles.length) userRoles = [userRole === "Admin" ? "Administrador" : "Cajero"];
 let businessType = localStorage.getItem("businessType") || "SHOP";
 let enabledModules = ["inicio", "inventario", "compras", "pos", "caja", "ventas", "clientes", "usuarios", "config"];
 let suppliers = [];
@@ -1001,17 +1003,30 @@ let purchaseDraft = [];
 
 function applyModuleVisibility() {
   document.querySelectorAll("[data-module]").forEach(element => {
-    const roleAllowed = !element.hasAttribute("data-admin-only") || userRole === "Admin";
+    const roleAllowed = (!element.hasAttribute("data-admin-only") || userRole === "Admin") && roleModuleAllowed(element.dataset.module);
     element.classList.toggle("hidden", !enabledModules.includes(element.dataset.module) || !roleAllowed);
   });
   document.querySelectorAll("[data-admin-only]").forEach(element => {
     element.classList.toggle("hidden", userRole !== "Admin");
+  });
+  document.querySelectorAll("[data-role-module]").forEach(element => {
+    element.classList.toggle("hidden", !roleModuleAllowed(element.dataset.roleModule));
   });
   const restaurantGroup = document.getElementById("restaurantNavGroup");
   const hasRestaurantModules = ["mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"].some(module => enabledModules.includes(module));
   if (restaurantGroup) {
     restaurantGroup.classList.toggle("hidden", !hasRestaurantModules);
   }
+}
+
+function roleModuleAllowed(module) {
+  if (userRole === "Admin" || userRoles.includes("Administrador")) return true;
+  const allowed = new Set(["inicio"]);
+  if (userRoles.includes("Mesero")) ["mesas", "pos", "ventas", "clientes"].forEach(item => allowed.add(item));
+  if (userRoles.includes("Host")) allowed.add("mesas");
+  if (userRoles.includes("Cocina") || userRoles.includes("Barra / Bebidas")) allowed.add("cocina");
+  if (userRoles.includes("Cajero")) ["pos", "ventas", "clientes"].forEach(item => allowed.add(item));
+  return allowed.has(module);
 }
 
 function toggleRestaurantMenu(forceOpen) {
