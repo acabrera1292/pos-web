@@ -981,10 +981,6 @@ function applyModuleVisibility() {
   const hasRestaurantModules = ["mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"].some(module => enabledModules.includes(module));
   if (restaurantGroup) {
     restaurantGroup.classList.toggle("hidden", !hasRestaurantModules);
-    if (businessType === "RESTAURANT") {
-      const firstModule = document.getElementById("nav-inicio");
-      if (firstModule && restaurantGroup.nextElementSibling !== firstModule) firstModule.parentElement.insertBefore(restaurantGroup, firstModule);
-    }
   }
 }
 
