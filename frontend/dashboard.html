@@ -686,6 +686,14 @@
             <button type="button" onclick="downloadCompanyBackup()">Descargar respaldo</button>
             <span id="backupLastDownload" class="settings-note">Todavía no se ha descargado un respaldo desde este dispositivo.</span>
           </div>
+          <hr>
+          <h4>Restaurar respaldo</h4>
+          <p class="settings-note">Solo administradores. Primero se valida el archivo y, antes de aplicarlo, se guarda automáticamente una copia del estado actual.</p>
+          <div class="backup-actions">
+            <input id="backupRestoreFile" type="file" accept="application/json,.json">
+            <button type="button" onclick="restoreCompanyBackup()">Validar y restaurar</button>
+          </div>
+          <span id="backupRestoreStatus" class="settings-note"></span>
         </div>
 
         <div id="sriAdminSettings">
@@ -2065,6 +2073,44 @@ async function downloadCompanyBackup() {
   } catch (error) {
     console.error("Error descargando respaldo", error);
     alert("No se pudo descargar el respaldo. Verifica tu conexión e inténtalo nuevamente.");
+  }
+}
+
+async function restoreCompanyBackup() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede restaurar respaldos.");
+  const input = document.getElementById("backupRestoreFile");
+  const status = document.getElementById("backupRestoreStatus");
+  const file = input?.files?.[0];
+  if (!file) return alert("Selecciona un archivo JSON de respaldo.");
+  if (file.size > 25 * 1024 * 1024) return alert("El respaldo debe pesar menos de 25 MB.");
+  try {
+    const backup = JSON.parse(await file.text());
+    const preview = await fetch(`${API}/backup/restore/${encodeURIComponent(company)}`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ backup })
+    });
+    const previewData = await preview.json().catch(() => ({}));
+    if (!preview.ok) return alert(previewData.error || "El archivo no se pudo validar.");
+    const totalRows = Object.values(previewData.summary || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+    if (!await appConfirm(`Respaldo válido con ${totalRows} registros.\n\nSe guardará una copia automática de los datos actuales y luego se reemplazarán los datos de esta tienda. ¿Continuar?`)) return;
+    status.textContent = "Restaurando respaldo…";
+    const response = await fetch(`${API}/backup/restore/${encodeURIComponent(company)}`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ backup, confirm: true })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      status.textContent = "";
+      return alert(data.error || "No se pudo restaurar el respaldo.");
+    }
+    status.textContent = "Respaldo restaurado correctamente.";
+    input.value = "";
+    alert(data.message || "Respaldo restaurado correctamente.");
+    window.location.reload();
+  } catch (error) {
+    console.error("Error restaurando respaldo", error);
+    if (status) status.textContent = "";
+    alert("El archivo no es un JSON válido o no se pudo conectar con el servidor.");
   }
 }
 
