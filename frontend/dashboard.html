@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f4f6">
+  <link rel="manifest" href="manifest.json">
   <title>POS Simple - Dashboard</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
@@ -123,6 +125,13 @@
           <button type="button" onclick="showTab('ventas')">Ver Ventas</button>
         </div>
       </section>
+
+      <nav class="mobile-operation-bar" aria-label="Acciones rápidas">
+        <button type="button" onclick="showTab('pos')"><span aria-hidden="true">＋</span><small>Venta</small></button>
+        <button type="button" onclick="showTab('mesas')"><span aria-hidden="true">▦</span><small>Mesas</small></button>
+        <button type="button" onclick="showTab('pos')"><span aria-hidden="true">☰</span><small>Menú</small></button>
+        <button type="button" onclick="showTab('caja')"><span aria-hidden="true">$</span><small>Caja</small></button>
+      </nav>
 
       <!-- TAB: INVENTARIO -->
       <section id="inventario" class="tab-section app-card hidden">
@@ -4151,6 +4160,7 @@ function logout() {
 showTab("inventario");
 loadProducts();
 loadClients();
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 </script>
 </body>
 </html>
