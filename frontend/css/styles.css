@@ -1697,6 +1697,10 @@ tbody td {
 .cash-register-kpis article strong { font-size: 1.15rem; }
 .cash-register-close-card { border-left: 4px solid #6b7280 !important; }
 .cash-register-close-card button { font-weight: 700; }
+.role-picker { display: flex; flex-wrap: wrap; gap: 8px 12px; min-width: 260px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 5px; }
+.role-picker legend { padding: 0 4px; font-weight: 600; }
+.role-picker label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.role-picker input { width: auto; min-height: 0 !important; }
 
 /* Barra compacta para operación desde el teléfono del mesero. */
 .mobile-operation-bar { display: none; }
