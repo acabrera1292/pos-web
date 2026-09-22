@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f4f6">
+  <link rel="manifest" href="manifest.json">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Control de Licencias</title>
   <link rel="stylesheet" href="css/styles.css">
@@ -82,12 +84,22 @@
         <div id="passwordResetPanel" class="password-reset-panel hidden">
           <span id="passwordResetUser"></span><input id="passwordResetValue" type="password" placeholder="Nueva contraseña"><button onclick="resetUserPassword()">Guardar clave</button><button onclick="closePasswordReset()">Cancelar</button>
         </div>
+        <div id="userEditPanel" class="password-reset-panel hidden">
+          <input id="editUserId" type="hidden">
+          <label>Nombre <input id="editUserFullName"></label>
+          <label>Correo <input id="editUserEmail" type="email"></label>
+          <label>Tienda <select id="editUserStore"></select></label>
+          <label>Rol <select id="editUserRole"><option value="Admin">Admin</option><option value="Usuario">Usuario</option></select></label>
+          <label><input id="editUserActive" type="checkbox"> Usuario activo</label>
+          <button onclick="saveUserEdit()">Guardar cambios</button><button onclick="closeUserEdit()">Cancelar</button>
+        </div>
         <div class="license-user-filters">
           <select id="userStoreFilter" onchange="renderUsers()"><option value="">Todas las tiendas</option></select>
           <input id="userSearch" placeholder="Buscar por nombre o correo" oninput="renderUsers()">
         </div>
         <div class="table-scroll"><table class="license-table"><thead><tr><th>Nombre</th><th>Usuario</th><th>Tienda</th><th>Rol</th></tr></thead><tbody id="usersBody"></tbody></table></div>
         <div class="inventory-actions license-table-actions">
+          <button onclick="editSelectedUser()">Editar usuario</button>
           <button onclick="resetSelectedUserPassword()">Cambiar clave</button>
           <button class="danger-button" onclick="deleteSelectedUser()">Eliminar</button>
         </div>
@@ -96,5 +108,6 @@
   </div>
   <script src="js/dialogs.js"></script>
   <script src="js/admin.js"></script>
+  <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});</script>
 </body>
 </html>
