@@ -6,6 +6,14 @@ const path = require("path");
 const crypto = require("crypto");
 const forge = require("node-forge");
 const { createDatabase } = require("./database");
+const {
+  Ambiente,
+  FormaPago,
+  loadCertificate,
+  SriClient,
+  TipoComprobante,
+  TipoEmision
+} = require("sri-ec");
 
 const app = express();
 app.use(cors());
@@ -513,6 +521,10 @@ function dbRun(sql, params = []) {
   return dataStore.run(sql, params);
 }
 
+function dbAll(sql, params = []) {
+  return dataStore.all(sql, params);
+}
+
 function resetCodeHash(userId, code) {
   return crypto.createHash("sha256").update(`${userId}:${code}:${SECRET}`).digest("hex");
 }
@@ -531,6 +543,123 @@ async function sendTransactionalEmail(to, subject, html) {
 
 function money(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function sriDate(value) {
+  const date = new Date(value || Date.now());
+  const parts = new Intl.DateTimeFormat("es-EC", {
+    timeZone: "America/Guayaquil", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(date).reduce((out, part) => (out[part.type] = part.value, out), {});
+  return `${parts.day}/${parts.month}/${parts.year}`;
+}
+
+function sriPaymentType(paymentType) {
+  const value = String(paymentType || "").toLowerCase();
+  if (value.includes("efectivo")) return FormaPago.EFECTIVO;
+  if (value.includes("débito") || value.includes("debito")) return FormaPago.TARJETA_DEBITO;
+  if (value.includes("crédito") || value.includes("credito") || value.includes("tarjeta")) return FormaPago.TARJETA_CREDITO;
+  return FormaPago.OTROS_SISTEMA_FINANCIERO;
+}
+
+async function submitInvoiceToSri(company, invoiceId) {
+  const settings = await dbGet("SELECT * FROM sri_settings WHERE company = ?", [company]);
+  if (!settings?.ruc || !settings.legalName || !settings.mainAddress) {
+    throw new Error("Completa los datos del emisor SRI antes de enviar la factura.");
+  }
+  if (!settings.certificateConfigured) throw new Error("Instala primero el certificado .p12 del emisor.");
+  if (settings.environment === "PRODUCTION" && !settings.certificateValidated) {
+    throw new Error("La firma todavía no está autorizada para Producción.");
+  }
+
+  const certRow = await dbGet("SELECT certificateEncrypted, passwordEncrypted FROM sri_certificates WHERE company = ?", [company]);
+  if (!certRow) throw new Error("No se encontró el certificado del emisor.");
+  const certificate = loadCertificate(
+    decryptCertificateValue(certRow.certificateEncrypted),
+    decryptCertificateValue(certRow.passwordEncrypted).toString("utf8")
+  );
+  const invoice = await dbGet("SELECT * FROM invoices WHERE id = ? AND company = ?", [invoiceId, company]);
+  if (!invoice) throw new Error("Factura no encontrada.");
+  const lines = await dbAll(
+    `SELECT s.*, p.taxRate FROM sales s LEFT JOIN products p ON p.id = s.productId
+     WHERE s.invoiceId = ? AND s.company = ? ORDER BY s.id`, [invoiceId, company]
+  );
+  if (!lines.length) throw new Error("La factura no tiene detalles para enviar.");
+
+  const totalConImpuestos = [];
+  const detalles = lines.map(line => {
+    const rate = Number(line.taxRate ?? 15);
+    const total = money(line.total);
+    const base = rate > 0 ? money(total / (1 + rate / 100)) : total;
+    const tax = money(total - base);
+    const grossUnit = Number(line.price) || 0;
+    const priceUnit = rate > 0 ? money(grossUnit / (1 + rate / 100)) : money(grossUnit);
+    const discount = rate > 0 ? money((Number(line.discountAmount) || 0) / (1 + rate / 100)) : money(line.discountAmount || 0);
+    const taxCode = rate === 15 ? "4" : rate === 0 ? "0" : "2";
+    const taxRow = { codigo: "2", codigoPorcentaje: taxCode, tarifa: rate.toFixed(2), baseImponible: base.toFixed(2), valor: tax.toFixed(2) };
+    const existingTax = totalConImpuestos.find(row => row.codigoPorcentaje === taxCode);
+    if (existingTax) {
+      existingTax.baseImponible = money(Number(existingTax.baseImponible) + base).toFixed(2);
+      existingTax.valor = money(Number(existingTax.valor) + tax).toFixed(2);
+    } else totalConImpuestos.push({ ...taxRow });
+    return {
+      codigoPrincipal: String(line.code || line.productId),
+      descripcion: String(line.name || "Producto").slice(0, 300),
+      cantidad: Number(line.quantity || 0).toFixed(2),
+      precioUnitario: priceUnit.toFixed(2),
+      descuento: discount.toFixed(2),
+      precioTotalSinImpuesto: base.toFixed(2),
+      impuestos: [taxRow]
+    };
+  });
+
+  const [estab = "001", ptoEmi = "001", secuencial = "000000001"] = String(invoice.invoiceNumber || "001-001-000000001").split("-");
+  const ambiente = settings.environment === "PRODUCTION" ? Ambiente.Produccion : Ambiente.Pruebas;
+  const factura = {
+    tipo: TipoComprobante.Factura,
+    infoTributaria: {
+      ambiente,
+      razonSocial: String(settings.legalName).slice(0, 300),
+      nombreComercial: String(settings.commercialName || settings.legalName).slice(0, 300),
+      ruc: String(settings.ruc), estab, ptoEmi, secuencial,
+      dirMatriz: String(settings.mainAddress).slice(0, 300), tipoEmision: TipoEmision.Normal
+    },
+    dirEstablecimiento: settings.establishmentAddress || undefined,
+    fechaEmision: sriDate(invoice.date),
+    tipoIdentificacionComprador: invoice.buyerIdType || "07",
+    razonSocialComprador: String(invoice.buyerName || "CONSUMIDOR FINAL").slice(0, 300),
+    identificacionComprador: String(invoice.buyerIdNumber || "9999999999999"),
+    direccionComprador: invoice.buyerAddress || undefined,
+    totalSinImpuestos: Number(invoice.subtotal || 0).toFixed(2),
+    totalDescuento: Number(invoice.discountAmount || 0).toFixed(2),
+    importeTotal: Number(invoice.total || 0).toFixed(2),
+    totalConImpuestos,
+    detalles,
+    pagos: [{ formaPago: sriPaymentType(invoice.paymentType), total: Number(invoice.total || 0).toFixed(2) }]
+  };
+
+  const sri = new SriClient({ ambiente, certificate });
+  let result;
+  try {
+    result = await sri.emit(factura, invoice.accessKey || undefined);
+  } catch (error) {
+    if (error?.claveAcceso) {
+      await dbRun(
+        "UPDATE invoices SET status = ?, accessKey = ?, sriMessage = ? WHERE id = ? AND company = ?",
+        ["PENDING_SRI", error.claveAcceso, error.message || "Error de comunicación con el SRI", invoiceId, company]
+      );
+    }
+    throw error;
+  }
+  const messages = (result.messages || []).map(message => `${message.identificador || "SRI"}: ${message.mensaje || message.message || ""}`).join(" | ");
+  const status = result.status === "AUTORIZADO" ? "AUTHORIZED" : result.status === "RECHAZADO" ? "SRI_REJECTED" : "PENDING_SRI";
+  await dbRun(
+    `UPDATE invoices SET status = ?, accessKey = ?, authorizationNumber = ?, authorizedAt = ?, sriMessage = ? WHERE id = ? AND company = ?`,
+    [status, result.claveAcceso || invoice.accessKey || null, result.numeroAutorizacion || null, result.fechaAutorizacion || null, messages || result.status, invoiceId, company]
+  );
+  if (result.status === "AUTORIZADO") {
+    await dbRun("UPDATE sri_settings SET certificateValidated = 1 WHERE company = ?", [company]);
+  }
+  return { ...result, status, message: messages };
 }
 
 const PAYMENT_TYPES = ["Efectivo", "Tarjeta", "Transferencia"];
@@ -1440,7 +1569,7 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
     const emissionPoint = settings?.emissionPoint || "001";
     const invoiceNumber = `${establishment}-${emissionPoint}-${String(sequence).padStart(9, "0")}`;
     const issuerConfigured = Boolean(settings?.ruc && settings?.legalName && settings?.mainAddress);
-    const configured = issuerConfigured && Boolean(settings?.certificateValidated);
+    const configured = issuerConfigured && Boolean(settings?.certificateLocalValidated || settings?.certificateValidated);
     const status = configured
       ? "PENDING_SRI"
       : settings?.certificateConfigured ? "CERTIFICATE_PENDING_VALIDATION" : "CONFIGURATION_REQUIRED";
@@ -1547,11 +1676,23 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
       return createdInvoice;
     });
 
+    let sriResult = null;
+    if (type === "FACTURA" && configured) {
+      try {
+        sriResult = await submitInvoiceToSri(company, invoice.lastID);
+      } catch (sriError) {
+        await dbRun("UPDATE invoices SET status = ?, sriMessage = ? WHERE id = ? AND company = ?", ["SRI_ERROR", sriError.message, invoice.lastID, company]);
+        sriResult = { status: "SRI_ERROR", message: sriError.message };
+      }
+    }
     res.json({
       msg: "Venta registrada",
       invoiceId: invoice.lastID,
       invoiceNumber,
-      status,
+      status: sriResult?.status || status,
+      sriMessage: sriResult?.message || null,
+      accessKey: sriResult?.claveAcceso || null,
+      authorizationNumber: sriResult?.numeroAutorizacion || null,
       subtotal,
       taxAmount,
       discountAmount,
@@ -1564,6 +1705,16 @@ app.post("/sales/:company", requireCompanyUser, async (req, res) => {
     });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+app.post("/invoices/:company/:id/sri-send", requireUserAdmin, async (req, res) => {
+  try {
+    const result = await submitInvoiceToSri(req.params.company, Number(req.params.id));
+    res.json({ sent: true, status: result.status, accessKey: result.claveAcceso || null, authorizationNumber: result.numeroAutorizacion || null, message: result.message || null });
+  } catch (err) {
+    await dbRun("UPDATE invoices SET status = ?, sriMessage = ? WHERE id = ? AND company = ?", ["SRI_ERROR", err.message, Number(req.params.id), req.params.company]).catch(() => {});
+    res.status(502).json({ sent: false, status: "SRI_ERROR", error: err.message });
   }
 });
 
