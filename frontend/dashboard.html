@@ -31,6 +31,9 @@
       <button id="nav-inventario" data-module="inventario" onclick="showTab('inventario'); loadProducts();">
         Inventario
       </button>
+      <button id="nav-compras" data-module="compras" onclick="showTab('compras'); loadPurchasesModule();">
+        Compras
+      </button>
       <button id="nav-pos" data-module="pos" onclick="showTab('pos')">
         Punto de Venta
       </button>
@@ -160,6 +163,48 @@
   <button id="btnDelete" data-action="delete" onclick="deleteSelected()">Eliminar</button>
 </div>
 
+      </section>
+
+      <!-- TAB: COMPRAS -->
+      <section id="compras" class="tab-section app-card hidden">
+        <h2>Compras y proveedores</h2>
+        <p class="settings-note">Registra entradas de inventario para mantener existencias y costos actualizados.</p>
+        <div class="purchase-grid">
+          <section class="purchase-card purchase-admin-only" data-admin-only="true">
+            <h3>Nuevo proveedor</h3>
+            <div class="purchase-form-grid">
+              <input id="supplierName" placeholder="Nombre *">
+              <input id="supplierTaxId" placeholder="RUC / identificación">
+              <input id="supplierEmail" type="email" placeholder="Correo">
+              <input id="supplierPhone" placeholder="Teléfono">
+              <input id="supplierAddress" placeholder="Dirección">
+            </div>
+            <button type="button" onclick="createSupplier()">Guardar proveedor</button>
+          </section>
+          <section class="purchase-card purchase-admin-only" data-admin-only="true">
+            <h3>Registrar compra</h3>
+            <div class="purchase-form-grid">
+              <select id="purchaseSupplier"><option value="">Proveedor (opcional)</option></select>
+              <input id="purchaseInvoiceNumber" placeholder="Factura / referencia">
+              <input id="purchaseDate" type="date">
+              <input id="purchaseNotes" placeholder="Notas">
+            </div>
+            <div class="purchase-line-form">
+              <select id="purchaseProduct"><option value="">Producto</option></select>
+              <input id="purchaseQuantity" type="number" min="1" step="1" placeholder="Cantidad">
+              <input id="purchaseUnitCost" type="number" min="0" step="0.01" placeholder="Costo unitario">
+              <button type="button" onclick="addPurchaseLine()">Agregar línea</button>
+            </div>
+            <div class="table-scroll"><table><thead><tr><th>Producto</th><th>Cant.</th><th>Costo</th><th>Total</th><th></th></tr></thead><tbody id="purchaseDraftBody"></tbody></table></div>
+            <p class="purchase-total">Total compra: <strong>$<span id="purchaseDraftTotal">0.00</span></strong></p>
+            <button type="button" onclick="savePurchase()">Guardar compra</button>
+          </section>
+        </div>
+        <h3>Proveedores</h3>
+        <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>RUC / ID</th><th>Correo</th><th>Teléfono</th></tr></thead><tbody id="suppliersBody"></tbody></table></div>
+        <h3>Historial de compras</h3>
+        <div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Referencia</th><th>Total</th><th>Registró</th></tr></thead><tbody id="purchasesBody"></tbody></table></div>
+        <button type="button" onclick="exportPurchasesCsv()">Exportar compras (CSV)</button>
       </section>
 
       <!-- TAB: CAJA -->
@@ -546,6 +591,7 @@
       <article><span>Número de ventas</span><strong id="summaryTransactions">0</strong></article>
       <article><span>Productos vendidos</span><strong id="summaryUnits">0</strong></article>
       <article><span>Venta promedio</span><strong>$<span id="summaryAverage">0.00</span></strong></article>
+      <article><span>Utilidad estimada</span><strong>$<span id="summaryProfit">0.00</span></strong></article>
     </div>
     <div class="sales-insights">
       <section>
@@ -557,6 +603,10 @@
         <div id="paymentSummary" class="payment-summary"></div>
       </section>
     </div>
+    <section class="sales-daily-report">
+      <h3>Resumen diario</h3>
+      <div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Transacciones</th><th>Unidades</th><th>Total neto</th></tr></thead><tbody id="salesDailyBody"></tbody></table></div>
+    </section>
 
     <h3 class="sales-detail-title">Detalle de ventas</h3>
     <div class="table-scroll">
@@ -913,12 +963,18 @@ const API = "";
 const company = localStorage.getItem("company");
 const userRole = localStorage.getItem("role") || "Usuario";
 let businessType = localStorage.getItem("businessType") || "SHOP";
-let enabledModules = ["inicio", "inventario", "pos", "caja", "ventas", "clientes", "usuarios", "config"];
+let enabledModules = ["inicio", "inventario", "compras", "pos", "caja", "ventas", "clientes", "usuarios", "config"];
+let suppliers = [];
+let purchases = [];
+let purchaseDraft = [];
 
 function applyModuleVisibility() {
   document.querySelectorAll("[data-module]").forEach(element => {
     const roleAllowed = !element.hasAttribute("data-admin-only") || userRole === "Admin";
     element.classList.toggle("hidden", !enabledModules.includes(element.dataset.module) || !roleAllowed);
+  });
+  document.querySelectorAll("[data-admin-only]").forEach(element => {
+    element.classList.toggle("hidden", userRole !== "Admin");
   });
   const restaurantGroup = document.getElementById("restaurantNavGroup");
   const hasRestaurantModules = ["mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"].some(module => enabledModules.includes(module));
@@ -1061,7 +1117,7 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inicio", "inventario", "pos", "caja", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
+  ["inicio", "inventario", "compras", "pos", "caja", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
@@ -1074,6 +1130,7 @@ function showTab(tabId) {
   if (tabId === "inicio") loadDashboardSummary();
   if (tabId === "ventas")   loadSales();
   if (tabId === "caja") loadCashRegister();
+  if (tabId === "compras") loadPurchasesModule();
   if (tabId === "clientes") loadClients();
   if (tabId === "usuarios" && userRole === "Admin") loadStoreUsers();
   if (tabId === "mesas") loadRestaurantTables();
@@ -3508,6 +3565,84 @@ async function finishSale() {
 
 // ------- VENTAS (LISTADO) -------
 
+async function loadPurchasesModule() {
+  if (!company) return;
+  const [supplierRes, purchaseRes, productRes] = await Promise.all([
+    fetch(`${API}/suppliers/${encodeURIComponent(company)}`, { headers: authHeaders() }),
+    fetch(`${API}/purchases/${encodeURIComponent(company)}`, { headers: authHeaders() }),
+    fetch(`${API}/products/${encodeURIComponent(company)}`, { headers: authHeaders() })
+  ]);
+  suppliers = await supplierRes.json();
+  purchases = await purchaseRes.json();
+  const products = await productRes.json();
+  const supplierSelect = document.getElementById("purchaseSupplier");
+  if (supplierSelect) supplierSelect.innerHTML = '<option value="">Proveedor (opcional)</option>' + suppliers.map(item => `<option value="${item.id}">${escapeCartValue(item.name)}</option>`).join("");
+  const productSelect = document.getElementById("purchaseProduct");
+  if (productSelect) productSelect.innerHTML = '<option value="">Producto</option>' + (Array.isArray(products) ? products : []).map(item => `<option value="${item.id}">${escapeCartValue(item.code || "")} · ${escapeCartValue(item.name || "Producto")}</option>`).join("");
+  const supplierBody = document.getElementById("suppliersBody");
+  if (supplierBody) {
+    supplierBody.innerHTML = suppliers.map(item => `<tr><td>${escapeCartValue(item.name)}</td><td>${escapeCartValue(item.taxId || "—")}</td><td>${escapeCartValue(item.email || "—")}</td><td>${escapeCartValue(item.phone || "—")}</td></tr>`).join("") || '<tr><td colspan="4" class="empty-table">No hay proveedores.</td></tr>';
+  }
+  renderPurchases();
+}
+
+async function createSupplier() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede crear proveedores.");
+  const payload = { name: document.getElementById("supplierName").value.trim(), taxId: document.getElementById("supplierTaxId").value.trim(), email: document.getElementById("supplierEmail").value.trim(), phone: document.getElementById("supplierPhone").value.trim(), address: document.getElementById("supplierAddress").value.trim() };
+  const res = await fetch(`${API}/suppliers/${encodeURIComponent(company)}`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo guardar el proveedor.");
+  ["supplierName", "supplierTaxId", "supplierEmail", "supplierPhone", "supplierAddress"].forEach(id => document.getElementById(id).value = "");
+  await loadPurchasesModule();
+  alert("Proveedor guardado correctamente.");
+}
+
+function renderPurchaseDraft() {
+  const body = document.getElementById("purchaseDraftBody");
+  if (!body) return;
+  body.innerHTML = purchaseDraft.map((item, index) => `<tr><td>${escapeCartValue(item.name)}</td><td>${item.quantity}</td><td>$${item.unitCost.toFixed(2)}</td><td>$${item.total.toFixed(2)}</td><td><button type="button" onclick="removePurchaseLine(${index})">Quitar</button></td></tr>`).join("") || '<tr><td colspan="5" class="empty-table">Agrega productos a la compra.</td></tr>';
+  document.getElementById("purchaseDraftTotal").textContent = purchaseDraft.reduce((sum, item) => sum + item.total, 0).toFixed(2);
+}
+
+async function addPurchaseLine() {
+  const select = document.getElementById("purchaseProduct");
+  const option = select.options[select.selectedIndex];
+  const quantity = Number(document.getElementById("purchaseQuantity").value);
+  const unitCost = Number(document.getElementById("purchaseUnitCost").value);
+  if (!option?.value || !Number.isInteger(quantity) || quantity <= 0 || !Number.isFinite(unitCost) || unitCost < 0) return alert("Selecciona un producto, una cantidad válida y un costo.");
+  purchaseDraft.push({ productId: Number(option.value), name: option.textContent, quantity, unitCost, total: quantity * unitCost });
+  document.getElementById("purchaseQuantity").value = "";
+  document.getElementById("purchaseUnitCost").value = "";
+  renderPurchaseDraft();
+}
+
+function removePurchaseLine(index) { purchaseDraft.splice(index, 1); renderPurchaseDraft(); }
+
+async function savePurchase() {
+  if (userRole !== "Admin") return alert("Solo un administrador puede registrar compras.");
+  if (!purchaseDraft.length) return alert("Agrega al menos un producto.");
+  const res = await fetch(`${API}/purchases/${encodeURIComponent(company)}`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ supplierId: document.getElementById("purchaseSupplier").value || null, invoiceNumber: document.getElementById("purchaseInvoiceNumber").value.trim(), purchaseDate: document.getElementById("purchaseDate").value || new Date().toISOString().slice(0, 10), notes: document.getElementById("purchaseNotes").value.trim(), items: purchaseDraft }) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo registrar la compra.");
+  purchaseDraft = [];
+  document.getElementById("purchaseInvoiceNumber").value = "";
+  document.getElementById("purchaseNotes").value = "";
+  renderPurchaseDraft();
+  await Promise.all([loadPurchasesModule(), loadProducts()]);
+  alert(`Compra registrada por $${Number(data.total || 0).toFixed(2)}.`);
+}
+
+function renderPurchases() {
+  const body = document.getElementById("purchasesBody");
+  if (!body) return;
+  body.innerHTML = purchases.map(item => `<tr><td>${escapeCartValue(item.purchaseDate || "")}</td><td>${escapeCartValue(item.supplierName || "Sin proveedor")}</td><td>${escapeCartValue(item.invoiceNumber || "—")}</td><td>$${Number(item.subtotal || 0).toFixed(2)}</td><td>${escapeCartValue(item.createdByName || "—")}</td></tr>`).join("") || '<tr><td colspan="5" class="empty-table">No hay compras registradas.</td></tr>';
+}
+
+function exportPurchasesCsv() {
+  if (!purchases.length) return alert("No hay compras para exportar.");
+  downloadCsv("compras.csv", [["fecha", "proveedor", "referencia", "total", "registrado_por"], ...purchases.map(item => [item.purchaseDate, item.supplierName || "", item.invoiceNumber || "", item.subtotal, item.createdByName || ""]) ]);
+}
+
 async function loadSales(preserveFilter = false) {
   const res = await fetch(`${API}/sales/${company}`, { headers: authHeaders() });
   const data = await res.json();
@@ -3830,6 +3965,7 @@ function renderSalesReport(list, label) {
   }, 0);
   const complimentary = list.reduce((sum, sale) => sum + (Number(sale.discountPercent || 0) === 100 ? currentUnits(sale) : 0), 0);
   const units = list.reduce((sum, sale) => sum + currentUnits(sale), 0);
+  const profit = list.reduce((sum, sale) => sum + currentTotal(sale) - Math.max(0, Number(sale.productCost || 0)) * currentUnits(sale), 0);
   const activeSales = list.filter(sale => currentUnits(sale) > 0);
   const transactionIds = new Set(activeSales.map(sale => sale.invoiceId ? `invoice-${sale.invoiceId}` : `line-${sale.id}`));
   const transactionCount = transactionIds.size;
@@ -3840,6 +3976,7 @@ function renderSalesReport(list, label) {
   document.getElementById("summaryTransactions").textContent = transactionCount;
   document.getElementById("summaryUnits").textContent = units;
   document.getElementById("summaryAverage").textContent = (transactionCount ? total / transactionCount : 0).toFixed(2);
+  document.getElementById("summaryProfit").textContent = profit.toFixed(2);
 
   const products = new Map();
   list.forEach(sale => {
@@ -3890,6 +4027,20 @@ function renderSalesReport(list, label) {
     paymentSummary.appendChild(row);
   });
   if (!paymentSummary.children.length) paymentSummary.innerHTML = '<p class="empty-table">No hay pagos en este rango.</p>';
+
+  const daily = new Map();
+  list.forEach(sale => {
+    const day = sale.date ? new Date(sale.date).toLocaleDateString("es-EC") : "Sin fecha";
+    const entry = daily.get(day) || { transactions: new Set(), units: 0, total: 0 };
+    entry.transactions.add(sale.invoiceId ? `invoice-${sale.invoiceId}` : `line-${sale.id}`);
+    entry.units += currentUnits(sale);
+    entry.total += currentTotal(sale);
+    daily.set(day, entry);
+  });
+  const dailyBody = document.getElementById("salesDailyBody");
+  if (dailyBody) {
+    dailyBody.innerHTML = [...daily.entries()].map(([day, item]) => `<tr><td>${day}</td><td>${item.transactions.size}</td><td>${item.units}</td><td>$${item.total.toFixed(2)}</td></tr>`).join("") || '<tr><td colspan="4" class="empty-table">No hay datos diarios.</td></tr>';
+  }
 }
 
 function clearSalesFilter() {
