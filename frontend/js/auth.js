@@ -48,6 +48,7 @@ async function login() {
     localStorage.setItem("company", data.company);
     localStorage.setItem("username", data.username || username);
     localStorage.setItem("role", data.role || "Admin");
+    localStorage.setItem("roles", JSON.stringify(Array.isArray(data.roles) && data.roles.length ? data.roles : [data.role === "Admin" ? "Administrador" : "Cajero"]));
     localStorage.setItem("businessType", data.businessType || "SHOP");
 
     window.location.href = "dashboard.html";
