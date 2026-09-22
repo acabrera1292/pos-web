@@ -525,6 +525,45 @@ function dbAll(sql, params = []) {
   return dataStore.all(sql, params);
 }
 
+// Export a portable, company-scoped backup without exposing passwords or
+// encrypted signing certificates. The backup is intentionally read-only; a
+// future restore flow can validate it before changing production data.
+app.get("/backup/export/:company", requireUserAdmin, async (req, res) => {
+  const company = req.params.company;
+  if (company !== req.user.company) return res.status(403).json({ error: "No autorizado para esta tienda." });
+  const backup = { format: "pos-simple-backup", version: 1, company, generatedAt: new Date().toISOString(), tables: {} };
+  const scopedTables = [
+    "products", "clients", "sales", "invoices", "invoice_payments",
+    "cash_register_sessions", "cash_register_movements", "sale_adjustments",
+    "restaurant_tables", "restaurant_servers", "restaurant_table_sessions",
+    "restaurant_orders", "restaurant_order_items", "menu_categories",
+    "client_intake_submissions"
+  ];
+  try {
+    for (const table of scopedTables) {
+      backup.tables[table] = await dbAll(`SELECT * FROM ${table} WHERE company = ? ORDER BY id`, [company]);
+    }
+    backup.tables.users = await dbAll(
+      `SELECT id, username, fullName, company, role, active, mustChangePassword, createdAt, updatedAt
+       FROM users WHERE company = ? ORDER BY id`, [company]
+    );
+    backup.tables.sri_settings = await dbAll(
+      `SELECT company, environment, ruc, legalName, commercialName, mainAddress,
+              establishmentAddress, establishmentCode, emissionPoint, nextSequence,
+              accountingRequired, specialTaxpayerNumber, taxRegime, senderEmail,
+              adminCopyEmail, certificateConfigured, certificateValidated,
+              certificateLocalValidated
+       FROM sri_settings WHERE company = ?`, [company]
+    );
+    const filename = `pos-simple-respaldo-${company.replace(/[^a-z0-9_-]/gi, "-")}-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.json(backup);
+  } catch (err) {
+    res.status(500).json({ error: `No se pudo crear el respaldo: ${err.message}` });
+  }
+});
+
 function resetCodeHash(userId, code) {
   return crypto.createHash("sha256").update(`${userId}:${code}:${SECRET}`).digest("hex");
 }
