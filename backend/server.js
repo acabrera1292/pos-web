@@ -710,9 +710,23 @@ function resetCodeHash(userId, code) {
 }
 
 async function sendTransactionalEmail(to, subject, html) {
+  const brevoApiKey = process.env.BREVO_API_KEY;
+  const from = process.env.BREVO_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.EMAIL_FROM;
+  if (brevoApiKey) {
+    if (!from) throw new Error("Configura BREVO_FROM_EMAIL con un remitente verificado en Brevo.");
+    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: { "api-key": brevoApiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ sender: { email: from, name: "POS Simple" }, to: [{ email: to }], subject, htmlContent: html })
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(`Brevo rechazó el correo (${response.status})${detail ? `: ${detail.slice(0, 240)}` : "."}`);
+    }
+    return;
+  }
   const apiKey = process.env.SENDGRID_API_KEY;
-  const from = process.env.SENDGRID_FROM_EMAIL || process.env.EMAIL_FROM;
-  if (!apiKey || !from) throw new Error("Configura SENDGRID_API_KEY y SENDGRID_FROM_EMAIL en Render.");
+  if (!apiKey || !from) throw new Error("Configura BREVO_API_KEY/BREVO_FROM_EMAIL o SENDGRID_API_KEY/SENDGRID_FROM_EMAIL en Render.");
   const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
