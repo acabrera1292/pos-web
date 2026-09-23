@@ -147,8 +147,18 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
     notes TEXT DEFAULT '',
     createdByUserId INTEGER,
     createdByName TEXT DEFAULT '',
-    createdAt TEXT NOT NULL
+    createdAt TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'REGISTRADA',
+    cancellationReason TEXT DEFAULT '',
+    canceledAt TEXT,
+    canceledByUserId INTEGER,
+    canceledByName TEXT DEFAULT ''
   )`);
+  db.run(`ALTER TABLE purchases ADD COLUMN status TEXT NOT NULL DEFAULT 'REGISTRADA'`, () => {});
+  db.run(`ALTER TABLE purchases ADD COLUMN cancellationReason TEXT DEFAULT ''`, () => {});
+  db.run(`ALTER TABLE purchases ADD COLUMN canceledAt TEXT`, () => {});
+  db.run(`ALTER TABLE purchases ADD COLUMN canceledByUserId INTEGER`, () => {});
+  db.run(`ALTER TABLE purchases ADD COLUMN canceledByName TEXT DEFAULT ''`, () => {});
   db.run(`CREATE TABLE IF NOT EXISTS purchase_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company TEXT NOT NULL,
@@ -2728,6 +2738,29 @@ app.post("/purchases/:company", requireUserAdmin, async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+app.post("/purchases/:company/:id/cancel", requireUserAdmin, async (req, res) => {
+  const purchaseId = Number(req.params.id);
+  const reason = String(req.body.reason || "").trim().slice(0, 300);
+  if (!Number.isInteger(purchaseId) || purchaseId <= 0) return res.status(400).json({ error: "Compra no válida." });
+  if (!reason) return res.status(400).json({ error: "Escribe la razón de la anulación." });
+  try {
+    await dataStore.transaction(async () => {
+      const purchase = await dbGet("SELECT id, status FROM purchases WHERE id = ? AND company = ?", [purchaseId, req.params.company]);
+      if (!purchase) throw new Error("Compra no encontrada.");
+      if (String(purchase.status || "REGISTRADA") === "ANULADA") throw new Error("La compra ya está anulada.");
+      const items = await dbAll("SELECT productId, quantity FROM purchase_items WHERE purchaseId = ? AND company = ?", [purchaseId, req.params.company]);
+      for (const item of items) {
+        await dbRun("UPDATE products SET quantity = COALESCE(quantity, 0) - ? WHERE id = ? AND company = ?", [Number(item.quantity) || 0, item.productId, req.params.company]);
+      }
+      await dbRun(
+        "UPDATE purchases SET status = ?, cancellationReason = ?, canceledAt = ?, canceledByUserId = ?, canceledByName = ? WHERE id = ? AND company = ?",
+        ["ANULADA", reason, getETLocalISO(), req.user.id, req.user.fullName || req.user.username, purchaseId, req.params.company]
+      );
+    });
+    res.json({ canceled: true, id: purchaseId });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 // ---------- CLIENTES (por empresa) ----------
 
 // Listar clientes de una tienda
@@ -3927,7 +3960,12 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, cost DOUBLE PRECISION DEFAULT 0, taxRate DOUBLE PRECISION DEFAULT 15, menuCategory TEXT DEFAULT 'General', available INTEGER DEFAULT 1, modifierGroups TEXT DEFAULT '[]', company TEXT)`,
     `ALTER TABLE products ADD COLUMN IF NOT EXISTS cost DOUBLE PRECISION DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS suppliers (id SERIAL PRIMARY KEY, company TEXT NOT NULL, name TEXT NOT NULL, taxId TEXT DEFAULT '', email TEXT DEFAULT '', phone TEXT DEFAULT '', address TEXT DEFAULT '', active INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS purchases (id SERIAL PRIMARY KEY, company TEXT NOT NULL, supplierId INTEGER, invoiceNumber TEXT DEFAULT '', purchaseDate TEXT NOT NULL, subtotal DOUBLE PRECISION NOT NULL DEFAULT 0, notes TEXT DEFAULT '', createdByUserId INTEGER, createdByName TEXT DEFAULT '', createdAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS purchases (id SERIAL PRIMARY KEY, company TEXT NOT NULL, supplierId INTEGER, invoiceNumber TEXT DEFAULT '', purchaseDate TEXT NOT NULL, subtotal DOUBLE PRECISION NOT NULL DEFAULT 0, notes TEXT DEFAULT '', createdByUserId INTEGER, createdByName TEXT DEFAULT '', createdAt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'REGISTRADA', cancellationReason TEXT DEFAULT '', canceledAt TEXT, canceledByUserId INTEGER, canceledByName TEXT DEFAULT '')`,
+    `ALTER TABLE purchases ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'REGISTRADA'`,
+    `ALTER TABLE purchases ADD COLUMN IF NOT EXISTS cancellationReason TEXT DEFAULT ''`,
+    `ALTER TABLE purchases ADD COLUMN IF NOT EXISTS canceledAt TEXT`,
+    `ALTER TABLE purchases ADD COLUMN IF NOT EXISTS canceledByUserId INTEGER`,
+    `ALTER TABLE purchases ADD COLUMN IF NOT EXISTS canceledByName TEXT DEFAULT ''`,
     `CREATE TABLE IF NOT EXISTS purchase_items (id SERIAL PRIMARY KEY, company TEXT NOT NULL, purchaseId INTEGER NOT NULL, productId INTEGER NOT NULL, code TEXT DEFAULT '', name TEXT NOT NULL, quantity INTEGER NOT NULL, unitCost DOUBLE PRECISION NOT NULL, total DOUBLE PRECISION NOT NULL)`,
     `ALTER TABLE products ADD COLUMN IF NOT EXISTS menuCategory TEXT DEFAULT 'General'`,
     `ALTER TABLE products ADD COLUMN IF NOT EXISTS available INTEGER DEFAULT 1`,

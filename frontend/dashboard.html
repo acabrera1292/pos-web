@@ -212,7 +212,7 @@
         <h3>Proveedores</h3>
         <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>RUC / ID</th><th>Correo</th><th>Teléfono</th></tr></thead><tbody id="suppliersBody"></tbody></table></div>
         <h3>Historial de compras</h3>
-        <div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Referencia</th><th>Total</th><th>Registró</th></tr></thead><tbody id="purchasesBody"></tbody></table></div>
+        <div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Referencia</th><th>Total</th><th>Estado</th><th>Registró</th><th></th></tr></thead><tbody id="purchasesBody"></tbody></table></div>
         <button type="button" onclick="exportPurchasesCsv()">Exportar compras (CSV)</button>
       </section>
 
@@ -3724,12 +3724,33 @@ async function savePurchase() {
 function renderPurchases() {
   const body = document.getElementById("purchasesBody");
   if (!body) return;
-  body.innerHTML = purchases.map(item => `<tr><td>${escapeCartValue(item.purchaseDate || "")}</td><td>${escapeCartValue(item.supplierName || "Sin proveedor")}</td><td>${escapeCartValue(item.invoiceNumber || "—")}</td><td>$${Number(item.subtotal || 0).toFixed(2)}</td><td>${escapeCartValue(item.createdByName || "—")}</td></tr>`).join("") || '<tr><td colspan="5" class="empty-table">No hay compras registradas.</td></tr>';
+  body.innerHTML = purchases.map(item => {
+    const canceled = String(item.status || "REGISTRADA") === "ANULADA";
+    const status = canceled ? `<span class="status-badge status-canceled">ANULADA${item.cancellationReason ? ` · ${escapeCartValue(item.cancellationReason)}` : ""}</span>` : `<span class="status-badge status-active">REGISTRADA</span>`;
+    const action = !canceled && userRole === "Admin" ? `<button type="button" class="danger-button" onclick="cancelPurchase(${Number(item.id)})">Anular</button>` : "";
+    return `<tr><td>${escapeCartValue(item.purchaseDate || "")}</td><td>${escapeCartValue(item.supplierName || "Sin proveedor")}</td><td>${escapeCartValue(item.invoiceNumber || "—")}</td><td>$${Number(item.subtotal || 0).toFixed(2)}</td><td>${status}</td><td>${escapeCartValue(item.createdByName || "—")}</td><td>${action}</td></tr>`;
+  }).join("") || '<tr><td colspan="7" class="empty-table">No hay compras registradas.</td></tr>';
+}
+
+async function cancelPurchase(id) {
+  if (userRole !== "Admin") return alert("Solo un administrador puede anular compras.");
+  const reason = prompt("Escribe la razón de la anulación:", "Compra registrada por error");
+  if (!reason || !reason.trim()) return;
+  if (!confirm("Se revertirán las cantidades de esta compra en el inventario. ¿Continuar?")) return;
+  const res = await fetch(`${API}/purchases/${encodeURIComponent(company)}/${id}/cancel`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: reason.trim() })
+  });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo anular la compra.");
+  await Promise.all([loadPurchasesModule(), loadProducts()]);
+  alert("Compra anulada y cantidades revertidas en el inventario.");
 }
 
 function exportPurchasesCsv() {
   if (!purchases.length) return alert("No hay compras para exportar.");
-  downloadCsv("compras.csv", [["fecha", "proveedor", "referencia", "total", "registrado_por"], ...purchases.map(item => [item.purchaseDate, item.supplierName || "", item.invoiceNumber || "", item.subtotal, item.createdByName || ""]) ]);
+  downloadCsv("compras.csv", [["fecha", "proveedor", "referencia", "total", "estado", "razon_anulacion", "registrado_por"], ...purchases.map(item => [item.purchaseDate, item.supplierName || "", item.invoiceNumber || "", item.subtotal, item.status || "REGISTRADA", item.cancellationReason || "", item.createdByName || ""]) ]);
 }
 
 async function loadSales(preserveFilter = false) {

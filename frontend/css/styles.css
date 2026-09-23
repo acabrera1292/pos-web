@@ -1492,6 +1492,9 @@ td button {
 .purchase-form-grid input, .purchase-form-grid select, .purchase-line-form input, .purchase-line-form select { min-width: 0; }
 .purchase-line-form { display: grid; grid-template-columns: 1.5fr .7fr .8fr auto; gap: 7px; margin: 10px 0; }
 .purchase-total { text-align: right; font-size: 1.05rem; }
+.status-badge { display: inline-block; border-radius: 999px; padding: 3px 8px; font-size: .78rem; white-space: nowrap; }
+.status-active { background: #dcfce7; color: #166534; }
+.status-canceled { background: #fee2e2; color: #991b1b; max-width: 220px; white-space: normal; }
 .sales-daily-report { margin: 18px 0; }
 @media (max-width: 850px) { .purchase-grid { grid-template-columns: 1fr; } .purchase-line-form { grid-template-columns: 1fr 1fr; } }
 #cashRegisterAdminHistory { margin-top: 22px; }
