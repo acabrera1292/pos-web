@@ -65,7 +65,7 @@
         <div class="topbar-title" id="sectionTitle"></div>
         <div class="top-user">
           <span class="top-user-identity"><span class="top-user-store" id="storeNameLabel"></span><span class="top-user-name" id="signedInUserLabel"></span></span>
-          <span id="supportSessionLabel" class="support-session-label hidden">Soporte temporal</span><button onclick="logout()">Cerrar Sesión</button>
+          <button id="supportSessionExit" class="support-session-exit hidden" onclick="exitSupportSession()">Salir de soporte</button><span id="supportSessionLabel" class="support-session-label hidden">Soporte temporal</span><button onclick="logout()">Cerrar Sesión</button>
         </div>
       </header>
 
@@ -1088,7 +1088,7 @@ function toggleRestaurantMenu(forceOpen) {
 
 async function loadStoreContext() {
   try {
-    const res = await fetch(`${API}/store/context`, { headers: authHeaders() });
+    const res = await fetch(`${API}/store/context`, { headers: authHeaders(), cache: "no-store" });
     if (!res.ok) return;
     const context = await res.json();
     businessType = context.businessType || "SHOP";
@@ -1124,12 +1124,21 @@ window.addEventListener("DOMContentLoaded", () => {
   initializeKitchen();
   const label = document.getElementById("storeNameLabel");
   if (label) {
-    label.textContent = localStorage.getItem("storeName") || company;
+    label.textContent = company;
   }
   const signedInUserLabel = document.getElementById("signedInUserLabel");
   if (signedInUserLabel) signedInUserLabel.textContent = `Usuario: ${localStorage.getItem("fullName") || localStorage.getItem("username") || "—"}`;
   const supportSessionLabel = document.getElementById("supportSessionLabel");
   if (supportSessionLabel && localStorage.getItem("supportSession") === "1") supportSessionLabel.classList.remove("hidden");
+  const supportSessionExit = document.getElementById("supportSessionExit");
+  if (supportSessionExit && localStorage.getItem("supportSession") === "1") supportSessionExit.classList.remove("hidden");
+  if (localStorage.getItem("supportSession") === "1") {
+    window.setTimeout(() => {
+      if (localStorage.getItem("supportSession") !== "1") return;
+      alert("La sesión de soporte está por vencer. Saldrás a Administración para abrir otra si es necesario.");
+      exitSupportSession();
+    }, 29 * 60 * 1000);
+  }
   
     const deleteBtn = document.getElementById("btnDelete");
   if (deleteBtn && userRole !== "Admin") {
@@ -4368,6 +4377,12 @@ function exportSales() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function exitSupportSession() {
+  if (localStorage.getItem("supportSession") !== "1") return logout();
+  ["token", "company", "storeName", "username", "fullName", "role", "roles", "businessType", "supportSession"].forEach(key => localStorage.removeItem(key));
+  location.href = "admin.html";
 }
 
 function logout() {
