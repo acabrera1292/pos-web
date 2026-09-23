@@ -482,11 +482,11 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET || "posmaster";
 const BUSINESS_TYPES = Object.freeze({
   SHOP: Object.freeze({
     label: "Tienda",
-    modules: Object.freeze(["inicio", "inventario", "compras", "pos", "caja", "ventas", "clientes", "usuarios", "config"])
+    modules: Object.freeze(["inicio", "inventario", "compras", "pos", "caja", "ventas", "reportes", "clientes", "usuarios", "config"])
   }),
   RESTAURANT: Object.freeze({
     label: "Restaurante",
-    modules: Object.freeze(["inicio", "inventario", "compras", "pos", "caja", "ventas", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"])
+    modules: Object.freeze(["inicio", "inventario", "compras", "pos", "caja", "ventas", "reportes", "clientes", "usuarios", "config", "mesas", "meseros", "historial-mesas", "menu", "cocina", "rendimiento-cocina", "reloj"])
   })
 });
 

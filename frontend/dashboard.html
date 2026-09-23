@@ -46,6 +46,9 @@
       <button id="nav-ventas" data-module="ventas" onclick="showTab('ventas')">
         Ventas
       </button>
+      <button id="nav-reportes" data-module="reportes" onclick="showTab('reportes')">
+        Reportes
+      </button>
       <button id="nav-clientes" data-module="clientes" onclick="showTab('clientes')">
         Clientes</button>
       <button id="nav-usuarios" data-module="usuarios" onclick="showTab('usuarios')">
@@ -624,7 +627,6 @@
         <tbody id="salesBody"></tbody>
       </table>
     </div>
-    <button onclick="loadSales(true)">Actualizar</button>
     <button id="btnPrintSaleReceipt" onclick="printSelectedSaleReceipt()" disabled>Imprimir recibo</button>
     <button id="btnRetrySri" onclick="retrySelectedSri()" disabled>Reintentar envío SRI</button>
     <span id="saleDeleteActions">
@@ -632,6 +634,33 @@
       <button id="btnCancelSale" class="danger-button" onclick="cancelSelectedSale()">Anular venta</button>
     </span>
 
+  </div>
+</section>
+
+<section id="reportes" class="tab-section hidden">
+  <div class="app-card report-dashboard">
+    <div class="sales-report-heading">
+      <div><h2>Reportes</h2><p>Resumen operativo de ventas, inventario, compras y caja.</p></div>
+      <button type="button" onclick="exportReportsCsv()">Exportar CSV</button>
+    </div>
+    <div class="report-filters">
+      <label>Desde <input id="reportFrom" type="date"></label>
+      <label>Hasta <input id="reportTo" type="date"></label>
+      <button type="button" onclick="loadReports()">Aplicar filtros</button>
+    </div>
+    <div class="sales-kpis report-kpis">
+      <article><span>Ventas netas</span><strong>$<span id="reportSalesTotal">0.00</span></strong></article>
+      <article><span>Transacciones</span><strong id="reportTransactions">0</strong></article>
+      <article><span>Unidades vendidas</span><strong id="reportUnits">0</strong></article>
+      <article><span>Compras registradas</span><strong>$<span id="reportPurchasesTotal">0.00</span></strong></article>
+      <article><span>Productos bajo mínimo</span><strong id="reportLowStock">0</strong></article>
+      <article><span>Diferencia de caja</span><strong>$<span id="reportCashDifference">0.00</span></strong></article>
+    </div>
+    <div class="report-grid">
+      <section><h3>Ventas por método de pago</h3><div id="reportPaymentSummary" class="payment-summary"></div></section>
+      <section><h3>Productos bajo mínimo</h3><div class="table-scroll"><table><thead><tr><th>Producto</th><th>Existencia</th><th>Mínimo</th></tr></thead><tbody id="reportLowStockBody"></tbody></table></div></section>
+      <section><h3>Últimos cierres de caja</h3><div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Esperado</th><th>Contado</th><th>Diferencia</th></tr></thead><tbody id="reportCashBody"></tbody></table></div></section>
+    </div>
   </div>
 </section>
 
@@ -1030,7 +1059,7 @@ function roleModuleAllowed(module) {
   // En tiendas, Cajero conserva el flujo operativo normal y también puede
   // consultar/actualizar inventario (el backend mantiene las restricciones
   // para no borrar ni modificar precio/cantidad sin permisos).
-  if (userRoles.includes("Cajero")) ["inventario", "pos", "ventas", "clientes"].forEach(item => allowed.add(item));
+  if (userRoles.includes("Cajero")) ["inventario", "pos", "ventas", "reportes", "clientes"].forEach(item => allowed.add(item));
   return allowed.has(module);
 }
 
@@ -1152,6 +1181,10 @@ let quickMenuCategory = "Todas";
 let pendingModifierProduct = null;
 let currentCashRegister = null;
 let cashRegisterHistory = [];
+let reportSales = [];
+let reportPurchases = [];
+let reportProducts = [];
+let reportCashClosings = [];
 
 
 // --- NUEVO showTab para layout + filtros ---
@@ -1165,7 +1198,7 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inicio", "inventario", "compras", "pos", "caja", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "clientes", "usuarios", "config"].forEach(id => {
+  ["inicio", "inventario", "compras", "pos", "caja", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "reportes", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
@@ -1177,6 +1210,7 @@ function showTab(tabId) {
   // cargar datos según pestaña
   if (tabId === "inicio") loadDashboardSummary();
   if (tabId === "ventas")   loadSales();
+  if (tabId === "reportes") loadReports();
   if (tabId === "caja") loadCashRegister();
   if (tabId === "compras") loadPurchasesModule();
   if (tabId === "clientes") loadClients();
@@ -3751,6 +3785,73 @@ async function cancelPurchase(id) {
 function exportPurchasesCsv() {
   if (!purchases.length) return alert("No hay compras para exportar.");
   downloadCsv("compras.csv", [["fecha", "proveedor", "referencia", "total", "estado", "razon_anulacion", "registrado_por"], ...purchases.map(item => [item.purchaseDate, item.supplierName || "", item.invoiceNumber || "", item.subtotal, item.status || "REGISTRADA", item.cancellationReason || "", item.createdByName || ""]) ]);
+}
+
+function reportDateValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value).slice(0, 10) : date.toISOString().slice(0, 10);
+}
+
+function reportDateInRange(value, from, to) {
+  const date = reportDateValue(value);
+  return (!from || date >= from) && (!to || date <= to);
+}
+
+async function loadReports() {
+  const from = document.getElementById("reportFrom")?.value || "";
+  const to = document.getElementById("reportTo")?.value || "";
+  if (from && to && from > to) return alert("La fecha inicial no puede ser posterior a la fecha final.");
+  try {
+    const requests = [
+      fetch(`${API}/sales/${company}`, { headers: authHeaders() }).then(res => res.json()),
+      fetch(`${API}/purchases/${company}`, { headers: authHeaders() }).then(res => res.json()),
+      fetch(`${API}/products/${company}`, { cache: "no-store" }).then(res => res.json())
+    ];
+    if (userRole === "Admin") requests.push(fetch(`${API}/cash-register/history`, { headers: authHeaders() }).then(res => res.ok ? res.json() : []));
+    const [sales, purchasesData, products, cash] = await Promise.all(requests);
+    reportSales = Array.isArray(sales) ? sales.filter(item => reportDateInRange(item.date, from, to)) : [];
+    reportPurchases = Array.isArray(purchasesData) ? purchasesData.filter(item => reportDateInRange(item.purchaseDate, from, to)) : [];
+    reportProducts = Array.isArray(products) ? products : [];
+    reportCashClosings = Array.isArray(cash) ? cash : [];
+    renderReports(from, to);
+  } catch (err) {
+    console.error("No se pudieron cargar los reportes:", err);
+    alert("No se pudieron cargar los reportes.");
+  }
+}
+
+function renderReports(from, to) {
+  const completed = reportSales.filter(item => item.saleStatus !== "ANULADA");
+  const netTotal = completed.reduce((sum, item) => sum + Math.max(0, Number(item.total || 0) - Number(item.returnedAmount || 0)), 0);
+  const units = completed.reduce((sum, item) => sum + Math.max(0, Number(item.quantity || 0) - Number(item.returnedQuantity || 0)), 0);
+  const invoices = new Set(completed.map(item => item.invoiceId || item.invoiceNumber || item.id));
+  const purchaseTotal = reportPurchases.filter(item => item.status !== "ANULADA").reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+  const threshold = getThreshold();
+  const lowStock = reportProducts.filter(item => Number(item.quantity || 0) <= threshold);
+  const difference = reportCashClosings.reduce((sum, item) => sum + Number(item.difference || 0), 0);
+  document.getElementById("reportSalesTotal").textContent = netTotal.toFixed(2);
+  document.getElementById("reportTransactions").textContent = invoices.size;
+  document.getElementById("reportUnits").textContent = units;
+  document.getElementById("reportPurchasesTotal").textContent = purchaseTotal.toFixed(2);
+  document.getElementById("reportLowStock").textContent = lowStock.length;
+  document.getElementById("reportCashDifference").textContent = difference.toFixed(2);
+  const payments = {};
+  completed.forEach(item => (item.payments?.length ? item.payments : [{ paymentType: item.paymentType || "Efectivo", amount: item.total || 0 }]).forEach(payment => {
+    payments[payment.paymentType] = (payments[payment.paymentType] || 0) + Number(payment.amount || 0);
+  }));
+  document.getElementById("reportPaymentSummary").innerHTML = Object.entries(payments).map(([type, amount]) => `<div><span>${escapeCartValue(type)}</span><strong>$${amount.toFixed(2)}</strong></div>`).join("") || '<p class="empty-table">Sin ventas en el rango.</p>';
+  document.getElementById("reportLowStockBody").innerHTML = lowStock.map(item => `<tr><td>${escapeCartValue(item.name || "")}</td><td>${Number(item.quantity || 0)}</td><td>${threshold}</td></tr>`).join("") || '<tr><td colspan="3" class="empty-table">No hay productos bajo mínimo.</td></tr>';
+  document.getElementById("reportCashBody").innerHTML = reportCashClosings.slice(0, 10).map(item => `<tr><td>${escapeCartValue(reportDateValue(item.closedAt))}</td><td>$${Number(item.expectedAmount || 0).toFixed(2)}</td><td>$${Number(item.countedAmount || 0).toFixed(2)}</td><td>$${Number(item.difference || 0).toFixed(2)}</td></tr>`).join("") || '<tr><td colspan="4" class="empty-table">No hay cierres disponibles.</td></tr>';
+}
+
+function exportReportsCsv() {
+  if (!reportSales.length && !reportPurchases.length && !reportProducts.length) return alert("Primero carga un reporte.");
+  const rows = [["seccion", "fecha", "descripcion", "cantidad", "total", "estado"]];
+  reportSales.forEach(item => rows.push(["venta", reportDateValue(item.date), item.name || "", item.quantity || 0, Math.max(0, Number(item.total || 0) - Number(item.returnedAmount || 0)).toFixed(2), item.saleStatus || "COMPLETADA"]));
+  reportPurchases.forEach(item => rows.push(["compra", reportDateValue(item.purchaseDate), item.supplierName || "", "", Number(item.subtotal || 0).toFixed(2), item.status || "REGISTRADA"]));
+  reportProducts.forEach(item => rows.push(["inventario", "", item.name || "", item.quantity || 0, Number(item.price || 0).toFixed(2), Number(item.quantity || 0) <= getThreshold() ? "BAJO_MINIMO" : "OK"]));
+  downloadCsv("reporte-operativo.csv", rows);
 }
 
 async function loadSales(preserveFilter = false) {
