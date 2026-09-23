@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f4f6">
+  <link rel="manifest" href="manifest.json">
   <title>POS Simple - Acceso</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
@@ -57,5 +59,6 @@
 
   <script src="js/dialogs.js"></script>
   <script src="js/auth.js"></script>
+  <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});</script>
 </body>
 </html>

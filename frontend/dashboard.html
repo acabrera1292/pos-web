@@ -1002,7 +1002,6 @@ let enabledModules = ["inicio", "inventario", "compras", "pos", "caja", "ventas"
 let suppliers = [];
 let purchases = [];
 let purchaseDraft = [];
-
 function applyModuleVisibility() {
   document.querySelectorAll("[data-module]").forEach(element => {
     const roleAllowed = (!element.hasAttribute("data-admin-only") || userRole === "Admin") && roleModuleAllowed(element.dataset.module);
