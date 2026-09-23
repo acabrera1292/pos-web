@@ -27,7 +27,8 @@ async function loadStores() {
   const res = await fetch(adminUrl("/admin/tiendas"));
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudieron cargar las tiendas.");
-  stores = data;
+  const previousNames = new Map(stores.map(store => [store.company, store.displayName]));
+  stores = data.map(store => ({ ...store, displayName: store.displayName || previousNames.get(store.company) || store.company }));
   renderStores();
   fillStoreSelect();
   renderSummary();
@@ -239,6 +240,9 @@ async function saveLicense() {
   const res = await fetch(adminUrl(`/admin/tiendas/${encodeURIComponent(selectedStore.company)}/licencia`), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudo guardar la licencia.");
+  const updatedStore = stores.find(store => store.company === selectedStore.company);
+  if (updatedStore) updatedStore.displayName = data.displayName || payload.displayName;
+  renderStores();
   closeLicenseEditor(); await loadStores(); alert("Licencia actualizada.");
 }
 

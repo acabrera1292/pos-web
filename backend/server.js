@@ -3207,7 +3207,7 @@ app.put("/admin/tiendas/:company/licencia", requireAdmin, async (req, res) => {
          userLimit=excluded.userLimit, businessType=excluded.businessType, displayName=excluded.displayName, updatedAt=excluded.updatedAt`,
       [company, active, expiresAt, userLimit, businessType, displayName, now, now]
     );
-    res.json({ saved: true });
+    res.json({ saved: true, company, displayName });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
