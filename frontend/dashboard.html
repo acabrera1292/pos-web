@@ -3734,9 +3734,9 @@ function renderPurchases() {
 
 async function cancelPurchase(id) {
   if (userRole !== "Admin") return alert("Solo un administrador puede anular compras.");
-  const reason = prompt("Escribe la razón de la anulación:", "Compra registrada por error");
+  const reason = await appPrompt("Escribe la razón de la anulación:", "Compra registrada por error");
   if (!reason || !reason.trim()) return;
-  if (!confirm("Se revertirán las cantidades de esta compra en el inventario. ¿Continuar?")) return;
+  if (!await appConfirm("Se revertirán las cantidades de esta compra en el inventario. ¿Continuar?")) return;
   const res = await fetch(`${API}/purchases/${encodeURIComponent(company)}/${id}/cancel`, {
     method: "POST",
     headers: { ...authHeaders(), "Content-Type": "application/json" },
