@@ -105,6 +105,16 @@
           <button class="danger-button" onclick="deleteSelectedUser()">Eliminar</button>
         </div>
       </section>
+
+      <section class="license-card support-access-card">
+        <div class="license-section-heading"><div><h2>Acceso de soporte</h2><p>Entra temporalmente como el usuario que está reportando un problema.</p></div></div>
+        <div class="support-access-form">
+          <label>Tienda <select id="supportStoreSelect" onchange="fillSupportUserSelect()"></select></label>
+          <label>Usuario <select id="supportUserSelect"></select></label>
+          <button class="license-form-action" onclick="openSupportSession()">Abrir sesión de soporte</button>
+        </div>
+        <p class="settings-note">La sesión dura 30 minutos y queda identificada como soporte dentro del sistema.</p>
+      </section>
     </main>
   </div>
   <script src="js/dialogs.js"></script>

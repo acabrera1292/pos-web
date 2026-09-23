@@ -1307,6 +1307,10 @@ td button {
 .sales-report-heading h3 { margin-top: 0 !important; }
 .top-user-identity { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; line-height: 1.15; }
 .top-user-name { color: #667085; font-size: 12px; }
+.support-session-label { padding: 4px 7px; border-radius: 999px; color: #7c2d12; background: #ffedd5; font-size: 11px; font-weight: 700; }
+.support-access-form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.support-access-form label { display: grid; gap: 5px; min-width: min(320px, 100%); font-weight: 600; }
+.support-access-form .license-form-action { margin: 0; }
 .report-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 14px 0; }
 .report-filters label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; }
 .report-filters input { min-height: 36px; }

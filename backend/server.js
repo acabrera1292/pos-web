@@ -1049,7 +1049,7 @@ function requireAuthenticatedUser(req, res, next) {
   }
 
   db.get(
-    "SELECT id, username, company, role, active, fullName FROM users WHERE id = ?",
+    "SELECT id, username, company, role, roles, active, fullName FROM users WHERE id = ?",
     [payload.id],
     (err, user) => {
       if (err) return res.status(500).json({ error: err.message });
@@ -1058,6 +1058,7 @@ function requireAuthenticatedUser(req, res, next) {
       }
 
       req.user = user;
+      req.supportActor = payload.support ? (payload.supportActor || "Soporte POS Simple") : null;
       next();
     }
   );
@@ -1452,6 +1453,30 @@ app.get("/admin/usuarios", requireAdmin, (req, res) => {
       res.json(rows);
     }
   );
+});
+
+// Genera una sesión temporal para soporte, siempre vinculada a una tienda y usuario concretos.
+app.post("/admin/support/session", requireAdmin, async (req, res) => {
+  const company = String(req.body.company || "").trim();
+  const userId = Number(req.body.userId);
+  if (!company || !Number.isInteger(userId) || userId < 1) {
+    return res.status(400).json({ error: "Selecciona una tienda y un usuario." });
+  }
+  try {
+    const target = await dbGet("SELECT id, username, fullName, company, role, roles, active FROM users WHERE id = ? AND company = ?", [userId, company]);
+    if (!target || !target.active) return res.status(404).json({ error: "El usuario no existe o está inactivo." });
+    const license = await dbGet("SELECT active, expiresAt FROM store_licenses WHERE company = ?", [company]);
+    if (!license || !license.active) return res.status(403).json({ error: "La tienda está inactiva o no existe." });
+    if (license.expiresAt && license.expiresAt < getETLocalISO().slice(0, 10)) return res.status(403).json({ error: "La licencia de la tienda está vencida." });
+    const token = jwt.sign({ id: target.id, support: true, supportActor: "Soporte POS Simple" }, SECRET, { expiresIn: "30m" });
+    let roles = [];
+    try { roles = JSON.parse(target.roles || "[]"); } catch { roles = []; }
+    if (!Array.isArray(roles) || !roles.length) roles = [target.role === "Admin" ? "Administrador" : "Cajero"];
+    console.log(`[SUPPORT] admin opened ${company} as user ${target.id} (${target.username})`);
+    res.json({ token, company, username: target.username, fullName: target.fullName || "", role: target.role || "Usuario", roles, expiresInMinutes: 30 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Crear usuario para una tienda

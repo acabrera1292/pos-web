@@ -40,6 +40,7 @@ async function loadUsers() {
   if (!res.ok) return alert(data.error || "No se pudieron cargar los usuarios.");
   users = data;
   renderUsers();
+  fillSupportUserSelect();
   renderSummary();
 }
 
@@ -166,14 +167,16 @@ function fillStoreSelect() {
   const select = document.getElementById("storeSelect");
   const editSelect = document.getElementById("editUserStore");
   const filter = document.getElementById("userStoreFilter");
+  const supportSelect = document.getElementById("supportStoreSelect");
   const selectedFilter = filter ? filter.value : "";
   select.innerHTML = "";
   if (editSelect) editSelect.innerHTML = "";
   if (filter) filter.innerHTML = '<option value="">Todas las tiendas</option>';
+  if (supportSelect) supportSelect.innerHTML = "";
   stores.forEach(store => {
     const option = document.createElement("option");
     option.value = store.company;
-    option.textContent = `${store.company} (${store.userCount}/${store.userLimit})`;
+    option.textContent = `${store.displayName || store.company} (${store.userCount}/${store.userLimit})`;
     // Una licencia por vencer sigue siendo utilizable hasta su fecha real de vencimiento.
     option.disabled = !store.active || (store.expiresAt && daysUntil(store.expiresAt) < 0);
     select.appendChild(option);
@@ -184,11 +187,44 @@ function fillStoreSelect() {
     if (filter) {
       const filterOption = document.createElement("option");
       filterOption.value = store.company;
-      filterOption.textContent = store.company;
+      filterOption.textContent = store.displayName || store.company;
       filter.appendChild(filterOption);
+    }
+    if (supportSelect) {
+      const supportOption = document.createElement("option");
+      supportOption.value = store.company;
+      supportOption.textContent = store.displayName || store.company;
+      supportSelect.appendChild(supportOption);
     }
   });
   if (filter && stores.some(store => store.company === selectedFilter)) filter.value = selectedFilter;
+  fillSupportUserSelect();
+}
+
+function fillSupportUserSelect() {
+  const store = document.getElementById("supportStoreSelect")?.value || "";
+  const select = document.getElementById("supportUserSelect");
+  if (!select) return;
+  select.innerHTML = "";
+  users.filter(user => user.company === store && user.active !== 0).forEach(user => {
+    const option = document.createElement("option");
+    option.value = user.id;
+    option.textContent = `${user.fullName || user.username} · ${user.username}`;
+    select.appendChild(option);
+  });
+  if (!select.children.length) select.innerHTML = '<option value="">No hay usuarios activos</option>';
+}
+
+async function openSupportSession() {
+  const company = document.getElementById("supportStoreSelect")?.value || "";
+  const userId = Number(document.getElementById("supportUserSelect")?.value || 0);
+  if (!company || !userId) return alert("Selecciona una tienda y un usuario activo.");
+  if (!await appConfirm("Se abrirá una sesión temporal como este usuario. ¿Continuar?")) return;
+  const res = await fetch(adminUrl("/admin/support/session"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ company, userId }) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo abrir la sesión de soporte.");
+  const params = new URLSearchParams({ supportToken: data.token, company: data.company, username: data.username, fullName: data.fullName || "", role: data.role || "Usuario", roles: JSON.stringify(data.roles || []) });
+  window.location.href = `dashboard.html?${params.toString()}`;
 }
 
 async function createStore() {
@@ -270,7 +306,8 @@ function renderUsers() {
   users.filter(user => (!companyFilter || user.company === companyFilter) && (!search || `${user.fullName || ""} ${user.username}`.toLowerCase().includes(search))).forEach(user => {
     const row = document.createElement("tr");
     row.innerHTML = "<td></td><td></td><td></td><td></td>";
-    row.children[0].textContent = user.fullName || "—"; row.children[1].textContent = user.username; row.children[2].textContent = user.company; row.children[3].textContent = user.role || "Admin";
+    const userStore = stores.find(store => store.company === user.company);
+    row.children[0].textContent = user.fullName || "—"; row.children[1].textContent = user.username; row.children[2].textContent = userStore?.displayName || user.company; row.children[3].textContent = user.role || "Admin";
     row.onclick = () => selectUserRow(user, row);
     tbody.appendChild(row);
   });

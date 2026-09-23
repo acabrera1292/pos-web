@@ -65,7 +65,7 @@
         <div class="topbar-title" id="sectionTitle"></div>
         <div class="top-user">
           <span class="top-user-identity"><span class="top-user-store" id="storeNameLabel"></span><span class="top-user-name" id="signedInUserLabel"></span></span>
-          <button onclick="logout()">Cerrar Sesión</button>
+          <span id="supportSessionLabel" class="support-session-label hidden">Soporte temporal</span><button onclick="logout()">Cerrar Sesión</button>
         </div>
       </header>
 
@@ -1021,6 +1021,18 @@
 <script src="js/cocina.js"></script>
 <script src="js/rendimiento-cocina.js"></script>
 <script>
+const supportParams = new URLSearchParams(location.search);
+const supportToken = supportParams.get("supportToken");
+if (supportToken) {
+  localStorage.setItem("token", supportToken);
+  localStorage.setItem("company", supportParams.get("company") || "");
+  localStorage.setItem("username", supportParams.get("username") || "");
+  localStorage.setItem("fullName", supportParams.get("fullName") || "");
+  localStorage.setItem("role", supportParams.get("role") || "Usuario");
+  localStorage.setItem("roles", supportParams.get("roles") || "[]");
+  localStorage.setItem("supportSession", "1");
+  history.replaceState({}, document.title, location.pathname);
+}
 const API = "";
 const company = localStorage.getItem("company");
 const userRole = localStorage.getItem("role") || "Usuario";
@@ -1116,6 +1128,8 @@ window.addEventListener("DOMContentLoaded", () => {
   }
   const signedInUserLabel = document.getElementById("signedInUserLabel");
   if (signedInUserLabel) signedInUserLabel.textContent = `Usuario: ${localStorage.getItem("fullName") || localStorage.getItem("username") || "—"}`;
+  const supportSessionLabel = document.getElementById("supportSessionLabel");
+  if (supportSessionLabel && localStorage.getItem("supportSession") === "1") supportSessionLabel.classList.remove("hidden");
   
     const deleteBtn = document.getElementById("btnDelete");
   if (deleteBtn && userRole !== "Admin") {
@@ -4362,6 +4376,7 @@ function logout() {
   localStorage.removeItem("storeName");
   localStorage.removeItem("username");
   localStorage.removeItem("fullName");
+  localStorage.removeItem("supportSession");
   localStorage.removeItem("role"); 
   localStorage.removeItem("businessType");
   location.href = "index.html";
