@@ -86,6 +86,7 @@ if (!dataStore.postgres) db.serialize(() => {
       expiresAt TEXT,
       userLimit INTEGER DEFAULT 3,
       businessType TEXT DEFAULT 'SHOP',
+      displayName TEXT,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     )
@@ -561,7 +562,9 @@ app.post("/auth/login", (req, res) => {
       res.json({
         token,
         company: user.company,
+        storeName: license?.displayName || user.company,
         username: user.username,
+        fullName: user.fullName || "",
         role: user.role || "Admin",
         roles: (() => { try { const parsed = JSON.parse(user.roles || "[]"); return Array.isArray(parsed) && parsed.length ? parsed : [user.role === "Admin" ? "Administrador" : "Cajero"]; } catch { return [user.role === "Admin" ? "Administrador" : "Cajero"]; } })(),
         businessType: normalizeBusinessType(license?.businessType),
@@ -1386,6 +1389,7 @@ app.get("/admin/tiendas", requireAdmin, (req, res) => {
            COALESCE(MAX(l.userLimit), CASE WHEN COUNT(u.id) < 3 THEN 3 ELSE CAST(COUNT(u.id) AS INTEGER) END) AS userLimit,
            CAST(COUNT(u.id) AS INTEGER) AS userCount,
            COALESCE(MAX(l.businessType), 'SHOP') AS businessType,
+           COALESCE(MAX(l.displayName), u.company) AS displayName,
            MAX(l.createdAt) AS createdAt, MAX(l.updatedAt) AS updatedAt
     FROM users u
     LEFT JOIN store_licenses l ON l.company = u.company
@@ -2200,7 +2204,7 @@ app.post("/admin/tiendas", requireAdmin, async (req, res) => {
     const hashed = await bcrypt.hash(password, 10);
     const user = await dataStore.transaction(async () => {
       const createdUser = await dbRun("INSERT INTO users (username, password, company, role, active, fullName, mustChangePassword) VALUES (?, ?, ?, 'Admin', 1, ?, 1)", [String(username).trim().toLowerCase(), hashed, company, String(fullName || "").trim()]);
-      await dbRun("INSERT INTO store_licenses (company, active, expiresAt, userLimit, businessType, createdAt, updatedAt) VALUES (?, 1, ?, ?, ?, ?, ?)", [company, expiresAt || null, limit, businessType, now, now]);
+      await dbRun("INSERT INTO store_licenses (company, active, expiresAt, userLimit, businessType, displayName, createdAt, updatedAt) VALUES (?, 1, ?, ?, ?, ?, ?, ?)", [company, expiresAt || null, limit, businessType, company, now, now]);
       return createdUser;
     });
     res.json({ id: user.lastID, company });
@@ -2224,10 +2228,13 @@ app.get("/store/users", requireUserAdmin, async (req, res) => {
 
 app.get("/store/context", requireCompanyUser, async (req, res) => {
   try {
-    const license = await dbGet("SELECT businessType FROM store_licenses WHERE company = ?", [req.user.company]);
+    const license = await dbGet("SELECT businessType, displayName FROM store_licenses WHERE company = ?", [req.user.company]);
     const businessType = normalizeBusinessType(license?.businessType);
     res.json({
       company: req.user.company,
+      storeName: license?.displayName || req.user.company,
+      username: req.user.username,
+      fullName: req.user.fullName || "",
       businessType,
       businessTypeLabel: BUSINESS_TYPES[businessType].label,
       enabledModules: BUSINESS_TYPES[businessType].modules
@@ -3000,6 +3007,7 @@ if (!dataStore.postgres) {
   addColumnIfMissing("sri_settings", "certificateValidated INTEGER DEFAULT 0");
   addColumnIfMissing("sri_settings", "certificateLocalValidated INTEGER DEFAULT 0");
   addColumnIfMissing("store_licenses", "businessType TEXT DEFAULT 'SHOP'");
+  addColumnIfMissing("store_licenses", "displayName TEXT");
 }
 
 async function updateInvoiceReturnStatus(invoiceId, company) {
@@ -3186,17 +3194,18 @@ app.put("/admin/tiendas/:company/licencia", requireAdmin, async (req, res) => {
   const expiresAt = req.body.expiresAt || null;
   const userLimit = Math.max(1, Number(req.body.userLimit) || 1);
   const businessType = normalizeBusinessType(req.body.businessType);
+  const displayName = String(req.body.displayName || company).trim().slice(0, 120) || company;
   const now = getETLocalISO();
   try {
     const count = await dbGet("SELECT COUNT(*) AS total FROM users WHERE company = ?", [company]);
     if (!count?.total) return res.status(404).json({ error: "Tienda no encontrada." });
     if (userLimit < count.total) return res.status(400).json({ error: `La tienda ya tiene ${count.total} usuarios. El límite no puede ser menor.` });
     await dbRun(
-      `INSERT INTO store_licenses (company, active, expiresAt, userLimit, businessType, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO store_licenses (company, active, expiresAt, userLimit, businessType, displayName, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(company) DO UPDATE SET active=excluded.active, expiresAt=excluded.expiresAt,
-         userLimit=excluded.userLimit, businessType=excluded.businessType, updatedAt=excluded.updatedAt`,
-      [company, active, expiresAt, userLimit, businessType, now, now]
+         userLimit=excluded.userLimit, businessType=excluded.businessType, displayName=excluded.displayName, updatedAt=excluded.updatedAt`,
+      [company, active, expiresAt, userLimit, businessType, displayName, now, now]
     );
     res.json({ saved: true });
   } catch (err) {
@@ -3954,8 +3963,9 @@ async function initializePostgres() {
     `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE, password TEXT, company TEXT, role TEXT DEFAULT 'Admin', active INTEGER DEFAULT 1, fullName TEXT DEFAULT '', mustChangePassword INTEGER DEFAULT 0, roles TEXT DEFAULT '[]')`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS roles TEXT DEFAULT '[]'`,
     `CREATE TABLE IF NOT EXISTS backup_snapshots (id SERIAL PRIMARY KEY, company TEXT NOT NULL, createdAt TEXT NOT NULL, payload TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS store_licenses (company TEXT PRIMARY KEY, active INTEGER DEFAULT 1, expiresAt TEXT, userLimit INTEGER DEFAULT 3, businessType TEXT DEFAULT 'SHOP', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS store_licenses (company TEXT PRIMARY KEY, active INTEGER DEFAULT 1, expiresAt TEXT, userLimit INTEGER DEFAULT 3, businessType TEXT DEFAULT 'SHOP', displayName TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
     `ALTER TABLE store_licenses ADD COLUMN IF NOT EXISTS businessType TEXT DEFAULT 'SHOP'`,
+    `ALTER TABLE store_licenses ADD COLUMN IF NOT EXISTS displayName TEXT`,
     `CREATE TABLE IF NOT EXISTS password_reset_codes (id SERIAL PRIMARY KEY, userId INTEGER NOT NULL, codeHash TEXT NOT NULL, expiresAt TEXT NOT NULL, usedAt TEXT, createdAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, code TEXT, name TEXT, quantity INTEGER, price DOUBLE PRECISION, cost DOUBLE PRECISION DEFAULT 0, taxRate DOUBLE PRECISION DEFAULT 15, menuCategory TEXT DEFAULT 'General', available INTEGER DEFAULT 1, modifierGroups TEXT DEFAULT '[]', company TEXT)`,
     `ALTER TABLE products ADD COLUMN IF NOT EXISTS cost DOUBLE PRECISION DEFAULT 0`,

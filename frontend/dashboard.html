@@ -64,7 +64,7 @@
       <header class="topbar">
         <div class="topbar-title" id="sectionTitle"></div>
         <div class="top-user">
-          <span class="top-user-store" id="storeNameLabel"></span>
+          <span class="top-user-identity"><span class="top-user-store" id="storeNameLabel"></span><span class="top-user-name" id="signedInUserLabel"></span></span>
           <button onclick="logout()">Cerrar Sesión</button>
         </div>
       </header>
@@ -1082,6 +1082,12 @@ async function loadStoreContext() {
     businessType = context.businessType || "SHOP";
     enabledModules = Array.isArray(context.enabledModules) ? context.enabledModules : enabledModules;
     localStorage.setItem("businessType", businessType);
+    localStorage.setItem("storeName", context.storeName || company);
+    if (context.fullName) localStorage.setItem("fullName", context.fullName);
+    const storeLabel = document.getElementById("storeNameLabel");
+    if (storeLabel) storeLabel.textContent = context.storeName || company;
+    const userLabel = document.getElementById("signedInUserLabel");
+    if (userLabel) userLabel.textContent = `Usuario: ${context.fullName || context.username || localStorage.getItem("username") || "—"}`;
     applyModuleVisibility();
     updateOperationalRoleOptions();
     renderRestaurantQuickMenu();
@@ -1106,8 +1112,10 @@ window.addEventListener("DOMContentLoaded", () => {
   initializeKitchen();
   const label = document.getElementById("storeNameLabel");
   if (label) {
-    label.textContent = company;
+    label.textContent = localStorage.getItem("storeName") || company;
   }
+  const signedInUserLabel = document.getElementById("signedInUserLabel");
+  if (signedInUserLabel) signedInUserLabel.textContent = `Usuario: ${localStorage.getItem("fullName") || localStorage.getItem("username") || "—"}`;
   
     const deleteBtn = document.getElementById("btnDelete");
   if (deleteBtn && userRole !== "Admin") {
@@ -4351,7 +4359,9 @@ function exportSales() {
 function logout() {
   localStorage.removeItem("token");
   localStorage.removeItem("company");
+  localStorage.removeItem("storeName");
   localStorage.removeItem("username");
+  localStorage.removeItem("fullName");
   localStorage.removeItem("role"); 
   localStorage.removeItem("businessType");
   location.href = "index.html";

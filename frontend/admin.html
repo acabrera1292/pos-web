@@ -53,6 +53,7 @@
       <section id="licenseEditor" class="license-card hidden">
         <div class="license-section-heading"><div><h2>Editar licencia</h2><p id="licenseEditorStore"></p></div><button onclick="closeLicenseEditor()">Cerrar</button></div>
         <div class="license-form-grid compact">
+          <label>Nombre visible de la tienda <input id="editStoreDisplayName" maxlength="120" placeholder="Nombre que verá el cliente"></label>
           <label>Estado <select id="editLicenseActive"><option value="1">Activa</option><option value="0">Inactiva</option></select></label>
           <label>Vencimiento <input id="editLicenseExpiration" type="date"></label>
           <label>Usuarios permitidos <input id="editLicenseLimit" type="number" min="1"></label>

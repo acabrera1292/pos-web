@@ -46,7 +46,9 @@ async function login() {
     // guardar sesión (incluimos el correo)
     localStorage.setItem("token", data.token);
     localStorage.setItem("company", data.company);
+    localStorage.setItem("storeName", data.storeName || data.company);
     localStorage.setItem("username", data.username || username);
+    localStorage.setItem("fullName", data.fullName || "");
     localStorage.setItem("role", data.role || "Admin");
     localStorage.setItem("roles", JSON.stringify(Array.isArray(data.roles) && data.roles.length ? data.roles : [data.role === "Admin" ? "Administrador" : "Cajero"]));
     localStorage.setItem("businessType", data.businessType || "SHOP");
