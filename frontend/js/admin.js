@@ -224,7 +224,7 @@ async function openSupportSession() {
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudo abrir la sesión de soporte.");
   const params = new URLSearchParams({ supportToken: data.token, company: data.company, username: data.username, fullName: data.fullName || "", role: data.role || "Usuario", roles: JSON.stringify(data.roles || []) });
-  window.location.href = `dashboard.html?${params.toString()}`;
+  window.location.href = `support.html?${params.toString()}`;
 }
 
 async function createStore() {

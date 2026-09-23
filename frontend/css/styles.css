@@ -1312,6 +1312,11 @@ td button {
 .support-access-form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .support-access-form label { display: grid; gap: 5px; min-width: min(320px, 100%); font-weight: 600; }
 .support-access-form .license-form-action { margin: 0; }
+.support-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #f3f4f6; }
+.support-card { width: min(520px, 100%); padding: 28px; border: 1px solid #d1d5db; border-radius: 12px; background: #fff; box-shadow: 0 12px 30px rgba(15, 23, 42, .12); }
+.support-card h1 { margin-top: 0; }
+.support-details { margin: 18px 0; padding: 12px; border-radius: 7px; background: #fff7ed; color: #7c2d12; font-weight: 600; }
+.support-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0; }
 .report-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 14px 0; }
 .report-filters label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; }
 .report-filters input { min-height: 36px; }

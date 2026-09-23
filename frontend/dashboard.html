@@ -4382,7 +4382,7 @@ function exportSales() {
 function exitSupportSession() {
   if (localStorage.getItem("supportSession") !== "1") return logout();
   ["token", "company", "storeName", "username", "fullName", "role", "roles", "businessType", "supportSession"].forEach(key => localStorage.removeItem(key));
-  location.href = "admin.html";
+  location.href = "support.html?ended=1";
 }
 
 function logout() {

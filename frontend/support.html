@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Soporte POS Simple</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="support-page">
+  <main class="support-card">
+    <h1>Soporte POS Simple</h1>
+    <p id="supportMessage">Sesión temporal preparada.</p>
+    <div id="supportDetails" class="support-details"></div>
+    <div class="support-actions">
+      <button id="enterSupportButton" type="button">Entrar a la tienda</button>
+      <button id="cancelSupportButton" type="button">Salir</button>
+    </div>
+    <small>El acceso expira automáticamente y no permite administrar licencias.</small>
+  </main>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const token = params.get("supportToken");
+    const ended = params.get("ended") === "1";
+    const details = document.getElementById("supportDetails");
+    const enter = document.getElementById("enterSupportButton");
+    const message = document.getElementById("supportMessage");
+    if (ended) {
+      message.textContent = "La sesión de soporte terminó.";
+      enter.classList.add("hidden");
+      details.textContent = "Solicita un nuevo enlace si necesitas volver a entrar.";
+    } else if (!token) {
+      message.textContent = "Este enlace de soporte no es válido o ya expiró.";
+      enter.classList.add("hidden");
+    } else {
+      details.textContent = `${params.get("company") || "Tienda"} · ${params.get("fullName") || params.get("username") || "Usuario"}`;
+      enter.onclick = () => { location.href = `dashboard.html${location.search}`; };
+    }
+    document.getElementById("cancelSupportButton").onclick = () => { location.href = "index.html"; };
+  </script>
+</body>
+</html>
