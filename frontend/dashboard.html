@@ -4097,7 +4097,10 @@ function payrollDateInput(id, date) { const input = document.getElementById(id);
 function payrollDateRange() {
   const today = new Date().toISOString().slice(0, 10);
   payrollDateInput("payrollTo", today);
-  payrollDateInput("payrollFrom", new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
+  const current = new Date();
+  const mondayOffset = (current.getDay() + 6) % 7;
+  const monday = new Date(current.getFullYear(), current.getMonth(), current.getDate() - mondayOffset);
+  payrollDateInput("payrollFrom", monday.toISOString().slice(0, 10));
   return { from: document.getElementById("payrollFrom")?.value || today, to: document.getElementById("payrollTo")?.value || today };
 }
 
