@@ -49,6 +49,9 @@
       <button id="nav-reportes" data-module="reportes" onclick="showTab('reportes')">
         Reportes
       </button>
+      <button id="nav-nomina" data-module="nomina" onclick="showTab('nomina'); loadPayroll()">
+        Nómina
+      </button>
       <button id="nav-clientes" data-module="clientes" onclick="showTab('clientes')">
         Clientes</button>
       <button id="nav-usuarios" data-module="usuarios" onclick="showTab('usuarios')">
@@ -761,8 +764,30 @@
             <button type="button" onclick="setSelectedStoreUserTemporaryPassword()" title="Asigna una contraseña temporal y obliga a crear una nueva al iniciar sesión">Restablecer contraseña</button>
             <button type="button" class="danger-button" onclick="deleteSelectedStoreUser()">Eliminar</button>
           </div>
+          <section id="personnelPayrollSettings" class="payroll-personnel-card">
+            <div class="section-heading-row"><div><h3>Pago del personal</h3><p class="settings-note">Asigna una tarifa individual. Se usa para calcular jornadas cerradas en Nómina.</p></div></div>
+            <div class="payroll-inline-form">
+              <label>Persona <select id="payrollProfileUser"></select></label>
+              <label>Tarifa por hora <input id="payrollProfileHourlyRate" type="number" min="0" step="0.01" inputmode="decimal"></label>
+              <label>Mínimo diario <input id="payrollProfileDailyMinimum" type="number" min="0" step="0.01" inputmode="decimal"></label>
+              <label>Forma <select id="payrollProfilePaymentMode"><option value="HORA">Por hora</option><option value="DIA">Por día</option></select></label>
+              <button type="button" onclick="savePayrollProfile()">Guardar tarifa</button>
+            </div>
+          </section>
         </div>
 
+      </section>
+
+      <!-- TAB: NÓMINA -->
+      <section id="nomina" class="tab-section app-card hidden">
+        <div class="sales-report-heading"><div><h2>Nómina básica</h2><p class="settings-note">Registra tu jornada y consulta una estimación de pago. Los administradores pueden revisar todo el personal.</p></div><span id="payrollTodayStatus" class="cash-register-status closed">Sin jornada abierta</span></div>
+        <div class="payroll-actions-card">
+          <div><strong id="payrollCurrentPerson">Mi jornada de hoy</strong><p id="payrollCurrentSummary" class="settings-note">Marca tu entrada para comenzar.</p></div>
+          <div class="payroll-action-buttons"><button type="button" id="payrollCheckInButton" onclick="payrollCheckIn()">Marcar entrada</button><button type="button" id="payrollCheckOutButton" class="secondary-button" onclick="payrollCheckOut()">Marcar salida</button></div>
+        </div>
+        <div class="report-filters payroll-filters"><label>Desde <input id="payrollFrom" type="date"></label><label>Hasta <input id="payrollTo" type="date"></label><button type="button" onclick="loadPayrollAttendance()">Actualizar</button></div>
+        <div class="sales-kpis report-kpis"><article><span>Horas registradas</span><strong id="payrollTotalHours">0.00</strong></article><article><span>Horas extra</span><strong id="payrollOvertimeHours">0.00</strong></article><article><span>Pago estimado</span><strong>$<span id="payrollGrossTotal">0.00</span></strong></article></div>
+        <div class="table-scroll"><table><thead><tr><th>Persona</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th><th>Extra</th><th>Pago estimado</th></tr></thead><tbody id="payrollAttendanceBody"></tbody></table></div>
       </section>
 
       <!-- TAB: CONFIGURACIÓN -->
@@ -775,6 +800,19 @@
           <input id="lowThreshold" type="number" style="width:80px;">
         </label>
         <button onclick="saveThreshold()">Guardar umbral</button>
+
+        <div class="backup-settings-card payroll-settings-card">
+          <h3>Nómina básica (módulo opcional)</h3>
+          <p class="settings-note">Actívala solo si quieres registrar entradas, salidas y estimaciones de pago. Configura valores de referencia según tu negocio y revisa el cumplimiento laboral ecuatoriano con tu contador.</p>
+          <label class="toggle-label"><input id="payrollEnabled" type="checkbox"> Activar módulo de nómina</label>
+          <div class="payroll-settings-grid">
+            <label>Tarifa general por hora <input id="payrollHourlyRate" type="number" min="0" step="0.01"></label>
+            <label>Mínimo diario <input id="payrollDailyMinimum" type="number" min="0" step="0.01"></label>
+            <label>Horas normales por día <input id="payrollWorkdayHours" type="number" min="1" step="0.5" value="8"></label>
+            <label>Multiplicador horas extra <input id="payrollOvertimeMultiplier" type="number" min="1" step="0.1" value="1.5"></label>
+          </div>
+          <button type="button" onclick="savePayrollSettings()">Guardar configuración de nómina</button>
+        </div>
 
         <div class="backup-settings-card">
           <h3>Respaldo de datos</h3>
@@ -1063,6 +1101,7 @@ function applyModuleVisibility() {
 
 function roleModuleAllowed(module) {
   if (userRole === "Admin" || userRoles.includes("Administrador")) return true;
+  if (module === "nomina") return true;
   const allowed = new Set();
   if (userRoles.includes("Cajero")) allowed.add("inicio");
   if (userRoles.includes("Mesero")) ["mesas", "pos", "ventas", "clientes"].forEach(item => allowed.add(item));
@@ -1091,6 +1130,7 @@ async function loadStoreContext() {
     const res = await fetch(`${API}/store/context`, { headers: authHeaders(), cache: "no-store" });
     if (!res.ok) return;
     const context = await res.json();
+    if (context.userId) localStorage.setItem("userId", context.userId);
     businessType = context.businessType || "SHOP";
     enabledModules = Array.isArray(context.enabledModules) ? context.enabledModules : enabledModules;
     localStorage.setItem("businessType", businessType);
@@ -1119,6 +1159,7 @@ window.addEventListener("DOMContentLoaded", () => {
   applyModuleVisibility();
   showTab("inicio");
   loadStoreContext();
+  loadPayrollSettings();
   initializeRestaurantTables();
   initializeRestaurantServers();
   initializeKitchen();
@@ -1157,6 +1198,7 @@ window.addEventListener("DOMContentLoaded", () => {
     loadSriSettings();
     loadClientIntakeStatus();
     loadStoreUsers();
+    loadPayrollProfiles();
   }
   const cashRegisterAdminHistory = document.getElementById("cashRegisterAdminHistory");
   if (cashRegisterAdminHistory) cashRegisterAdminHistory.classList.toggle("hidden", userRole !== "Admin");
@@ -1229,7 +1271,7 @@ function showTab(tabId) {
   if (sec) sec.classList.remove("hidden");
 
   // marcar botón de navegación activo
-  ["inicio", "inventario", "compras", "pos", "caja", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "reportes", "clientes", "usuarios", "config"].forEach(id => {
+  ["inicio", "inventario", "compras", "pos", "caja", "nomina", "mesas", "meseros", "menu", "cocina", "rendimiento-cocina", "historial-mesas", "ventas", "reportes", "clientes", "usuarios", "config"].forEach(id => {
     const btn = document.getElementById(`nav-${id}`);
     if (btn) btn.classList.toggle("active", id === tabId);
   });
@@ -1242,6 +1284,7 @@ function showTab(tabId) {
   if (tabId === "inicio") loadDashboardSummary();
   if (tabId === "ventas")   loadSales();
   if (tabId === "reportes") loadReports();
+  if (tabId === "nomina") loadPayroll();
   if (tabId === "caja") loadCashRegister();
   if (tabId === "compras") loadPurchasesModule();
   if (tabId === "clientes") loadClients();
@@ -3982,6 +4025,121 @@ function renderStoreUsers() {
     tbody.appendChild(row);
   });
   if (!tbody.children.length) tbody.innerHTML = '<tr><td colspan="4" class="empty-table">No hay usuarios con esa búsqueda.</td></tr>';
+}
+
+let payrollSettings = { enabled: false, hourlyRate: 0, dailyMinimum: 0, workdayHours: 8, overtimeMultiplier: 1.5 };
+let payrollProfiles = [];
+let payrollAttendance = [];
+
+async function loadPayrollSettings() {
+  try {
+    const res = await fetch(`${API}/payroll/settings`, { headers: authHeaders() });
+    if (!res.ok) return;
+    payrollSettings = await res.json();
+    const enabled = document.getElementById("payrollEnabled");
+    if (enabled) enabled.checked = Boolean(payrollSettings.enabled);
+    ["hourlyRate", "dailyMinimum", "workdayHours", "overtimeMultiplier"].forEach(key => {
+      const input = document.getElementById(`payroll${key[0].toUpperCase()}${key.slice(1)}`);
+      if (input) input.value = payrollSettings[key] ?? "";
+    });
+    applyModuleVisibility();
+  } catch (err) { console.warn("No se pudo cargar la configuración de nómina", err); }
+}
+
+async function savePayrollSettings() {
+  const payload = {
+    enabled: document.getElementById("payrollEnabled")?.checked,
+    hourlyRate: document.getElementById("payrollHourlyRate")?.value,
+    dailyMinimum: document.getElementById("payrollDailyMinimum")?.value,
+    workdayHours: document.getElementById("payrollWorkdayHours")?.value,
+    overtimeMultiplier: document.getElementById("payrollOvertimeMultiplier")?.value
+  };
+  const res = await fetch(`${API}/payroll/settings`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo guardar la nómina.");
+  payrollSettings = data.settings;
+  applyModuleVisibility();
+  alert(payload.enabled ? "Nómina activada." : "Nómina desactivada.");
+}
+
+async function loadPayrollProfiles() {
+  if (userRole !== "Admin") return;
+  const res = await fetch(`${API}/payroll/profiles`, { headers: authHeaders() });
+  if (!res.ok) return;
+  const data = await res.json();
+  payrollProfiles = data.profiles || [];
+  const select = document.getElementById("payrollProfileUser");
+  if (!select) return;
+  select.innerHTML = payrollProfiles.filter(item => item.active).map(item => `<option value="${item.userId}">${escapeCartValue(item.fullName || item.username)} · ${escapeCartValue(item.username)}</option>`).join("") || "<option value=\"\">No hay personal</option>";
+  select.onchange = renderPayrollProfileForm;
+  renderPayrollProfileForm();
+}
+
+function renderPayrollProfileForm() {
+  const id = Number(document.getElementById("payrollProfileUser")?.value);
+  const profile = payrollProfiles.find(item => Number(item.userId) === id);
+  if (document.getElementById("payrollProfileHourlyRate")) document.getElementById("payrollProfileHourlyRate").value = profile?.hourlyRate ?? payrollSettings.hourlyRate ?? 0;
+  if (document.getElementById("payrollProfileDailyMinimum")) document.getElementById("payrollProfileDailyMinimum").value = profile?.dailyMinimum ?? payrollSettings.dailyMinimum ?? 0;
+  if (document.getElementById("payrollProfilePaymentMode")) document.getElementById("payrollProfilePaymentMode").value = profile?.paymentMode || "HORA";
+}
+
+async function savePayrollProfile() {
+  const userId = document.getElementById("payrollProfileUser")?.value;
+  if (!userId) return alert("Selecciona una persona.");
+  const res = await fetch(`${API}/payroll/profiles/${userId}`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ hourlyRate: document.getElementById("payrollProfileHourlyRate")?.value, dailyMinimum: document.getElementById("payrollProfileDailyMinimum")?.value, paymentMode: document.getElementById("payrollProfilePaymentMode")?.value }) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo guardar la tarifa.");
+  await loadPayrollProfiles();
+  alert("Tarifa guardada.");
+}
+
+function payrollDateInput(id, date) { const input = document.getElementById(id); if (input && !input.value) input.value = date; }
+function payrollDateRange() {
+  const today = new Date().toISOString().slice(0, 10);
+  payrollDateInput("payrollTo", today);
+  payrollDateInput("payrollFrom", new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
+  return { from: document.getElementById("payrollFrom")?.value || today, to: document.getElementById("payrollTo")?.value || today };
+}
+
+async function loadPayroll() {
+  payrollDateRange();
+  await loadPayrollSettings();
+  await loadPayrollAttendance();
+}
+
+async function loadPayrollAttendance() {
+  const range = payrollDateRange();
+  const res = await fetch(`${API}/payroll/attendance?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`, { headers: authHeaders() });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo cargar la nómina.");
+  payrollAttendance = data.attendance || [];
+  const currentUsername = localStorage.getItem("username");
+  const open = payrollAttendance.find(row => !row.checkOut && (userRole === "Admin" ? row.userId === Number(localStorage.getItem("userId")) : row.username === currentUsername));
+  document.getElementById("payrollCheckInButton")?.toggleAttribute("disabled", Boolean(open));
+  document.getElementById("payrollCheckOutButton")?.toggleAttribute("disabled", !open);
+  document.getElementById("payrollTodayStatus")?.classList.toggle("open", Boolean(open));
+  document.getElementById("payrollTodayStatus").textContent = open ? "Jornada abierta" : "Sin jornada abierta";
+  const totalHours = payrollAttendance.reduce((sum, row) => sum + Number(row.regularHours || 0) + Number(row.overtimeHours || 0), 0);
+  const overtime = payrollAttendance.reduce((sum, row) => sum + Number(row.overtimeHours || 0), 0);
+  const gross = payrollAttendance.reduce((sum, row) => sum + Number(row.grossPay || 0), 0);
+  document.getElementById("payrollTotalHours").textContent = totalHours.toFixed(2);
+  document.getElementById("payrollOvertimeHours").textContent = overtime.toFixed(2);
+  document.getElementById("payrollGrossTotal").textContent = gross.toFixed(2);
+  document.getElementById("payrollAttendanceBody").innerHTML = payrollAttendance.map(row => `<tr><td>${escapeCartValue(row.fullName || row.username || "—")}</td><td>${escapeCartValue(row.workDate)}</td><td>${new Date(row.checkIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td><td>${row.checkOut ? new Date(row.checkOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td><td>${(Number(row.regularHours || 0) + Number(row.overtimeHours || 0)).toFixed(2)}</td><td>${Number(row.overtimeHours || 0).toFixed(2)}</td><td>$${Number(row.grossPay || 0).toFixed(2)}</td></tr>`).join("") || '<tr><td colspan="7" class="empty-table">No hay jornadas en este rango.</td></tr>';
+}
+
+async function payrollCheckIn() {
+  const res = await fetch(`${API}/payroll/attendance/check-in`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({}) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo marcar la entrada.");
+  await loadPayrollAttendance();
+}
+
+async function payrollCheckOut() {
+  const res = await fetch(`${API}/payroll/attendance/check-out`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({}) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo marcar la salida.");
+  await loadPayrollAttendance();
 }
 
 async function createStoreUser() {

@@ -138,6 +138,41 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
     active INTEGER DEFAULT 1,
     createdAt TEXT NOT NULL
   )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS payroll_settings (
+    company TEXT PRIMARY KEY,
+    enabled INTEGER DEFAULT 0,
+    hourlyRate REAL DEFAULT 0,
+    dailyMinimum REAL DEFAULT 0,
+    workdayHours REAL DEFAULT 8,
+    overtimeMultiplier REAL DEFAULT 1.5,
+    updatedAt TEXT NOT NULL
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS payroll_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT NOT NULL,
+    userId INTEGER NOT NULL,
+    hourlyRate REAL DEFAULT 0,
+    dailyMinimum REAL DEFAULT 0,
+    paymentMode TEXT DEFAULT 'HORA',
+    active INTEGER DEFAULT 1,
+    updatedAt TEXT NOT NULL,
+    UNIQUE(company, userId)
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS payroll_attendance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT NOT NULL,
+    userId INTEGER NOT NULL,
+    workDate TEXT NOT NULL,
+    checkIn TEXT NOT NULL,
+    checkOut TEXT,
+    regularHours REAL DEFAULT 0,
+    overtimeHours REAL DEFAULT 0,
+    grossPay REAL DEFAULT 0,
+    note TEXT DEFAULT '',
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL
+  )`);
   db.run(`CREATE TABLE IF NOT EXISTS purchases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company TEXT NOT NULL,
@@ -596,6 +631,7 @@ function dbAll(sql, params = []) {
 const backupTables = [
     "products", "clients", "sales", "invoices", "invoice_payments", "suppliers", "purchases", "purchase_items",
     "cash_register_sessions", "cash_register_movements", "sale_adjustments",
+    "payroll_profiles", "payroll_attendance",
     "restaurant_tables", "restaurant_servers", "restaurant_table_sessions",
     "restaurant_orders", "restaurant_order_items",
     "client_intake_submissions"
@@ -1426,7 +1462,7 @@ app.post("/admin/tiendas/estado", requireAdmin, (req, res) => {
 // Eliminar tienda completa (usuarios, productos, ventas)
 app.delete("/admin/tiendas/:company", requireAdmin, async (req, res) => {
   const company = req.params.company;
-  const tables = ["restaurant_order_items", "restaurant_orders", "restaurant_table_sessions", "restaurant_servers", "restaurant_tables", "client_intake_submissions", "client_intake_tokens", "sri_certificates",
+  const tables = ["payroll_attendance", "payroll_profiles", "payroll_settings", "restaurant_order_items", "restaurant_orders", "restaurant_table_sessions", "restaurant_servers", "restaurant_tables", "client_intake_submissions", "client_intake_tokens", "sri_certificates",
     "sri_settings", "invoices", "clients", "sales", "products", "users", "store_licenses"];
   try {
     await dataStore.transaction(async () => {
@@ -2253,20 +2289,154 @@ app.get("/store/users", requireUserAdmin, async (req, res) => {
 
 app.get("/store/context", requireCompanyUser, async (req, res) => {
   try {
-    const license = await dbGet("SELECT businessType, displayName FROM store_licenses WHERE company = ?", [req.user.company]);
+    const [license, payroll] = await Promise.all([
+      dbGet("SELECT businessType, displayName FROM store_licenses WHERE company = ?", [req.user.company]),
+      getPayrollSettings(req.user.company)
+    ]);
     const businessType = normalizeBusinessType(license?.businessType);
+    const enabledModules = [...BUSINESS_TYPES[businessType].modules];
+    if (payroll.enabled) enabledModules.push("nomina");
     res.json({
+      userId: req.user.id,
       company: req.user.company,
       storeName: license?.displayName || req.user.company,
       username: req.user.username,
       fullName: req.user.fullName || "",
       businessType,
       businessTypeLabel: BUSINESS_TYPES[businessType].label,
-      enabledModules: BUSINESS_TYPES[businessType].modules
+      enabledModules
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ---------- NÓMINA BÁSICA (MÓDULO OPCIONAL) ----------
+
+function payrollNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
+async function getPayrollSettings(company) {
+  const existing = await dbGet("SELECT * FROM payroll_settings WHERE company = ?", [company]);
+  return existing || {
+    company, enabled: 0, hourlyRate: 0, dailyMinimum: 0,
+    workdayHours: 8, overtimeMultiplier: 1.5
+  };
+}
+
+app.get("/payroll/settings", requireCompanyUser, async (req, res) => {
+  try {
+    res.json(await getPayrollSettings(req.user.company));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put("/payroll/settings", requireUserAdmin, async (req, res) => {
+  const now = new Date().toISOString();
+  const values = [
+    req.user.company,
+    req.body.enabled ? 1 : 0,
+    payrollNumber(req.body.hourlyRate),
+    payrollNumber(req.body.dailyMinimum),
+    Math.max(1, payrollNumber(req.body.workdayHours, 8)),
+    Math.max(1, payrollNumber(req.body.overtimeMultiplier, 1.5)),
+    now
+  ];
+  try {
+    await dbRun(
+      `INSERT INTO payroll_settings (company, enabled, hourlyRate, dailyMinimum, workdayHours, overtimeMultiplier, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(company) DO UPDATE SET enabled=excluded.enabled, hourlyRate=excluded.hourlyRate,
+         dailyMinimum=excluded.dailyMinimum, workdayHours=excluded.workdayHours,
+         overtimeMultiplier=excluded.overtimeMultiplier, updatedAt=excluded.updatedAt`, values
+    );
+    res.json({ saved: true, settings: await getPayrollSettings(req.user.company) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/payroll/profiles", requireCompanyUser, async (req, res) => {
+  try {
+    const rows = await dbAll(
+      `SELECT u.id AS userId, u.fullName, u.username, u.roles, u.active,
+              p.hourlyRate, p.dailyMinimum, p.paymentMode, p.active AS payrollActive
+       FROM users u LEFT JOIN payroll_profiles p ON p.userId = u.id AND p.company = u.company
+       WHERE u.company = ? ORDER BY u.fullName, u.username`, [req.user.company]
+    );
+    res.json({ profiles: rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put("/payroll/profiles/:userId", requireUserAdmin, async (req, res) => {
+  const userId = Number(req.params.userId);
+  const user = await dbGet("SELECT id FROM users WHERE id = ? AND company = ?", [userId, req.user.company]);
+  if (!user) return res.status(404).json({ error: "Personal no encontrado." });
+  try {
+    await dbRun(
+      `INSERT INTO payroll_profiles (company, userId, hourlyRate, dailyMinimum, paymentMode, active, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(company, userId) DO UPDATE SET hourlyRate=excluded.hourlyRate,
+         dailyMinimum=excluded.dailyMinimum, paymentMode=excluded.paymentMode,
+         active=excluded.active, updatedAt=excluded.updatedAt`,
+      [req.user.company, userId, payrollNumber(req.body.hourlyRate), payrollNumber(req.body.dailyMinimum),
+        String(req.body.paymentMode || "HORA").toUpperCase() === "DIA" ? "DIA" : "HORA", req.body.active === false ? 0 : 1, new Date().toISOString()]
+    );
+    res.json({ saved: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/payroll/attendance", requireCompanyUser, async (req, res) => {
+  const from = String(req.query.from || etDateWithOffset(-30)).slice(0, 10);
+  const to = String(req.query.to || etDateWithOffset()).slice(0, 10);
+  const ownOnly = req.user.role !== "Admin" && !req.user.roles?.includes?.("Administrador");
+  try {
+    const rows = await dbAll(
+      `SELECT a.*, u.fullName, u.username FROM payroll_attendance a
+       LEFT JOIN users u ON u.id = a.userId
+       WHERE a.company = ? AND a.workDate BETWEEN ? AND ? ${ownOnly ? "AND a.userId = ?" : ""}
+       ORDER BY a.workDate DESC, a.checkIn DESC`, ownOnly ? [req.user.company, from, to, req.user.id] : [req.user.company, from, to]
+    );
+    res.json({ attendance: rows, from, to });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/payroll/attendance/check-in", requireCompanyUser, async (req, res) => {
+  const settings = await getPayrollSettings(req.user.company);
+  if (!settings.enabled) return res.status(403).json({ error: "El módulo de nómina está desactivado." });
+  const now = new Date().toISOString();
+  const workDate = getETLocalISO().slice(0, 10);
+  try {
+    const open = await dbGet("SELECT * FROM payroll_attendance WHERE company = ? AND userId = ? AND workDate = ? AND checkOut IS NULL ORDER BY id DESC", [req.user.company, req.user.id, workDate]);
+    if (open) return res.status(409).json({ error: "Ya tienes una jornada abierta.", attendance: open });
+    const result = await dbRun(
+      "INSERT INTO payroll_attendance (company, userId, workDate, checkIn, note, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [req.user.company, req.user.id, workDate, now, String(req.body.note || "").slice(0, 250), now, now]
+    );
+    res.json({ saved: true, attendance: await dbGet("SELECT * FROM payroll_attendance WHERE id = ?", [result.lastID]) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/payroll/attendance/check-out", requireCompanyUser, async (req, res) => {
+  const workDate = getETLocalISO().slice(0, 10);
+  try {
+    const row = await dbGet("SELECT * FROM payroll_attendance WHERE company = ? AND userId = ? AND workDate = ? AND checkOut IS NULL ORDER BY id DESC", [req.user.company, req.user.id, workDate]);
+    if (!row) return res.status(404).json({ error: "No tienes una jornada abierta hoy." });
+    const checkOut = new Date();
+    const hours = Math.max(0, (checkOut.getTime() - new Date(row.checkIn).getTime()) / 3600000);
+    const settings = await getPayrollSettings(req.user.company);
+    const profile = await dbGet("SELECT * FROM payroll_profiles WHERE company = ? AND userId = ?", [req.user.company, req.user.id]);
+    const rate = payrollNumber(profile?.hourlyRate, payrollNumber(settings.hourlyRate));
+    const dailyMinimum = payrollNumber(profile?.dailyMinimum, payrollNumber(settings.dailyMinimum));
+    const regularHours = Math.min(hours, payrollNumber(settings.workdayHours, 8));
+    const overtimeHours = Math.max(0, hours - regularHours);
+    const calculated = regularHours * rate + overtimeHours * rate * payrollNumber(settings.overtimeMultiplier, 1.5);
+    const grossPay = Math.max(calculated, dailyMinimum);
+    await dbRun(
+      "UPDATE payroll_attendance SET checkOut = ?, regularHours = ?, overtimeHours = ?, grossPay = ?, note = ?, updatedAt = ? WHERE id = ? AND company = ?",
+      [checkOut.toISOString(), regularHours, overtimeHours, grossPay, String(req.body.note || row.note || "").slice(0, 250), new Date().toISOString(), row.id, req.user.company]
+    );
+    res.json({ saved: true, attendance: await dbGet("SELECT * FROM payroll_attendance WHERE id = ?", [row.id]) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ---------- INICIO / RESUMEN DIARIO ----------
@@ -3985,6 +4155,9 @@ app.get("/health", (req, res) => {
 async function initializePostgres() {
   if (!dataStore.postgres) return;
   const statements = [
+    `CREATE TABLE IF NOT EXISTS payroll_settings (company TEXT PRIMARY KEY, enabled INTEGER DEFAULT 0, hourlyRate DOUBLE PRECISION DEFAULT 0, dailyMinimum DOUBLE PRECISION DEFAULT 0, workdayHours DOUBLE PRECISION DEFAULT 8, overtimeMultiplier DOUBLE PRECISION DEFAULT 1.5, updatedAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS payroll_profiles (id SERIAL PRIMARY KEY, company TEXT NOT NULL, userId INTEGER NOT NULL, hourlyRate DOUBLE PRECISION DEFAULT 0, dailyMinimum DOUBLE PRECISION DEFAULT 0, paymentMode TEXT DEFAULT 'HORA', active INTEGER DEFAULT 1, updatedAt TEXT NOT NULL, UNIQUE(company, userId))`,
+    `CREATE TABLE IF NOT EXISTS payroll_attendance (id SERIAL PRIMARY KEY, company TEXT NOT NULL, userId INTEGER NOT NULL, workDate TEXT NOT NULL, checkIn TEXT NOT NULL, checkOut TEXT, regularHours DOUBLE PRECISION DEFAULT 0, overtimeHours DOUBLE PRECISION DEFAULT 0, grossPay DOUBLE PRECISION DEFAULT 0, note TEXT DEFAULT '', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE, password TEXT, company TEXT, role TEXT DEFAULT 'Admin', active INTEGER DEFAULT 1, fullName TEXT DEFAULT '', mustChangePassword INTEGER DEFAULT 0, roles TEXT DEFAULT '[]')`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS roles TEXT DEFAULT '[]'`,
     `CREATE TABLE IF NOT EXISTS backup_snapshots (id SERIAL PRIMARY KEY, company TEXT NOT NULL, createdAt TEXT NOT NULL, payload TEXT NOT NULL)`,
