@@ -170,6 +170,9 @@ db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'Admin'`, (err) => {
     overtimeHours REAL DEFAULT 0,
     grossPay REAL DEFAULT 0,
     note TEXT DEFAULT '',
+    paid INTEGER DEFAULT 0,
+    paidAt TEXT,
+    paidByUserId INTEGER,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL
   )`);
@@ -2400,6 +2403,16 @@ app.get("/payroll/attendance", requireCompanyUser, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.put("/payroll/attendance/:id/paid", requireUserAdmin, async (req, res) => {
+  const paid = req.body.paid === false ? 0 : 1;
+  try {
+    const row = await dbGet("SELECT id FROM payroll_attendance WHERE id = ? AND company = ?", [Number(req.params.id), req.user.company]);
+    if (!row) return res.status(404).json({ error: "Jornada no encontrada." });
+    await dbRun("UPDATE payroll_attendance SET paid = ?, paidAt = ?, paidByUserId = ?, updatedAt = ? WHERE id = ? AND company = ?", [paid, paid ? new Date().toISOString() : null, paid ? req.user.id : null, new Date().toISOString(), row.id, req.user.company]);
+    res.json({ saved: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post("/payroll/attendance/check-in", requireCompanyUser, async (req, res) => {
   const settings = await getPayrollSettings(req.user.company);
   if (!settings.enabled) return res.status(403).json({ error: "El módulo de nómina está desactivado." });
@@ -3203,6 +3216,9 @@ if (!dataStore.postgres) {
   addColumnIfMissing("sri_settings", "certificateLocalValidated INTEGER DEFAULT 0");
   addColumnIfMissing("store_licenses", "businessType TEXT DEFAULT 'SHOP'");
   addColumnIfMissing("store_licenses", "displayName TEXT");
+  addColumnIfMissing("payroll_attendance", "paid INTEGER DEFAULT 0");
+  addColumnIfMissing("payroll_attendance", "paidAt TEXT");
+  addColumnIfMissing("payroll_attendance", "paidByUserId INTEGER");
 }
 
 async function updateInvoiceReturnStatus(invoiceId, company) {
@@ -4157,7 +4173,10 @@ async function initializePostgres() {
   const statements = [
     `CREATE TABLE IF NOT EXISTS payroll_settings (company TEXT PRIMARY KEY, enabled INTEGER DEFAULT 0, hourlyRate DOUBLE PRECISION DEFAULT 0, dailyMinimum DOUBLE PRECISION DEFAULT 0, workdayHours DOUBLE PRECISION DEFAULT 8, overtimeMultiplier DOUBLE PRECISION DEFAULT 1.5, updatedAt TEXT NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS payroll_profiles (id SERIAL PRIMARY KEY, company TEXT NOT NULL, userId INTEGER NOT NULL, hourlyRate DOUBLE PRECISION DEFAULT 0, dailyMinimum DOUBLE PRECISION DEFAULT 0, paymentMode TEXT DEFAULT 'HORA', active INTEGER DEFAULT 1, updatedAt TEXT NOT NULL, UNIQUE(company, userId))`,
-    `CREATE TABLE IF NOT EXISTS payroll_attendance (id SERIAL PRIMARY KEY, company TEXT NOT NULL, userId INTEGER NOT NULL, workDate TEXT NOT NULL, checkIn TEXT NOT NULL, checkOut TEXT, regularHours DOUBLE PRECISION DEFAULT 0, overtimeHours DOUBLE PRECISION DEFAULT 0, grossPay DOUBLE PRECISION DEFAULT 0, note TEXT DEFAULT '', createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS payroll_attendance (id SERIAL PRIMARY KEY, company TEXT NOT NULL, userId INTEGER NOT NULL, workDate TEXT NOT NULL, checkIn TEXT NOT NULL, checkOut TEXT, regularHours DOUBLE PRECISION DEFAULT 0, overtimeHours DOUBLE PRECISION DEFAULT 0, grossPay DOUBLE PRECISION DEFAULT 0, note TEXT DEFAULT '', paid INTEGER DEFAULT 0, paidAt TEXT, paidByUserId INTEGER, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL)`,
+    `ALTER TABLE payroll_attendance ADD COLUMN IF NOT EXISTS paid INTEGER DEFAULT 0`,
+    `ALTER TABLE payroll_attendance ADD COLUMN IF NOT EXISTS paidAt TEXT`,
+    `ALTER TABLE payroll_attendance ADD COLUMN IF NOT EXISTS paidByUserId INTEGER`,
     `CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT UNIQUE, password TEXT, company TEXT, role TEXT DEFAULT 'Admin', active INTEGER DEFAULT 1, fullName TEXT DEFAULT '', mustChangePassword INTEGER DEFAULT 0, roles TEXT DEFAULT '[]')`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS roles TEXT DEFAULT '[]'`,
     `CREATE TABLE IF NOT EXISTS backup_snapshots (id SERIAL PRIMARY KEY, company TEXT NOT NULL, createdAt TEXT NOT NULL, payload TEXT NOT NULL)`,

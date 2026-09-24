@@ -1526,6 +1526,9 @@ td button {
 .payroll-action-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .payroll-action-buttons button:disabled { opacity: .5; cursor: not-allowed; }
 .cash-register-status.open { background: #dcfce7; color: #166534; }
+.payroll-paid-status { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.payroll-paid-status.paid { background: #dcfce7; color: #166534; }
+.payroll-paid-status.pending { background: #fef3c7; color: #92400e; }
 @media (max-width: 700px) { .payroll-actions-card { align-items: stretch; flex-direction: column; } .payroll-action-buttons button { flex: 1; } }
 @media (max-width: 850px) { .purchase-grid { grid-template-columns: 1fr; } .purchase-line-form { grid-template-columns: 1fr 1fr; } }
 #cashRegisterAdminHistory { margin-top: 22px; }

@@ -785,9 +785,9 @@
           <div><strong id="payrollCurrentPerson">Mi jornada de hoy</strong><p id="payrollCurrentSummary" class="settings-note">Marca tu entrada para comenzar.</p></div>
           <div class="payroll-action-buttons"><button type="button" id="payrollCheckInButton" onclick="payrollCheckIn()">Marcar entrada</button><button type="button" id="payrollCheckOutButton" class="secondary-button" onclick="payrollCheckOut()">Marcar salida</button></div>
         </div>
-        <div class="report-filters payroll-filters"><label>Desde <input id="payrollFrom" type="date"></label><label>Hasta <input id="payrollTo" type="date"></label><button type="button" onclick="loadPayrollAttendance()">Actualizar</button></div>
+        <div class="report-filters payroll-filters"><label>Desde <input id="payrollFrom" type="date"></label><label>Hasta <input id="payrollTo" type="date"></label><button type="button" onclick="loadPayrollAttendance()">Actualizar</button><button type="button" onclick="exportPayrollCsv()">Descargar CSV</button></div>
         <div class="sales-kpis report-kpis"><article><span>Horas registradas</span><strong id="payrollTotalHours">0.00</strong></article><article><span>Horas extra</span><strong id="payrollOvertimeHours">0.00</strong></article><article><span>Pago estimado</span><strong>$<span id="payrollGrossTotal">0.00</span></strong></article></div>
-        <div class="table-scroll"><table><thead><tr><th>Persona</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th><th>Extra</th><th>Pago estimado</th></tr></thead><tbody id="payrollAttendanceBody"></tbody></table></div>
+        <div class="table-scroll"><table><thead><tr><th>Persona</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th><th>Extra</th><th>Pago estimado</th><th>Estado</th><th></th></tr></thead><tbody id="payrollAttendanceBody"></tbody></table></div>
       </section>
 
       <!-- TAB: CONFIGURACIÓN -->
@@ -4125,7 +4125,21 @@ async function loadPayrollAttendance() {
   document.getElementById("payrollTotalHours").textContent = totalHours.toFixed(2);
   document.getElementById("payrollOvertimeHours").textContent = overtime.toFixed(2);
   document.getElementById("payrollGrossTotal").textContent = gross.toFixed(2);
-  document.getElementById("payrollAttendanceBody").innerHTML = payrollAttendance.map(row => `<tr><td>${escapeCartValue(row.fullName || row.username || "—")}</td><td>${escapeCartValue(row.workDate)}</td><td>${new Date(row.checkIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td><td>${row.checkOut ? new Date(row.checkOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td><td>${(Number(row.regularHours || 0) + Number(row.overtimeHours || 0)).toFixed(2)}</td><td>${Number(row.overtimeHours || 0).toFixed(2)}</td><td>$${Number(row.grossPay || 0).toFixed(2)}</td></tr>`).join("") || '<tr><td colspan="7" class="empty-table">No hay jornadas en este rango.</td></tr>';
+  document.getElementById("payrollAttendanceBody").innerHTML = payrollAttendance.map(row => `<tr><td>${escapeCartValue(row.fullName || row.username || "—")}</td><td>${escapeCartValue(row.workDate)}</td><td>${new Date(row.checkIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td><td>${row.checkOut ? new Date(row.checkOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td><td>${(Number(row.regularHours || 0) + Number(row.overtimeHours || 0)).toFixed(2)}</td><td>${Number(row.overtimeHours || 0).toFixed(2)}</td><td>$${Number(row.grossPay || 0).toFixed(2)}</td><td><span class="payroll-paid-status ${row.paid ? "paid" : "pending"}">${row.paid ? "Pagado" : "Pendiente"}</span></td><td>${userRole === "Admin" && row.checkOut ? `<button type="button" onclick="togglePayrollPaid(${row.id}, ${row.paid ? "false" : "true"})">${row.paid ? "Desmarcar" : "Marcar pagado"}</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="9" class="empty-table">No hay jornadas en este rango.</td></tr>';
+}
+
+async function togglePayrollPaid(id, paid) {
+  const res = await fetch(`${API}/payroll/attendance/${id}/paid`, { method: "PUT", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ paid }) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo actualizar el estado de pago.");
+  await loadPayrollAttendance();
+}
+
+function exportPayrollCsv() {
+  if (!payrollAttendance.length) return alert("No hay jornadas para exportar.");
+  const rows = [["persona", "usuario", "fecha", "entrada", "salida", "horas", "horas_extra", "pago_estimado", "estado"]];
+  payrollAttendance.forEach(row => rows.push([row.fullName || "", row.username || "", row.workDate || "", row.checkIn || "", row.checkOut || "", (Number(row.regularHours || 0) + Number(row.overtimeHours || 0)).toFixed(2), Number(row.overtimeHours || 0).toFixed(2), Number(row.grossPay || 0).toFixed(2), row.paid ? "PAGADO" : "PENDIENTE"]));
+  downloadCsv("nomina.csv", rows);
 }
 
 async function payrollCheckIn() {
