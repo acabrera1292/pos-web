@@ -46,20 +46,19 @@
       <button id="nav-ventas" data-module="ventas" onclick="showTab('ventas')">
         Ventas
       </button>
-      <button id="nav-reportes" data-module="reportes" onclick="showTab('reportes')">
-        Reportes
-      </button>
-      <button id="nav-nomina" data-module="nomina" onclick="showTab('nomina'); loadPayroll()">
-        Nómina
-      </button>
       <button id="nav-clientes" data-module="clientes" onclick="showTab('clientes')">
         Clientes</button>
-      <button id="nav-usuarios" data-module="usuarios" onclick="showTab('usuarios')">
-        Usuarios
-      </button>
-      <button id="nav-config" data-module="config" onclick="showTab('config')">
-        Configuración
-      </button>
+      <div id="administrationNavGroup" class="nav-group administration-nav-group">
+        <button id="nav-administracion" class="nav-group-toggle" type="button" aria-expanded="false" onclick="toggleAdministrationMenu()">
+          <span>Administración</span><span id="administrationNavArrow" class="nav-group-arrow">›</span>
+        </button>
+        <div id="administrationNavItems" class="nav-submenu hidden">
+          <button id="nav-reportes" data-module="reportes" onclick="showTab('reportes')">Reportes</button>
+          <button id="nav-nomina" data-module="nomina" onclick="showTab('nomina'); loadPayroll()">Nómina</button>
+          <button id="nav-usuarios" data-module="usuarios" onclick="showTab('usuarios')">Usuarios</button>
+          <button id="nav-config" data-module="config" onclick="showTab('config')">Configuración</button>
+        </div>
+      </div>
     </aside>
 
     <!-- CENTER -->
@@ -1108,6 +1107,10 @@ function applyModuleVisibility() {
   if (restaurantGroup) {
     restaurantGroup.classList.toggle("hidden", !hasRestaurantModules);
   }
+  const administrationGroup = document.getElementById("administrationNavGroup");
+  const administrationItems = document.querySelectorAll("#administrationNavItems [data-module]");
+  const hasAdministrationModules = Array.from(administrationItems).some(element => !element.classList.contains("hidden"));
+  if (administrationGroup) administrationGroup.classList.toggle("hidden", !hasAdministrationModules);
 }
 
 function roleModuleAllowed(module) {
@@ -1290,6 +1293,10 @@ function showTab(tabId) {
   const restaurantButton = document.getElementById("nav-restaurante");
   if (restaurantButton) restaurantButton.classList.toggle("active", restaurantTabs.includes(tabId));
   if (restaurantTabs.includes(tabId)) toggleRestaurantMenu(true);
+  const administrationTabs = ["reportes", "nomina", "usuarios", "config"];
+  const administrationButton = document.getElementById("nav-administracion");
+  if (administrationButton) administrationButton.classList.toggle("active", administrationTabs.includes(tabId));
+  if (administrationTabs.includes(tabId)) toggleAdministrationMenu(true);
 
   // cargar datos según pestaña
   if (tabId === "inicio") loadDashboardSummary();
@@ -2263,6 +2270,17 @@ async function changePassword() {
     console.error(err);
     alert("No se pudo conectar con el servidor.");
   }
+}
+
+function toggleAdministrationMenu(forceOpen) {
+  const items = document.getElementById("administrationNavItems");
+  const button = document.getElementById("nav-administracion");
+  const arrow = document.getElementById("administrationNavArrow");
+  if (!items || !button || !arrow) return;
+  const open = typeof forceOpen === "boolean" ? forceOpen : items.classList.contains("hidden");
+  items.classList.toggle("hidden", !open);
+  button.setAttribute("aria-expanded", String(open));
+  arrow.textContent = open ? "⌄" : "›";
 }
 
 function updateOperationalRoleOptions() {
