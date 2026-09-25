@@ -1867,3 +1867,100 @@ tbody td {
   .mobile-operation-bar span { font-size: 21px; line-height: 1; font-weight: 700; }
   .mobile-operation-bar small { font-size: 12px; font-weight: 600; }
 }
+
+/* --------------------------------------------------
+   VISUAL REFRESH
+   Keep the existing information architecture while giving the workspace a
+   calmer blue-gray surface, clearer active states, and warmer controls.
+-------------------------------------------------- */
+:root {
+  --ui-page: #eef2f5;
+  --ui-surface: #ffffff;
+  --ui-surface-muted: #e2e9ee;
+  --ui-surface-dark: #cbd7df;
+  --ui-border: #c2ced7;
+  --ui-border-strong: #9cacb8;
+  --ui-ink: #1f2d3a;
+  --ui-muted: #5d7180;
+  --ui-accent: #df8738;
+  --ui-accent-dark: #b96a28;
+}
+
+body {
+  background: var(--ui-page);
+  color: var(--ui-ink);
+}
+
+.side-nav {
+  background: linear-gradient(180deg, #e7edf1 0%, #dce5eb 100%);
+  border-right-color: var(--ui-border);
+  padding: 14px 10px;
+}
+
+.side-nav .logo {
+  color: var(--ui-ink);
+  letter-spacing: -.02em;
+  margin-bottom: 16px;
+}
+
+.side-nav .nav-section-title { color: var(--ui-muted); letter-spacing: .08em; }
+.side-nav button { color: var(--ui-ink); border-radius: 7px; padding: 8px 10px; }
+.side-nav button:hover { background: #d4dfe6; border-color: var(--ui-border-strong); }
+.side-nav button.active {
+  background: var(--ui-surface-dark);
+  border-color: var(--ui-border-strong);
+  box-shadow: inset 3px 0 0 var(--ui-accent);
+  font-weight: 600;
+}
+.side-nav .nav-submenu { border-left-color: var(--ui-border-strong); }
+
+.main-area { background: #f6f8fa; padding: 18px 20px; }
+.right-panel { background: var(--ui-surface-muted); border-left-color: var(--ui-border); }
+.right-panel h3, .filter-banner { background: var(--ui-surface-dark); border-bottom-color: var(--ui-border-strong); color: var(--ui-ink); }
+
+.app-card {
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: 10px;
+  box-shadow: 0 3px 12px rgba(35, 55, 70, .06);
+}
+
+input[type="text"], input[type="number"], input[type="password"], input[type="date"], select, textarea {
+  border-color: var(--ui-border-strong);
+  border-radius: 6px;
+  color: var(--ui-ink);
+}
+input[type="text"]:focus, input[type="number"]:focus, input[type="password"]:focus,
+input[type="date"]:focus, select:focus, textarea:focus {
+  border-color: var(--ui-accent);
+  box-shadow: 0 0 0 3px rgba(223, 135, 56, .18);
+}
+
+input[type="checkbox"], input[type="radio"] { accent-color: var(--ui-accent); }
+
+button {
+  border-color: var(--ui-border-strong);
+  border-radius: 6px;
+  background: #dbe3e8;
+  color: var(--ui-ink);
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+button:hover { background: #cbd7df; border-color: #8295a3; }
+button:active { transform: translateY(1px); }
+
+table { border-color: var(--ui-border) !important; }
+thead { background: var(--ui-surface-muted); }
+thead th { color: var(--ui-ink); border-bottom-color: var(--ui-border) !important; }
+tbody tr:nth-child(even) { background: #f7f9fa; }
+tbody tr.selected-row { background: #dce5eb !important; outline-color: var(--ui-accent); }
+
+.top-user { color: var(--ui-muted); }
+.top-user-store { color: var(--ui-ink); }
+.role-picker { background: #f2f6f8; border-color: var(--ui-border); border-radius: 8px; }
+.payroll-admin-card { background: #fff8ef; border-color: #e6c39e; }
+.payroll-actions-card { background: #eef4f7; border-color: var(--ui-border); }
+
+@media (max-width: 700px) {
+  .main-area { padding: 12px; }
+  .app-card { border-radius: 8px; }
+}
