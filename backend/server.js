@@ -2413,6 +2413,36 @@ app.put("/payroll/attendance/:id/paid", requireUserAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.post("/payroll/attendance/admin", requireUserAdmin, async (req, res) => {
+  const userId = Number(req.body.userId);
+  const workDate = String(req.body.workDate || "").slice(0, 10);
+  const checkIn = String(req.body.checkIn || "");
+  const checkOut = String(req.body.checkOut || "");
+  if (!userId || !/^\d{4}-\d{2}-\d{2}$/.test(workDate) || !checkIn) return res.status(400).json({ error: "Persona, fecha y entrada son obligatorias." });
+  try {
+    const user = await dbGet("SELECT id FROM users WHERE id = ? AND company = ?", [userId, req.user.company]);
+    if (!user) return res.status(404).json({ error: "Personal no encontrado." });
+    const settings = await getPayrollSettings(req.user.company);
+    const profile = await dbGet("SELECT * FROM payroll_profiles WHERE company = ? AND userId = ?", [req.user.company, userId]);
+    const start = new Date(checkIn);
+    const end = checkOut ? new Date(checkOut) : null;
+    if (Number.isNaN(start.getTime()) || (end && Number.isNaN(end.getTime())) || (end && end < start)) return res.status(400).json({ error: "Las horas no son válidas." });
+    const hours = end ? Math.max(0, (end.getTime() - start.getTime()) / 3600000) : 0;
+    const regularHours = Math.min(hours, payrollNumber(settings.workdayHours, 8));
+    const overtimeHours = Math.max(0, hours - regularHours);
+    const rate = payrollNumber(profile?.hourlyRate, payrollNumber(settings.hourlyRate));
+    const grossPay = end ? Math.max(regularHours * rate + overtimeHours * rate * payrollNumber(settings.overtimeMultiplier, 1.5), payrollNumber(profile?.dailyMinimum, payrollNumber(settings.dailyMinimum))) : 0;
+    const existing = await dbGet("SELECT id FROM payroll_attendance WHERE company = ? AND userId = ? AND workDate = ?", [req.user.company, userId, workDate]);
+    const now = new Date().toISOString();
+    if (existing) {
+      await dbRun("UPDATE payroll_attendance SET checkIn = ?, checkOut = ?, regularHours = ?, overtimeHours = ?, grossPay = ?, note = ?, updatedAt = ? WHERE id = ? AND company = ?", [start.toISOString(), end ? end.toISOString() : null, regularHours, overtimeHours, grossPay, String(req.body.note || "").slice(0, 250), now, existing.id, req.user.company]);
+      return res.json({ saved: true, id: existing.id });
+    }
+    const created = await dbRun("INSERT INTO payroll_attendance (company, userId, workDate, checkIn, checkOut, regularHours, overtimeHours, grossPay, note, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [req.user.company, userId, workDate, start.toISOString(), end ? end.toISOString() : null, regularHours, overtimeHours, grossPay, String(req.body.note || "").slice(0, 250), now, now]);
+    res.json({ saved: true, id: created.lastID });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post("/payroll/attendance/check-in", requireCompanyUser, async (req, res) => {
   const settings = await getPayrollSettings(req.user.company);
   if (!settings.enabled) return res.status(403).json({ error: "El módulo de nómina está desactivado." });

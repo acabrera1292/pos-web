@@ -1522,6 +1522,8 @@ td button {
 .toggle-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; margin: 12px 0; }
 .payroll-personnel-card { border-top: 1px solid #d7dce2; margin-top: 18px; padding-top: 16px; }
 .payroll-actions-card { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 18px; border: 1px solid #d7dce2; border-radius: 10px; background: #f8fafc; margin: 18px 0; }
+.payroll-admin-card { padding: 16px; border: 1px solid #d7dce2; border-radius: 10px; background: #fffdf5; margin: 14px 0 18px; }
+.payroll-admin-card h3 { margin-top: 0; }
 .payroll-actions-card p { margin-bottom: 0; }
 .payroll-action-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .payroll-action-buttons button:disabled { opacity: .5; cursor: not-allowed; }

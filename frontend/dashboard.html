@@ -785,6 +785,17 @@
           <div><strong id="payrollCurrentPerson">Mi jornada de hoy</strong><p id="payrollCurrentSummary" class="settings-note">Marca tu entrada para comenzar.</p></div>
           <div class="payroll-action-buttons"><button type="button" id="payrollCheckInButton" onclick="payrollCheckIn()">Marcar entrada</button><button type="button" id="payrollCheckOutButton" class="secondary-button" onclick="payrollCheckOut()">Marcar salida</button></div>
         </div>
+        <section id="payrollAdminCorrection" class="payroll-admin-card hidden">
+          <h3>Registrar o corregir jornada</h3>
+          <p class="settings-note">Úsalo si una persona olvidó marcar entrada o salida.</p>
+          <div class="payroll-inline-form">
+            <label>Persona <select id="payrollAdminUser"></select></label>
+            <label>Fecha <input id="payrollAdminDate" type="date"></label>
+            <label>Entrada <input id="payrollAdminCheckIn" type="datetime-local"></label>
+            <label>Salida <input id="payrollAdminCheckOut" type="datetime-local"></label>
+            <button type="button" onclick="savePayrollAdminCorrection()">Guardar jornada</button>
+          </div>
+        </section>
         <div class="report-filters payroll-filters"><label>Desde <input id="payrollFrom" type="date"></label><label>Hasta <input id="payrollTo" type="date"></label><button type="button" onclick="loadPayrollAttendance()">Actualizar</button><button type="button" onclick="exportPayrollCsv()">Descargar CSV</button></div>
         <div class="sales-kpis report-kpis"><article><span>Horas registradas</span><strong id="payrollTotalHours">0.00</strong></article><article><span>Horas extra</span><strong id="payrollOvertimeHours">0.00</strong></article><article><span>Pago estimado</span><strong>$<span id="payrollGrossTotal">0.00</span></strong></article></div>
         <div class="table-scroll"><table><thead><tr><th>Persona</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th><th>Extra</th><th>Pago estimado</th><th>Estado</th><th></th></tr></thead><tbody id="payrollAttendanceBody"></tbody></table></div>
@@ -4069,10 +4080,10 @@ async function loadPayrollProfiles() {
   const data = await res.json();
   payrollProfiles = data.profiles || [];
   const select = document.getElementById("payrollProfileUser");
-  if (!select) return;
-  select.innerHTML = payrollProfiles.filter(item => item.active).map(item => `<option value="${item.userId}">${escapeCartValue(item.fullName || item.username)} · ${escapeCartValue(item.username)}</option>`).join("") || "<option value=\"\">No hay personal</option>";
-  select.onchange = renderPayrollProfileForm;
-  renderPayrollProfileForm();
+  const options = payrollProfiles.filter(item => item.active).map(item => `<option value="${item.userId}">${escapeCartValue(item.fullName || item.username)} · ${escapeCartValue(item.username)}</option>`).join("") || "<option value=\"\">No hay personal</option>";
+  if (select) { select.innerHTML = options; select.onchange = renderPayrollProfileForm; renderPayrollProfileForm(); }
+  const adminSelect = document.getElementById("payrollAdminUser");
+  if (adminSelect) adminSelect.innerHTML = options;
 }
 
 function renderPayrollProfileForm() {
@@ -4107,6 +4118,24 @@ function payrollDateRange() {
 async function loadPayroll() {
   payrollDateRange();
   await loadPayrollSettings();
+  if (userRole === "Admin") {
+    document.getElementById("payrollAdminCorrection")?.classList.remove("hidden");
+    await loadPayrollProfiles();
+  }
+  await loadPayrollAttendance();
+}
+
+async function savePayrollAdminCorrection() {
+  const payload = {
+    userId: document.getElementById("payrollAdminUser")?.value,
+    workDate: document.getElementById("payrollAdminDate")?.value,
+    checkIn: document.getElementById("payrollAdminCheckIn")?.value,
+    checkOut: document.getElementById("payrollAdminCheckOut")?.value
+  };
+  const res = await fetch(`${API}/payroll/attendance/admin`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok) return alert(data.error || "No se pudo guardar la jornada.");
+  alert("Jornada guardada correctamente.");
   await loadPayrollAttendance();
 }
 
