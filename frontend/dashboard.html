@@ -4136,6 +4136,10 @@ async function savePayrollAdminCorrection() {
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudo guardar la jornada.");
   alert("Jornada guardada correctamente.");
+  if (payload.workDate) {
+    payrollDateInput("payrollFrom", payload.workDate);
+    payrollDateInput("payrollTo", payload.workDate);
+  }
   await loadPayrollAttendance();
 }
 
@@ -4157,7 +4161,11 @@ async function loadPayrollAttendance() {
   document.getElementById("payrollTotalHours").textContent = totalHours.toFixed(2);
   document.getElementById("payrollOvertimeHours").textContent = overtime.toFixed(2);
   document.getElementById("payrollGrossTotal").textContent = gross.toFixed(2);
-  document.getElementById("payrollAttendanceBody").innerHTML = payrollAttendance.map(row => `<tr><td>${escapeCartValue(row.fullName || row.username || "—")}</td><td>${escapeCartValue(row.workDate)}</td><td>${new Date(row.checkIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td><td>${row.checkOut ? new Date(row.checkOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td><td>${(Number(row.regularHours || 0) + Number(row.overtimeHours || 0)).toFixed(2)}</td><td>${Number(row.overtimeHours || 0).toFixed(2)}</td><td>$${Number(row.grossPay || 0).toFixed(2)}</td><td><span class="payroll-paid-status ${row.paid ? "paid" : "pending"}">${row.paid ? "Pagado" : "Pendiente"}</span></td><td>${userRole === "Admin" && row.checkOut ? `<button type="button" onclick="togglePayrollPaid(${row.id}, ${row.paid ? "false" : "true"})">${row.paid ? "Desmarcar" : "Marcar pagado"}</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="9" class="empty-table">No hay jornadas en este rango.</td></tr>';
+  document.getElementById("payrollAttendanceBody").innerHTML = payrollAttendance.map(row => {
+    const checkInLabel = row.checkIn ? new Date(row.checkIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+    const checkOutLabel = row.checkOut ? new Date(row.checkOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+    return `<tr><td>${escapeCartValue(row.fullName || row.username || "—")}</td><td>${escapeCartValue(row.workDate || "—")}</td><td>${checkInLabel}</td><td>${checkOutLabel}</td><td>${(Number(row.regularHours || 0) + Number(row.overtimeHours || 0)).toFixed(2)}</td><td>${Number(row.overtimeHours || 0).toFixed(2)}</td><td>$${Number(row.grossPay || 0).toFixed(2)}</td><td><span class="payroll-paid-status ${row.paid ? "paid" : "pending"}">${row.paid ? "Pagado" : "Pendiente"}</span></td><td>${userRole === "Admin" && row.checkOut ? `<button type="button" onclick="togglePayrollPaid(${row.id}, ${row.paid ? "false" : "true"})">${row.paid ? "Desmarcar" : "Marcar pagado"}</button>` : ""}</td></tr>`;
+  }).join("") || '<tr><td colspan="9" class="empty-table">No hay jornadas en este rango.</td></tr>';
 }
 
 async function togglePayrollPaid(id, paid) {
