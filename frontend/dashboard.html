@@ -168,7 +168,7 @@
 <!-- 🔁 Paginación -->
 <div class="pagination">
   <button onclick="prevPage()">Anterior</button>
-  <span id="pageInfo">1 / 1</span>
+  <span id="pageInfo">Página 1 de 1 - mostrando 0 de 0 resultados</span>
   <button onclick="nextPage()">Siguiente</button>
 </div>
 
@@ -713,7 +713,7 @@
 
 <div class="pagination">
   <button id="clientPrev" onclick="clientPrevPage()">Anterior</button>
-  <span id="clientPageInfo">1 / 1</span>
+  <span id="clientPageInfo">Página 1 de 1 - mostrando 0 de 0 resultados</span>
   <button id="clientNext" onclick="clientNextPage()">Siguiente</button>
 </div>
 
@@ -1686,7 +1686,7 @@ function renderInventoryTable() {
   const tbody = document.getElementById("tableBody");
   tbody.innerHTML = "";
 
-  const source = filteredProducts.length ? filteredProducts : allProducts;
+  const source = Array.isArray(filteredProducts) ? filteredProducts : allProducts;
   const totalPages = Math.max(1, Math.ceil(source.length / pageSize));
 
   if (currentPage > totalPages) currentPage = totalPages;
@@ -1706,7 +1706,7 @@ function renderInventoryTable() {
   });
 
   const pageInfo = document.getElementById("pageInfo");
-  if (pageInfo) pageInfo.textContent = `${currentPage} / ${totalPages}`;
+  if (pageInfo) pageInfo.textContent = `Página ${currentPage} de ${totalPages} - mostrando ${items.length} de ${source.length} resultados`;
 
   const prevBtn = document.querySelector(".pagination button:nth-child(1)");
   const nextBtn = document.querySelector(".pagination button:nth-child(3)");
@@ -1915,7 +1915,7 @@ function renderClientsTable() {
 
   tbody.innerHTML = "";
 
-  const source = filteredClients.length ? filteredClients : allClients;
+  const source = Array.isArray(filteredClients) ? filteredClients : allClients;
   const totalPages = Math.max(1, Math.ceil(source.length / clientPageSize));
   if (currentClientPage > totalPages) currentClientPage = totalPages;
 
@@ -1938,11 +1938,41 @@ function renderClientsTable() {
   });
 
   if (pageInfo) {
-    pageInfo.textContent = `${currentClientPage} / ${totalPages}`;
+    pageInfo.textContent = `Página ${currentClientPage} de ${totalPages} - mostrando ${items.length} de ${source.length} resultados`;
   }
   if (prevBtn) prevBtn.disabled = currentClientPage <= 1;
   if (nextBtn) nextBtn.disabled = currentClientPage >= totalPages;
 }
+
+// Añade un conteo breve a cada tabla de datos, incluso a las tablas que no
+// tienen paginación propia. Las tablas paginadas muestran además el total
+// filtrado en su indicador de página.
+function updateTableResultCounts() {
+  document.querySelectorAll("table").forEach(table => {
+    const tbody = table.querySelector("tbody[id]");
+    if (!tbody || tbody.id === "cartBody") return;
+    let label = table.previousElementSibling;
+    if (!label || !label.classList.contains("table-result-count")) {
+      label = document.createElement("div");
+      label.className = "table-result-count";
+      table.parentNode.insertBefore(label, table);
+    }
+    const rows = [...tbody.querySelectorAll("tr")].filter(row => !row.querySelector(".empty-table"));
+    const text = `${rows.length} resultado${rows.length === 1 ? "" : "s"} visibles`;
+    if (label.textContent !== text) label.textContent = text;
+  });
+}
+
+let tableResultUpdateFrame = 0;
+const tableResultObserver = new MutationObserver(() => {
+  if (tableResultUpdateFrame) return;
+  tableResultUpdateFrame = requestAnimationFrame(() => {
+    tableResultUpdateFrame = 0;
+    updateTableResultCounts();
+  });
+});
+tableResultObserver.observe(document.body, { childList: true, subtree: true });
+updateTableResultCounts();
 
 function clientPrevPage() {
   if (currentClientPage > 1) {

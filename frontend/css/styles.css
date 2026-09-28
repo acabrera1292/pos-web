@@ -1052,6 +1052,19 @@ td button {
   color: #4b5563;
 }
 
+.table-result-count {
+  margin: 8px 0 4px;
+  color: var(--ui-muted, #5d7180);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pagination #pageInfo,
+.pagination #clientPageInfo {
+  color: var(--ui-ink, #1f2d3a);
+  font-weight: 600;
+}
+
 /* --------------------------------------------------
    POS / CARRITO
 -------------------------------------------------- */
