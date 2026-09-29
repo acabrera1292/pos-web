@@ -168,8 +168,8 @@
 <!-- 🔁 Paginación -->
 <div class="pagination">
   <button onclick="prevPage()">Anterior</button>
-  <span id="pageInfo">Página 1 de 1 - mostrando 0 de 0 resultados</span>
   <button onclick="nextPage()">Siguiente</button>
+  <span id="pageInfo">Resultados 0 - 0 de 0</span>
 </div>
 
 <div class="inventory-actions">
@@ -713,8 +713,8 @@
 
 <div class="pagination">
   <button id="clientPrev" onclick="clientPrevPage()">Anterior</button>
-  <span id="clientPageInfo">Página 1 de 1 - mostrando 0 de 0 resultados</span>
   <button id="clientNext" onclick="clientNextPage()">Siguiente</button>
+  <span id="clientPageInfo">Resultados 0 - 0 de 0</span>
 </div>
 
 <div class="inventory-actions">
@@ -1706,7 +1706,9 @@ function renderInventoryTable() {
   });
 
   const pageInfo = document.getElementById("pageInfo");
-  if (pageInfo) pageInfo.textContent = `Página ${currentPage} de ${totalPages} - mostrando ${items.length} de ${source.length} resultados`;
+  const firstResult = source.length ? start + 1 : 0;
+  const lastResult = source.length ? start + items.length : 0;
+  if (pageInfo) pageInfo.textContent = `Resultados ${firstResult} - ${lastResult} de ${source.length}`;
 
   const prevBtn = document.querySelector(".pagination button:nth-child(1)");
   const nextBtn = document.querySelector(".pagination button:nth-child(3)");
@@ -1938,7 +1940,9 @@ function renderClientsTable() {
   });
 
   if (pageInfo) {
-    pageInfo.textContent = `Página ${currentClientPage} de ${totalPages} - mostrando ${items.length} de ${source.length} resultados`;
+    const firstResult = source.length ? start + 1 : 0;
+    const lastResult = source.length ? start + items.length : 0;
+    pageInfo.textContent = `Resultados ${firstResult} - ${lastResult} de ${source.length}`;
   }
   if (prevBtn) prevBtn.disabled = currentClientPage <= 1;
   if (nextBtn) nextBtn.disabled = currentClientPage >= totalPages;
@@ -3678,6 +3682,9 @@ function openReceiptPrintWindow() {
 
 async function printSaleReceipt(invoiceId, receiptWindow = null) {
   if (!invoiceId) return alert("No se encontró el comprobante para imprimir.");
+  // Use the dedicated thermal receipt window for both new sales and reprints.
+  // This prevents the full dashboard's older print layout from being used.
+  const printTarget = receiptWindow || openReceiptPrintWindow();
   const previousTitle = document.title;
   try {
     const res = await fetch(`${API}/invoices/${invoiceId}/receipt`, { headers: authHeaders(), cache: "no-store" });
@@ -3689,22 +3696,22 @@ async function printSaleReceipt(invoiceId, receiptWindow = null) {
     renderThermalReceipt(data);
     document.title = `Recibo_${data.invoice?.invoiceNumber || invoiceId}`;
     await new Promise(resolve => setTimeout(resolve, 100));
-    if (receiptWindow && !receiptWindow.closed) {
+    if (printTarget && !printTarget.closed) {
       const receiptMarkup = document.getElementById("thermalReceipt")?.innerHTML || "";
-      receiptWindow.document.open();
-      receiptWindow.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Recibo ${escapeCartValue(data.invoice?.invoiceNumber || invoiceId)}</title><style>
+      printTarget.document.open();
+      printTarget.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Recibo ${escapeCartValue(data.invoice?.invoiceNumber || invoiceId)}</title><style>
         @page{size:80mm auto;margin:0}html,body{width:80mm;margin:0;padding:0;background:#fff;color:#000}body{font-family:"Courier New",monospace;font-size:9.2pt;line-height:1.28}#receipt{box-sizing:border-box;width:80mm;padding:3mm 4mm 5mm;overflow-wrap:anywhere}.receipt-center{text-align:center}.receipt-separator{margin:8px 0;border-top:1px dashed #000}.receipt-items{width:100%;border-collapse:collapse;table-layout:fixed}.receipt-items th{padding:3px 0;border:0;border-bottom:1px solid #000;font-size:8.5pt;text-align:left}.receipt-items th:last-child{width:24%;text-align:right}.receipt-items td{padding:3px 0;border:0;vertical-align:top}.receipt-items td:nth-child(2){text-align:center}.receipt-items td:last-child{text-align:right}.receipt-product td{padding-top:6px;padding-bottom:0}.receipt-product-detail td{color:#222;padding-top:1px;padding-bottom:4px}.receipt-items small{display:block;padding-left:8px;color:#333;font-size:8.4pt}.receipt-totals{padding:2px 0}.receipt-totals>div{display:flex;justify-content:space-between;gap:8px;padding:1px 0}.receipt-totals .receipt-section-title{display:block;padding:3px 0 4px;font-weight:700;border-bottom:1px solid #000}.receipt-grand-total{margin-top:5px;padding:5px 0;border-top:1px solid #000;border-bottom:2px double #000;font-size:11.5pt}.receipt-access-key,.receipt-warning{margin-top:7px;text-align:center;overflow-wrap:anywhere}.receipt-warning{font-weight:700}h1{margin:0 0 5px;font-size:14pt;letter-spacing:.2px}.receipt-status{margin-top:5px;padding:3px 0;font-weight:700;border-top:1px solid #000;border-bottom:1px solid #000}
       </style></head><body><section id="receipt">${receiptMarkup}</section></body></html>`);
-      receiptWindow.document.close();
-      receiptWindow.focus();
+      printTarget.document.close();
+      printTarget.focus();
       await new Promise(resolve => setTimeout(resolve, 180));
-      receiptWindow.print();
+      printTarget.print();
     } else {
       window.print();
     }
     return true;
   } catch {
-    if (receiptWindow && !receiptWindow.closed) receiptWindow.close();
+    if (printTarget && !printTarget.closed) printTarget.close();
     alert("La venta fue registrada, pero no se pudo abrir el recibo. Puedes imprimirlo desde Ventas.");
     return false;
   } finally {
