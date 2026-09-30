@@ -1082,6 +1082,15 @@ if (supportToken) {
   history.replaceState({}, document.title, location.pathname);
 }
 const API = "";
+const ECUADOR_TIME_ZONE = "America/Guayaquil";
+function ecuadorDateTime(value, options = {}) {
+  const date = value instanceof Date ? value : new Date(value || Date.now());
+  return date.toLocaleString("es-EC", { timeZone: ECUADOR_TIME_ZONE, ...options });
+}
+function ecuadorDate(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  return date.toLocaleDateString("sv-SE", { timeZone: ECUADOR_TIME_ZONE });
+}
 const company = localStorage.getItem("company");
 const userRole = localStorage.getItem("role") || "Usuario";
 let userRoles = []; try { userRoles = JSON.parse(localStorage.getItem("roles") || "[]"); } catch {}
@@ -1388,7 +1397,7 @@ async function loadDashboardSummary() {
     const parsedDate = new Date(`${data.date}T12:00:00`);
     dateLabel.textContent = Number.isNaN(parsedDate.getTime())
       ? data.date
-      : parsedDate.toLocaleDateString("es-EC", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+      : parsedDate.toLocaleDateString("es-EC", { timeZone: ECUADOR_TIME_ZONE, weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
     const status = document.getElementById("homeCashStatus");
     const registerOpen = Boolean(data.cashRegister?.open);
@@ -1447,7 +1456,7 @@ function cashMoney(value) {
 function cashDateTime(value) {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : ecuadorDateTime(date);
 }
 
 async function loadCashRegister() {
@@ -2331,7 +2340,7 @@ function updateBackupLastDownload() {
   const label = document.getElementById("backupLastDownload");
   if (!label) return;
   const saved = localStorage.getItem(`posSimpleBackup:${company}`);
-  if (saved) label.textContent = `Último respaldo descargado: ${new Date(saved).toLocaleString("es-EC")}`;
+  if (saved) label.textContent = `Último respaldo descargado: ${ecuadorDateTime(saved)}`;
 }
 
 async function downloadCompanyBackup() {
@@ -3293,7 +3302,7 @@ async function validateSriCertificate() {
   if (!res.ok) return alert(data.error || "No se pudo validar el certificado.");
   document.getElementById("sriCertificateStatus").textContent = data.sriValidated
     ? "Autorizada por el SRI" : "Válida localmente; pendiente de prueba SRI";
-  alert(`Certificado válido. Vencimiento: ${data.expiresAt ? new Date(data.expiresAt).toLocaleDateString() : "no disponible"}. Ahora falta enviar una factura de prueba al ambiente TEST del SRI.`);
+  alert(`Certificado válido. Vencimiento: ${data.expiresAt ? new Date(data.expiresAt).toLocaleDateString("es-EC", { timeZone: ECUADOR_TIME_ZONE }) : "no disponible"}. Ahora falta enviar una factura de prueba al ambiente TEST del SRI.`);
 }
 
 async function testSriConnection() {
@@ -3653,7 +3662,7 @@ function buildThermalReceiptText(data) {
   add(receiptCenter(data.environment === "TEST" ? "AMBIENTE DE PRUEBAS - SIN VALIDEZ TRIBUTARIA" : data.authorized ? "AUTORIZADO POR EL SRI" : "PENDIENTE DE AUTORIZACION SRI", width));
   separator();
   const date = invoice.date ? new Date(invoice.date) : new Date();
-  add(`Fecha: ${date.toLocaleDateString("es-EC")} ${date.toLocaleTimeString("es-EC")}`);
+  add(`Fecha: ${date.toLocaleDateString("es-EC", { timeZone: ECUADOR_TIME_ZONE })} ${date.toLocaleTimeString("es-EC", { timeZone: ECUADOR_TIME_ZONE })}`);
   add(`Cliente: ${invoice.buyerName || "CONSUMIDOR FINAL"}`);
   add(`Identificacion: ${invoice.buyerIdNumber || "9999999999999"}`);
   add(`Cajero: ${invoice.issuedByName || "-"}`);
@@ -3731,7 +3740,7 @@ function renderThermalReceipt(data) {
     </section>
     <div class="receipt-separator"></div>
     <section>
-      <div>Fecha: ${date.toLocaleDateString("es-EC")} ${date.toLocaleTimeString("es-EC")}</div>
+      <div>Fecha: ${date.toLocaleDateString("es-EC", { timeZone: ECUADOR_TIME_ZONE })} ${date.toLocaleTimeString("es-EC", { timeZone: ECUADOR_TIME_ZONE })}</div>
       <div>Cliente: ${escapeCartValue(invoice.buyerName || "CONSUMIDOR FINAL")}</div>
       <div>Identificación: ${escapeCartValue(invoice.buyerIdNumber || "9999999999999")}</div>
       ${invoice.buyerAddress ? `<div>Dirección: ${escapeCartValue(invoice.buyerAddress)}</div>` : ""}
@@ -3761,7 +3770,7 @@ function renderThermalReceipt(data) {
       ${accessKey ? `<div class="receipt-access-key">${invoice.authorizationNumber ? `<strong>NÚMERO DE AUTORIZACIÓN</strong><br>${escapeCartValue(invoice.authorizationNumber)}<br>` : ""}${invoice.authorizedAt ? `Fecha autorización: ${escapeCartValue(invoice.authorizedAt)}<br>` : ""}<strong>CLAVE DE ACCESO</strong><br>${escapeCartValue(invoice.accessKey || invoice.authorizationNumber)}</div>` : `<div class="receipt-warning">La clave de acceso aparecerá cuando el SRI autorice el comprobante.</div>`}
     </section>
     <div class="receipt-separator"></div>
-    <footer class="receipt-center">Gracias por su compra<br><small>Representación impresa del comprobante electrónico (RIDE) únicamente cuando conste como autorizado por el SRI.</small></footer>
+    <footer class="receipt-center">Gracias por su compra</footer>
   `;
 }
 
@@ -3978,7 +3987,7 @@ function removePurchaseLine(index) { purchaseDraft.splice(index, 1); renderPurch
 async function savePurchase() {
   if (userRole !== "Admin") return alert("Solo un administrador puede registrar compras.");
   if (!purchaseDraft.length) return alert("Agrega al menos un producto.");
-  const res = await fetch(`${API}/purchases/${encodeURIComponent(company)}`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ supplierId: document.getElementById("purchaseSupplier").value || null, invoiceNumber: document.getElementById("purchaseInvoiceNumber").value.trim(), purchaseDate: document.getElementById("purchaseDate").value || new Date().toISOString().slice(0, 10), notes: document.getElementById("purchaseNotes").value.trim(), items: purchaseDraft }) });
+  const res = await fetch(`${API}/purchases/${encodeURIComponent(company)}`, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ supplierId: document.getElementById("purchaseSupplier").value || null, invoiceNumber: document.getElementById("purchaseInvoiceNumber").value.trim(), purchaseDate: document.getElementById("purchaseDate").value || ecuadorDate(), notes: document.getElementById("purchaseNotes").value.trim(), items: purchaseDraft }) });
   const data = await res.json();
   if (!res.ok) return alert(data.error || "No se pudo registrar la compra.");
   purchaseDraft = [];
@@ -4024,7 +4033,7 @@ function exportPurchasesCsv() {
 function reportDateValue(value) {
   if (!value) return "";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value).slice(0, 10) : date.toISOString().slice(0, 10);
+  return Number.isNaN(date.getTime()) ? String(value).slice(0, 10) : ecuadorDate(date);
 }
 
 function reportDateInRange(value, from, to) {
@@ -4112,7 +4121,7 @@ function renderSalesTable(list) {
   const tbody = document.getElementById("salesBody");
   tbody.innerHTML = "";
   list.forEach(s => {
-    const fecha = s.date ? new Date(s.date).toLocaleString() : "";
+    const fecha = s.date ? ecuadorDateTime(s.date) : "";
     const tipo = s.paymentType || "Efectivo";
     const discountPercent = Number(s.discountPercent || 0);
     const discountAmount = Number(s.discountAmount || 0);
@@ -4255,12 +4264,12 @@ async function savePayrollProfile() {
 
 function payrollDateInput(id, date) { const input = document.getElementById(id); if (input && !input.value) input.value = date; }
 function payrollDateRange() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = ecuadorDate();
   payrollDateInput("payrollTo", today);
   const current = new Date();
   const mondayOffset = (current.getDay() + 6) % 7;
   const monday = new Date(current.getFullYear(), current.getMonth(), current.getDate() - mondayOffset);
-  payrollDateInput("payrollFrom", monday.toISOString().slice(0, 10));
+  payrollDateInput("payrollFrom", ecuadorDate(monday));
   return { from: document.getElementById("payrollFrom")?.value || today, to: document.getElementById("payrollTo")?.value || today };
 }
 
@@ -4311,8 +4320,8 @@ async function loadPayrollAttendance() {
   document.getElementById("payrollOvertimeHours").textContent = overtime.toFixed(2);
   document.getElementById("payrollGrossTotal").textContent = gross.toFixed(2);
   document.getElementById("payrollAttendanceBody").innerHTML = payrollAttendance.map(row => {
-    const checkInLabel = row.checkIn ? new Date(row.checkIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
-    const checkOutLabel = row.checkOut ? new Date(row.checkOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+    const checkInLabel = row.checkIn ? new Date(row.checkIn).toLocaleTimeString("es-EC", { timeZone: ECUADOR_TIME_ZONE, hour: "2-digit", minute: "2-digit" }) : "—";
+    const checkOutLabel = row.checkOut ? new Date(row.checkOut).toLocaleTimeString("es-EC", { timeZone: ECUADOR_TIME_ZONE, hour: "2-digit", minute: "2-digit" }) : "—";
     return `<tr><td>${escapeCartValue(row.fullName || row.username || "—")}</td><td>${escapeCartValue(row.workDate || "—")}</td><td>${checkInLabel}</td><td>${checkOutLabel}</td><td>${(Number(row.regularHours || 0) + Number(row.overtimeHours || 0)).toFixed(2)}</td><td>${Number(row.overtimeHours || 0).toFixed(2)}</td><td>$${Number(row.grossPay || 0).toFixed(2)}</td><td><span class="payroll-paid-status ${row.paid ? "paid" : "pending"}">${row.paid ? "Pagado" : "Pendiente"}</span></td><td>${userRole === "Admin" && row.checkOut ? `<button type="button" onclick="togglePayrollPaid(${row.id}, ${row.paid ? "false" : "true"})">${row.paid ? "Desmarcar" : "Marcar pagado"}</button>` : ""}</td></tr>`;
   }).join("") || '<tr><td colspan="9" class="empty-table">No hay jornadas en este rango.</td></tr>';
 }
@@ -4660,7 +4669,7 @@ function renderSalesReport(list, label) {
 
   const daily = new Map();
   list.forEach(sale => {
-    const day = sale.date ? new Date(sale.date).toLocaleDateString("es-EC") : "Sin fecha";
+    const day = sale.date ? new Date(sale.date).toLocaleDateString("es-EC", { timeZone: ECUADOR_TIME_ZONE }) : "Sin fecha";
     const entry = daily.get(day) || { transactions: new Set(), units: 0, total: 0 };
     entry.transactions.add(sale.invoiceId ? `invoice-${sale.invoiceId}` : `line-${sale.id}`);
     entry.units += currentUnits(sale);
@@ -4701,8 +4710,8 @@ function exportSales() {
     if (s.date) {
       const d = new Date(s.date);
       if (!isNaN(d)) {
-        fecha = d.toLocaleDateString();
-        hora  = d.toLocaleTimeString();
+        fecha = d.toLocaleDateString("es-EC", { timeZone: ECUADOR_TIME_ZONE });
+        hora  = d.toLocaleTimeString("es-EC", { timeZone: ECUADOR_TIME_ZONE });
       }
     }
     const tipo = s.paymentType || "Efectivo";

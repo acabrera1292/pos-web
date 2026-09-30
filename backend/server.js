@@ -49,7 +49,7 @@ const db = {
 
 function getETLocalISO() {
   const etString = new Date().toLocaleString("sv-SE", {
-    timeZone: "America/New_York",
+    timeZone: "America/Guayaquil",
     hour12: false,
   });
   return etString.replace(" ", "T");
@@ -2485,7 +2485,7 @@ app.post("/payroll/attendance/check-out", requireCompanyUser, async (req, res) =
 // ---------- INICIO / RESUMEN DIARIO ----------
 
 function etDateWithOffset(days = 0) {
-  return new Date(Date.now() + days * 86400000).toLocaleDateString("sv-SE", { timeZone: "America/New_York" });
+  return new Date(Date.now() + days * 86400000).toLocaleDateString("sv-SE", { timeZone: "America/Guayaquil" });
 }
 
 function summarizeDailySales(rows, paymentsByInvoice = new Map()) {
