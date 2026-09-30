@@ -1725,7 +1725,7 @@ tbody td {
 /* Recibo térmico POSINTMART PM-80E: rollo de 80 mm, área útil de 72 mm. */
 .print-only { display: none; }
 .thermal-receipt { color: #000; background: #fff; font-family: "Courier New", monospace; font-size: 9.2pt; line-height: 1.28; overflow-wrap: anywhere; }
-.thermal-receipt-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.thermal-receipt-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.15; }
 .thermal-receipt h1 { margin: 0 0 5px; font-size: 14pt; letter-spacing: .2px; }
 .receipt-center { text-align: center; }
 .receipt-separator { margin: 8px 0; border-top: 1px dashed #000; }
