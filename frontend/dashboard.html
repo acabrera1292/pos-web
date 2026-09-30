@@ -3597,7 +3597,101 @@ function updateChange() {
     change > 0 ? change.toFixed(2) : "0.00";
 }
 
+function receiptAscii(value) {
+  return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "?");
+}
+
+function receiptCenter(value, width = 42) {
+  const text = receiptAscii(value).slice(0, width);
+  return `${" ".repeat(Math.max(0, Math.floor((width - text.length) / 2)))}${text}`;
+}
+
+function receiptColumns(left, right, width = 42) {
+  const a = receiptAscii(left);
+  const b = receiptAscii(right);
+  const available = Math.max(1, width - b.length - 1);
+  return `${a.slice(0, available)}${" ".repeat(Math.max(1, width - Math.min(a.length, available) - b.length))}${b}`.slice(0, width);
+}
+
+function receiptWrap(value, width = 42) {
+  const words = receiptAscii(value).split(/\s+/);
+  const lines = [];
+  let line = "";
+  words.forEach(word => {
+    if (!line) line = word.slice(0, width);
+    else if ((line + " " + word).length <= width) line += ` ${word}`;
+    else { lines.push(line); line = word.slice(0, width); }
+  });
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+function buildThermalReceiptText(data) {
+  const invoice = data.invoice || {};
+  const issuer = data.issuer || {};
+  const width = 42;
+  const lines = [];
+  const add = value => lines.push(receiptAscii(value));
+  const separator = () => add("-".repeat(width));
+  add(receiptCenter(issuer.commercialName || issuer.legalName || company, width));
+  if (issuer.commercialName && issuer.legalName) add(receiptCenter(issuer.legalName, width));
+  add(`RUC: ${issuer.ruc || "NO CONFIGURADO"}`);
+  if (issuer.mainAddress) receiptWrap(`Matriz: ${issuer.mainAddress}`, width).forEach(add);
+  if (issuer.establishmentAddress) receiptWrap(`Establecimiento: ${issuer.establishmentAddress}`, width).forEach(add);
+  if (issuer.taxRegime) add(issuer.taxRegime);
+  add(`Obligado a llevar contabilidad: ${issuer.accountingRequired || "NO"}`);
+  separator();
+  add(receiptCenter(invoice.invoiceType === "FACTURA" ? "FACTURA ELECTRONICA" : "COMPROBANTE ELECTRONICO", width));
+  add(receiptCenter(`No. ${invoice.invoiceNumber || "-"}`, width));
+  add(receiptCenter(data.environment === "TEST" ? "AMBIENTE DE PRUEBAS - SIN VALIDEZ TRIBUTARIA" : data.authorized ? "AUTORIZADO POR EL SRI" : "PENDIENTE DE AUTORIZACION SRI", width));
+  separator();
+  const date = invoice.date ? new Date(invoice.date) : new Date();
+  add(`Fecha: ${date.toLocaleDateString("es-EC")} ${date.toLocaleTimeString("es-EC")}`);
+  add(`Cliente: ${invoice.buyerName || "CONSUMIDOR FINAL"}`);
+  add(`Identificacion: ${invoice.buyerIdNumber || "9999999999999"}`);
+  add(`Cajero: ${invoice.issuedByName || "-"}`);
+  separator();
+  add(receiptColumns("DETALLE", "TOTAL", width));
+  (data.lines || []).forEach(item => {
+    receiptWrap(item.name, width).forEach(add);
+    add(receiptColumns(`${Number(item.quantity)} x $${Number(item.price).toFixed(2)}`, `$${Number(item.total).toFixed(2)}`, width));
+  });
+  separator();
+  add("RESUMEN DE VALORES");
+  add(receiptColumns("Subtotal 15%", `$${Number(invoice.subtotal || 0).toFixed(2)}`, width));
+  add(receiptColumns("Subtotal 0%", "$0.00", width));
+  add(receiptColumns("Subtotal no objeto IVA", "$0.00", width));
+  add(receiptColumns("Subtotal exento IVA", "$0.00", width));
+  add(receiptColumns("Subtotal sin impuestos", `$${Number(invoice.subtotal || 0).toFixed(2)}`, width));
+  add(receiptColumns("Descuento", `$${Number(invoice.discountAmount || 0).toFixed(2)}`, width));
+  add(receiptColumns("ICE", "$0.00", width));
+  add(receiptColumns("IVA 15%", `$${Number(invoice.taxAmount || 0).toFixed(2)}`, width));
+  separator();
+  add(receiptColumns("VALOR A PAGAR", `$${Number(invoice.total || 0).toFixed(2)}`, width));
+  separator();
+  const payments = Array.isArray(data.payments) && data.payments.length ? data.payments : [{ paymentType: invoice.paymentType || "-", amount: Number(invoice.total || 0) }];
+  payments.forEach(payment => add(`Forma de pago: ${payment.paymentType} $${Number(payment.amount || 0).toFixed(2)}`));
+  const accessKey = invoice.accessKey || invoice.authorizationNumber;
+  if (accessKey) {
+    if (invoice.authorizationNumber) add(`Numero de autorizacion: ${invoice.authorizationNumber}`);
+    add(`Clave de acceso: ${accessKey}`);
+  } else {
+    add("La clave de acceso aparecera cuando el SRI");
+    add("autorice el comprobante.");
+  }
+  separator();
+  add(receiptCenter("Gracias por su compra", width));
+  add(receiptCenter("Representacion impresa del comprobante", width));
+  add(receiptCenter("electronico (RIDE)", width));
+  return lines.join("\n");
+}
+
 function renderThermalReceipt(data) {
+  const plainText = buildThermalReceiptText(data);
+  const target = document.getElementById("thermalReceipt");
+  if (target) target.innerHTML = `<pre class="thermal-receipt-text">${escapeCartValue(plainText)}</pre>`;
+  return;
+
   const invoice = data.invoice || {};
   const issuer = data.issuer || {};
   const date = invoice.date ? new Date(invoice.date) : new Date();
@@ -3701,6 +3795,7 @@ async function printSaleReceipt(invoiceId, receiptWindow = null) {
       printTarget.document.open();
       printTarget.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Recibo ${escapeCartValue(data.invoice?.invoiceNumber || invoiceId)}</title><style>
         @page{size:80mm auto;margin:0}html,body{width:80mm;margin:0;padding:0;background:#fff;color:#000}body{font-family:"Courier New",monospace;font-size:9.2pt;line-height:1.28}#receipt{box-sizing:border-box;width:80mm;padding:3mm 4mm 5mm;overflow-wrap:anywhere}.receipt-center{text-align:center}.receipt-separator{margin:8px 0;border-top:1px dashed #000}.receipt-items{width:100%;border-collapse:collapse;table-layout:fixed}.receipt-items th{padding:3px 0;border:0;border-bottom:1px solid #000;font-size:8.5pt;text-align:left}.receipt-items th:last-child{width:24%;text-align:right}.receipt-items td{padding:3px 0;border:0;vertical-align:top}.receipt-items td:nth-child(2){text-align:center}.receipt-items td:last-child{text-align:right}.receipt-product td{padding-top:6px;padding-bottom:0}.receipt-product-detail td{color:#222;padding-top:1px;padding-bottom:4px}.receipt-items small{display:block;padding-left:8px;color:#333;font-size:8.4pt}.receipt-totals{padding:2px 0}.receipt-totals>div{display:flex;justify-content:space-between;gap:8px;padding:1px 0}.receipt-totals .receipt-section-title{display:block;padding:3px 0 4px;font-weight:700;border-bottom:1px solid #000}.receipt-grand-total{margin-top:5px;padding:5px 0;border-top:1px solid #000;border-bottom:2px double #000;font-size:11.5pt}.receipt-access-key,.receipt-warning{margin-top:7px;text-align:center;overflow-wrap:anywhere}.receipt-warning{font-weight:700}h1{margin:0 0 5px;font-size:14pt;letter-spacing:.2px}.receipt-status{margin-top:5px;padding:3px 0;font-weight:700;border-top:1px solid #000;border-bottom:1px solid #000}
+      #receipt pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
       </style></head><body><section id="receipt">${receiptMarkup}</section></body></html>`);
       printTarget.document.close();
       printTarget.focus();
